@@ -22,6 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_RAW_DIR = BASE_DIR / "raw"
 DEFAULT_PROCESS_DIR = DEFAULT_RAW_DIR / "PROCESSAR"
 DEFAULT_OUT_DIR = BASE_DIR / "out"
+MESTRADO_ROOT = Path(r"D:\Drive\Faculdade\PUC\Mestrado")
 
 RAW_DIR = DEFAULT_RAW_DIR
 PROCESS_DIR = DEFAULT_PROCESS_DIR
@@ -43,6 +44,18 @@ DEFAULT_MAX_DELTA_BETWEEN_SAMPLES_MS = 1200.0
 DEFAULT_MAX_ACT_CONTROL_ERROR_C = 5.0
 DEFAULT_MAX_ECT_CONTROL_ERROR_C = 2.0
 K_COVERAGE = 2.0
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except Exception:
+        return False
+
+
+def is_mestrado_runtime() -> bool:
+    return _path_is_within(Path.cwd(), MESTRADO_ROOT)
 
 FUEL_H2O_LEVELS = [6, 25, 35]  # â€œcombustÃ­veisâ€ por hidrataÃ§Ã£o
 COMPOSITION_COLS = ["DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct"]
@@ -2136,6 +2149,10 @@ def build_final_table(
     mdot = Fkgh / 3600.0
     LHVv = pd.to_numeric(df[L_col], errors="coerce")
 
+    # Generic alias for the measured UPD power used by runtime-specific plots.
+    df["UPD_Power_kW"] = PkW
+    df["UPD_Power_Bin_kW"] = PkW.round(1).where(PkW.notna(), pd.NA)
+
     df["n_th"] = PkW / (mdot * LHVv)
     df.loc[(PkW <= 0) | (mdot <= 0) | (LHVv <= 0), "n_th"] = pd.NA
     df["n_th_pct"] = df["n_th"] * 100.0
@@ -2757,6 +2774,37 @@ def _derive_title_for_expansion(template: str, x_col: str, y_col: str) -> str:
     return t
 
 
+def _resolve_plot_x_request(x_col_req: str) -> Tuple[str, bool]:
+    req = _to_str_or_empty(x_col_req)
+    req_norm = norm_key(req) if req else ""
+    load_norm = norm_key("Load_kW")
+    if is_mestrado_runtime() and (not req or req_norm == load_norm):
+        return "UPD_Power_Bin_kW", True
+    return ("Load_kW" if not req else req), False
+
+
+def _runtime_plot_x_label(
+    x_label: str,
+    x_col_base: str,
+    x_col_resolved: str,
+    mestrado_override: bool,
+) -> str:
+    label = _to_str_or_empty(x_label)
+    if mestrado_override:
+        label_norm = norm_key(label) if label else ""
+        x_base_norm = norm_key(x_col_base)
+        if not label or label_norm in {
+            x_base_norm,
+            norm_key("Load_kW"),
+            norm_key("Carga (kW)"),
+            norm_key("Power (kW)"),
+            norm_key("Power"),
+            norm_key("Potencia (kW)"),
+        }:
+            return "Potencia UPD medida (kW, bin 0.1)"
+    return label if label else x_col_resolved
+
+
 def make_plots_from_config(
     out_df: pd.DataFrame,
     plots_df: pd.DataFrame,
@@ -2827,7 +2875,7 @@ def make_plots_from_config(
                 continue
 
             # x column default for kibox_all
-            x_col_base = "Load_kW" if not x_col_req else x_col_req
+            x_col_base, mestrado_x_override = _resolve_plot_x_request(x_col_req)
             try:
                 x_col = resolve_col(out_df, x_col_base)
             except Exception as e:
@@ -2835,7 +2883,7 @@ def make_plots_from_config(
                 n_skip += 1
                 continue
 
-            xlab = x_label if x_label else x_col
+            xlab = _runtime_plot_x_label(x_label, x_col_base, x_col, mestrado_x_override)
 
             for yc in sorted(kibox_cols):
                 fn = _derive_filename_for_expansion(filename, yc)
@@ -2866,7 +2914,7 @@ def make_plots_from_config(
         # Normal plots (one output per row)
         # ---------
         if pt in {"all_fuels_yx", "all_fuels", "all_fuels_y_vs_x"}:
-            x_col_base = "Load_kW" if not x_col_req else x_col_req
+            x_col_base, mestrado_x_override = _resolve_plot_x_request(x_col_req)
             try:
                 x_col = resolve_col(out_df, x_col_base)
             except Exception as e:
@@ -2900,8 +2948,7 @@ def make_plots_from_config(
                 if yerr_col:
                     print(f"[INFO] Plot '{filename or title}': usando '{yerr_col}' como incerteza final.")
 
-            if not x_label:
-                x_label = x_col
+            x_label = _runtime_plot_x_label(x_label, x_col_base, x_col, mestrado_x_override)
             if not y_label:
                 y_label = y_col
             if not title:
@@ -2930,19 +2977,16 @@ def make_plots_from_config(
             continue
 
         if pt in {"all_fuels_xy", "xy"}:
-            if not x_col_req:
-                print(f"[ERROR] Plot '{filename or title}': x_col vazio (plot_type=all_fuels_xy). Pulei.")
-                n_skip += 1
-                continue
             if not y_col_req:
                 print(f"[ERROR] Plot '{filename or title}': y_col vazio (plot_type=all_fuels_xy). Pulei.")
                 n_skip += 1
                 continue
 
+            x_col_base, mestrado_x_override = _resolve_plot_x_request(x_col_req)
             try:
-                x_col = resolve_col(out_df, x_col_req)
+                x_col = resolve_col(out_df, x_col_base)
             except Exception as e:
-                print(f"[ERROR] Plot '{filename or title}': x_col '{x_col_req}' nÃ£o encontrado. Pulei. ({e})")
+                print(f"[ERROR] Plot '{filename or title}': x_col '{x_col_base}' nÃ£o encontrado. Pulei. ({e})")
                 n_skip += 1
                 continue
 
@@ -2968,8 +3012,7 @@ def make_plots_from_config(
                 if yerr_col:
                     print(f"[INFO] Plot '{filename or title}': usando '{yerr_col}' como incerteza final.")
 
-            if not x_label:
-                x_label = x_col
+            x_label = _runtime_plot_x_label(x_label, x_col_base, x_col, mestrado_x_override)
             if not y_label:
                 y_label = y_col
             if not title:
@@ -2998,7 +3041,7 @@ def make_plots_from_config(
             continue
 
         if pt in {"all_fuels_labels", "labels"}:
-            x_col_base = "Load_kW" if not x_col_req else x_col_req
+            x_col_base, mestrado_x_override = _resolve_plot_x_request(x_col_req)
             try:
                 x_col = resolve_col(out_df, x_col_base)
             except Exception as e:
@@ -3017,8 +3060,7 @@ def make_plots_from_config(
                 n_skip += 1
                 continue
 
-            if not x_label:
-                x_label = x_col
+            x_label = _runtime_plot_x_label(x_label, x_col_base, x_col, mestrado_x_override)
             if not y_label:
                 y_label = y_col
             if not title:
@@ -3241,3 +3283,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

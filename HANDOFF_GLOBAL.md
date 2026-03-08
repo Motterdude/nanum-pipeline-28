@@ -66,6 +66,20 @@ Arquivos de referencia:
 - A execucao gerou `lv_time_diagnostics.xlsx`, `lv_diagnostics_summay.xlsx` e `lv_kpis_clean.xlsx`, mas falhou no fim da etapa de plots por um bug de codigo: `NameError: table_rows is not defined` em `plot_all_fuels_xy`.
 - Correcao aplicada em 2026-03-08: inicializacao de `table_rows` em `plot_all_fuels_xy` para permitir concluir os plots finais em datasets sem subpastas.
 
+## Modo mestrado para eixo X de plots - 2026-03-08
+- Objetivo: no conjunto do mestrado, os plots finais nao devem usar `Load_kW` como eixo X padronizado; devem usar a potencia real medida no UPD.
+- Regra de ativacao: esse modo so entra em efeito quando o processo e executado com `cwd` dentro de `D:\Drive\Faculdade\PUC\Mestrado`, independentemente da subpasta.
+- Implementacao:
+- foi criado o detector `is_mestrado_runtime()` baseado em `Path.cwd()`;
+- a tabela final passa a carregar `UPD_Power_kW` (valor medio medido de potencia) e `UPD_Power_Bin_kW` (mesmo valor arredondado para `0.1 kW`);
+- nos plot types dirigidos pela planilha (`all_fuels_yx`, `all_fuels_xy`, `all_fuels_labels`, `kibox_all`), toda requisicao vazia ou explicita de `Load_kW` passa a ser resolvida como `UPD_Power_Bin_kW` quando o runtime e do mestrado;
+- a label do eixo X tambem passa a ser forcada para `Potencia UPD medida (kW, bin 0.1)` quando a planilha usar labels genericas como `Load_kW`, `Carga (kW)` ou `Power (kW)`.
+- Validacao executada em 2026-03-08:
+- a pasta `out` original do mestrado estava parcialmente bloqueada por um Excel aberto, entao a validacao foi rodada em um diretorio temporario de saida: `D:\Drive\Faculdade\PUC\Mestrado\Dados_Ensaios\Processamento_Pyton\out_runtime_test_134506`;
+- a execucao concluiu com `101` plots de configuracao, `30` plots de `time_delta_by_file` e os tres Excel finais (`lv_time_diagnostics.xlsx`, `lv_diagnostics_summay.xlsx`, `lv_kpis_clean.xlsx`);
+- o `lv_kpis_clean.xlsx` gerado nessa validacao manteve `30` linhas e passou a expor os bins reais do UPD, por exemplo `4.8`, `9.6`, `14.3`, `14.4`, `19.1`, `23.8`, `30.8`, `30.9`, `35.6`, `40.2`, `44.9`, `45.0`, `49.1`, `49.4`;
+- confirmacao visual feita em `nth_vs_power_all.png`: os pontos e a tabela XY usam a potencia medida do UPD, e o eixo X ficou rotulado como `Potencia UPD medida (kW, bin 0.1)`.
+
 ## Objetivo deste arquivo
 Registrar, para continuidade no Codex, o que ja existia no `pipeline27`, o que foi adicionado no `pipeline28`, e as regras de trabalho herdadas do historico no GPT online.
 
