@@ -511,13 +511,19 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
 - Estrutura da tela:
   - subplot superior: `PCYL_1`;
   - subplot inferior: `Q_1`;
+  - terceiro subplot: `PMAX` por ciclo;
   - slider inferior para escolher o `CycleNumber`.
 - Comportamento:
   - a escala dos eixos fica fixa entre ciclos, para permitir comparacao direta;
   - o grafico pode sobrepor a media do bloco de `30 ciclos` como referencia;
-  - setas `left/right` do teclado avancam ou recuam um ciclo.
+  - setas `left/right` do teclado avancam ou recuam um ciclo;
+  - o subplot de `PMAX` tem cursor vertical sincronizado com o ciclo selecionado;
+  - o ponto correspondente ao `PMAX` do ciclo selecionado e destacado;
+  - o canto direito do slider foi trocado por uma caixa de entrada (`TextBox`) para digitar o ciclo desejado.
 - Reaproveitamento de logica:
   - o viewer importa `load_cycle_dataframe` e `mean_curve_by_cycle_block` do utilitario `standalone_kibox_cycle_plots.py`, para manter o mesmo parse do CSV.
+- Calculo de `PMAX`:
+  - `PMAX` e calculado ciclo a ciclo a partir do maior valor de `PCYL_1` encontrado naquele ciclo.
 - Parametros uteis:
   - `--initial-cycle`;
   - `--cycle-block-size`;

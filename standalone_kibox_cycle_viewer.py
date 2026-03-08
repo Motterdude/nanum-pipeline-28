@@ -43,7 +43,7 @@ def _select_backend() -> str:
 SELECTED_BACKEND = _select_backend()
 
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider
+from matplotlib.widgets import Slider, TextBox
 from standalone_kibox_cycle_plots import (
     DEFAULT_CYCLE_BLOCK_SIZE,
     DEFAULT_INPUT,
@@ -56,6 +56,7 @@ from standalone_kibox_cycle_plots import (
 class ViewerSeries:
     cycle_lookup: dict[int, pd.DataFrame]
     block_lookup: dict[int, pd.DataFrame]
+    value_col: str
     y_label: str
     x_min: float
     x_max: float
@@ -164,11 +165,24 @@ def build_viewer_series(
     return ViewerSeries(
         cycle_lookup=cycle_lookup,
         block_lookup=block_lookup,
+        value_col=value_col,
         y_label=y_label,
         x_min=x_min,
         x_max=x_max,
         y_limits=y_limits,
     )
+
+
+def build_pmax_series(df: pd.DataFrame) -> pd.DataFrame:
+    pmax = (
+        df.dropna(subset=["PCYL_1"])
+        .groupby("CycleNumber", as_index=False)["PCYL_1"]
+        .max()
+        .rename(columns={"PCYL_1": "PMAX_bar"})
+        .sort_values("CycleNumber")
+    )
+    pmax["CycleNumber"] = pmax["CycleNumber"].astype(int)
+    return pmax
 
 
 def _nearest_available_cycle(cycle: int, available_cycles: list[int]) -> int:
@@ -184,6 +198,7 @@ def launch_viewer(
     *,
     pcyl_series: ViewerSeries,
     q1_series: ViewerSeries,
+    pmax_series: pd.DataFrame,
     cycle_block_size: int,
     initial_cycle: int,
     show_block_mean: bool,
@@ -195,13 +210,22 @@ def launch_viewer(
 
     initial_cycle = _nearest_available_cycle(initial_cycle, available_cycles)
 
-    fig, (ax_pcyl, ax_q1) = plt.subplots(2, 1, figsize=(12, 8))
-    plt.subplots_adjust(bottom=0.16, top=0.92, left=0.08, right=0.95, hspace=0.32)
+    fig, (ax_pcyl, ax_q1, ax_pmax) = plt.subplots(3, 1, figsize=(12, 10))
+    plt.subplots_adjust(bottom=0.16, top=0.94, left=0.08, right=0.95, hspace=0.36)
 
     pcyl_cycle_line, = ax_pcyl.plot([], [], color="tab:blue", linewidth=1.1, label="Selected cycle")
     pcyl_block_line, = ax_pcyl.plot([], [], color="black", linestyle="--", linewidth=1.4, label="Block mean")
     q1_cycle_line, = ax_q1.plot([], [], color="tab:orange", linewidth=1.1, label="Selected cycle")
     q1_block_line, = ax_q1.plot([], [], color="black", linestyle="--", linewidth=1.4, label="Block mean")
+    ax_pmax.plot(
+        pmax_series["CycleNumber"].to_numpy(),
+        pmax_series["PMAX_bar"].to_numpy(),
+        color="tab:green",
+        linewidth=1.0,
+        label="PMAX per cycle",
+    )
+    pmax_cursor = ax_pmax.axvline(float(initial_cycle), color="crimson", linestyle="--", linewidth=1.4, label="Selected cycle")
+    pmax_selected_point, = ax_pmax.plot([], [], marker="o", color="crimson", markersize=6, linestyle="None")
 
     for ax, series in ((ax_pcyl, pcyl_series), (ax_q1, q1_series)):
         ax.set_xlim(series.x_min, series.x_max)
@@ -211,9 +235,24 @@ def launch_viewer(
         ax.grid(True, which="both", linestyle="--", linewidth=0.5)
         ax.legend(loc="upper right")
 
+    pmax_y = pd.to_numeric(pmax_series["PMAX_bar"], errors="coerce").dropna().to_numpy(dtype=float)
+    if pmax_y.size:
+        pmax_min = float(np.nanmin(pmax_y))
+        pmax_max = float(np.nanmax(pmax_y))
+        if np.isclose(pmax_min, pmax_max):
+            pmax_pad = max(abs(pmax_min) * 0.05, 1.0)
+        else:
+            pmax_pad = (pmax_max - pmax_min) * 0.05
+        ax_pmax.set_ylim(pmax_min - pmax_pad, pmax_max + pmax_pad)
+    ax_pmax.set_xlim(float(min(available_cycles)), float(max(available_cycles)))
+    ax_pmax.set_xlabel("Cycle number")
+    ax_pmax.set_ylabel("PMAX (bar)")
+    ax_pmax.grid(True, which="both", linestyle="--", linewidth=0.5)
+    ax_pmax.legend(loc="upper right")
+
     fig.suptitle(csv_path.name)
 
-    slider_ax = fig.add_axes([0.12, 0.06, 0.76, 0.03])
+    slider_ax = fig.add_axes([0.12, 0.06, 0.60, 0.03])
     cycle_slider = Slider(
         ax=slider_ax,
         label="Cycle",
@@ -222,42 +261,61 @@ def launch_viewer(
         valinit=float(initial_cycle),
         valstep=1.0,
     )
+    cycle_slider.valtext.set_visible(False)
+    cycle_input_ax = fig.add_axes([0.77, 0.052, 0.12, 0.045])
+    cycle_input = TextBox(cycle_input_ax, "Go to", initial=str(initial_cycle))
+    sync_state = {"busy": False}
 
     def update(cycle_value: float) -> None:
-        cycle = _nearest_available_cycle(int(round(cycle_value)), available_cycles)
-        block_index = ((cycle - 1) // cycle_block_size) + 1
+        if sync_state["busy"]:
+            return
+        sync_state["busy"] = True
+        try:
+            cycle = _nearest_available_cycle(int(round(cycle_value)), available_cycles)
+            block_index = ((cycle - 1) // cycle_block_size) + 1
 
-        pcyl_cycle = pcyl_series.cycle_lookup.get(cycle, pd.DataFrame(columns=["CrankAngle_deg", "PCYL_1"]))
-        q1_cycle = q1_series.cycle_lookup.get(cycle, pd.DataFrame(columns=["CrankAngle_deg", "Q_1"]))
-        pcyl_block = pcyl_series.block_lookup.get(block_index, pd.DataFrame(columns=["CrankAngle_deg", "mean_value", "CycleBlockLabel"]))
-        q1_block = q1_series.block_lookup.get(block_index, pd.DataFrame(columns=["CrankAngle_deg", "mean_value", "CycleBlockLabel"]))
+            pcyl_cycle = pcyl_series.cycle_lookup.get(cycle, pd.DataFrame(columns=["CrankAngle_deg", pcyl_series.value_col]))
+            q1_cycle = q1_series.cycle_lookup.get(cycle, pd.DataFrame(columns=["CrankAngle_deg", q1_series.value_col]))
+            pcyl_block = pcyl_series.block_lookup.get(block_index, pd.DataFrame(columns=["CrankAngle_deg", "mean_value", "CycleBlockLabel"]))
+            q1_block = q1_series.block_lookup.get(block_index, pd.DataFrame(columns=["CrankAngle_deg", "mean_value", "CycleBlockLabel"]))
 
-        pcyl_cycle_line.set_data(pcyl_cycle.get("CrankAngle_deg", []), pcyl_cycle.get("PCYL_1", []))
-        q1_cycle_line.set_data(q1_cycle.get("CrankAngle_deg", []), q1_cycle.get("Q_1", []))
+            pcyl_cycle_line.set_data(pcyl_cycle.get("CrankAngle_deg", []), pcyl_cycle.get(pcyl_series.value_col, []))
+            q1_cycle_line.set_data(q1_cycle.get("CrankAngle_deg", []), q1_cycle.get(q1_series.value_col, []))
 
-        if show_block_mean and not pcyl_block.empty:
-            pcyl_block_line.set_data(pcyl_block["CrankAngle_deg"], pcyl_block["mean_value"])
-            pcyl_block_line.set_visible(True)
-        else:
-            pcyl_block_line.set_data([], [])
-            pcyl_block_line.set_visible(False)
+            if show_block_mean and not pcyl_block.empty:
+                pcyl_block_line.set_data(pcyl_block["CrankAngle_deg"], pcyl_block["mean_value"])
+                pcyl_block_line.set_visible(True)
+            else:
+                pcyl_block_line.set_data([], [])
+                pcyl_block_line.set_visible(False)
 
-        if show_block_mean and not q1_block.empty:
-            q1_block_line.set_data(q1_block["CrankAngle_deg"], q1_block["mean_value"])
-            q1_block_line.set_visible(True)
-        else:
-            q1_block_line.set_data([], [])
-            q1_block_line.set_visible(False)
+            if show_block_mean and not q1_block.empty:
+                q1_block_line.set_data(q1_block["CrankAngle_deg"], q1_block["mean_value"])
+                q1_block_line.set_visible(True)
+            else:
+                q1_block_line.set_data([], [])
+                q1_block_line.set_visible(False)
 
-        block_label = "n/a"
-        if not pcyl_block.empty:
-            block_label = str(pcyl_block["CycleBlockLabel"].iloc[0])
-        elif not q1_block.empty:
-            block_label = str(q1_block["CycleBlockLabel"].iloc[0])
+            block_label = "n/a"
+            if not pcyl_block.empty:
+                block_label = str(pcyl_block["CycleBlockLabel"].iloc[0])
+            elif not q1_block.empty:
+                block_label = str(q1_block["CycleBlockLabel"].iloc[0])
 
-        ax_pcyl.set_title(f"PCYL_1 - Cycle {cycle} (block {block_label})")
-        ax_q1.set_title(f"Q_1 - Cycle {cycle} (block {block_label})")
-        fig.canvas.draw_idle()
+            pmax_match = pmax_series.loc[pmax_series["CycleNumber"] == cycle, "PMAX_bar"]
+            pmax_cursor.set_xdata([float(cycle), float(cycle)])
+            if not pmax_match.empty:
+                pmax_selected_point.set_data([float(cycle)], [float(pmax_match.iloc[0])])
+            else:
+                pmax_selected_point.set_data([], [])
+
+            cycle_input.set_val(str(cycle))
+            ax_pcyl.set_title(f"PCYL_1 - Cycle {cycle} (block {block_label})")
+            ax_q1.set_title(f"Q_1 - Cycle {cycle} (block {block_label})")
+            ax_pmax.set_title(f"PMAX by cycle - selected cycle {cycle}")
+            fig.canvas.draw_idle()
+        finally:
+            sync_state["busy"] = False
 
     def on_key(event) -> None:
         if event.key not in {"left", "right"}:
@@ -269,7 +327,22 @@ def launch_viewer(
         elif event.key == "right" and idx < len(available_cycles) - 1:
             cycle_slider.set_val(float(available_cycles[idx + 1]))
 
+    def on_submit(text: str) -> None:
+        if sync_state["busy"]:
+            return
+        stripped = text.strip()
+        if not stripped:
+            cycle_input.set_val(str(_nearest_available_cycle(int(round(cycle_slider.val)), available_cycles)))
+            return
+        try:
+            requested = int(round(float(stripped)))
+        except ValueError:
+            cycle_input.set_val(str(_nearest_available_cycle(int(round(cycle_slider.val)), available_cycles)))
+            return
+        cycle_slider.set_val(float(_nearest_available_cycle(requested, available_cycles)))
+
     cycle_slider.on_changed(update)
+    cycle_input.on_submit(on_submit)
     fig.canvas.mpl_connect("key_press_event", on_key)
     update(float(initial_cycle))
 
@@ -295,6 +368,7 @@ def main() -> None:
         raise SystemExit(f"Input file not found: {csv_path}")
 
     df = load_cycle_dataframe(csv_path)
+    pmax_series = build_pmax_series(df)
     pcyl_series = build_viewer_series(
         df,
         value_col="PCYL_1",
@@ -314,6 +388,7 @@ def main() -> None:
         csv_path,
         pcyl_series=pcyl_series,
         q1_series=q1_series,
+        pmax_series=pmax_series,
         cycle_block_size=args.cycle_block_size,
         initial_cycle=args.initial_cycle,
         show_block_mean=not args.hide_block_mean,
