@@ -442,3 +442,9 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
 
 - Limpeza de output:
 - `clear_output_dir` passou a remover tambem diretorios vazios, evitando sobras de pastas antigas em `out/plots/compare`.
+
+## Ajuste de escala do plot MOTEC de ignition advance - 2026-03-08
+- O plot `motec_ignition_advance_vs_power_all.png` passou a usar marcacoes de eixo Y de `1 em 1 grau`.
+- A escala do Y continua em `autoscale`; apenas o espacamento dos ticks foi forzado para `1 deg`.
+- Para suportar isso sem travar `y_min/y_max`, `make_plots_from_config()` passou a aceitar `y_step` isolado como configuracao de ticks quando `fixed_y` nao esta definido.
+- A aba `Plots` da `config_incertezas_rev3.xlsx` foi atualizada com `y_step = 1` para esse plot.
