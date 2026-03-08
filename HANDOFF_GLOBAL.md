@@ -99,6 +99,21 @@ Arquivos de referencia:
 - `rows with any kibox = 30`, ou seja, o KIBOX voltou para todas as linhas do ensaio;
 - confirmacao visual feita em `t_radiador_vs_power_all.png`: sem tabela embutida e com pontos ate `50 kW` sem colapso em `47.5`.
 
+## Limpeza de duplicidades KIBOX e housekeeping de debug - 2026-03-08
+- Problema residual observado apos a correcao principal:
+- alguns CSVs do KIBOX traziam pares de colunas equivalentes, por exemplo `AI50_AVG_1` e `AI50_AVG__1`, `APMAX_AVG_1` e `APMAX_AVG__1`, `IMEPH_AVG_1` e `IMEPH_AVG__1`, `IMEPN_AVG_1` e `IMEPN_AVG__1`, `PMAX_AVG_1` e `PMAX_AVG__1`;
+- isso gerava duas colunas semanticamente iguais no output final e fazia o `kibox_all` tentar salvar o mesmo plot mais de uma vez.
+- Correcao aplicada:
+- `read_kibox_csv_robust()` agora consolida colunas equivalentes apos a leitura, colapsando nomes repetidos por normalizacao simples e preservando o primeiro valor nao nulo por linha;
+- `make_plots_from_config()` passou a proteger a expansao `kibox_all` contra colisao de `filename` ja visto na mesma rodada.
+- Validacao direta na agregacao KIBOX:
+- `kibox_rows = 30`;
+- `loads = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]`;
+- `dup_groups = 0` apos a consolidacao.
+- Housekeeping operacional:
+- os diretorios temporarios de validacao (`out_repo_mode_*`, `out_runtime_test_*`) e logs de runtime criados para debug local devem ser removidos ao final da verificacao;
+- nesta rodada, os residuos temporarios usados na analise foram efetivamente apagados da pasta `D:\Drive\Faculdade\PUC\Mestrado\Dados_Ensaios\Processamento_Pyton`.
+
 ## Objetivo deste arquivo
 Registrar, para continuidade no Codex, o que ja existia no `pipeline27`, o que foi adicionado no `pipeline28`, e as regras de trabalho herdadas do historico no GPT online.
 

@@ -147,6 +147,31 @@ def _normalize_repeated_stat_tokens_in_name(x: object) -> str:
     return s
 
 
+def _coalesce_equivalent_columns(df: pd.DataFrame, context: str = "") -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+
+    merged: Dict[str, pd.Series] = {}
+    sources: Dict[str, List[str]] = {}
+    for idx, raw_col in enumerate(df.columns):
+        col = _normalize_repeated_stat_tokens_in_name(raw_col)
+        series = df.iloc[:, idx].copy()
+        series.name = col
+        sources.setdefault(col, []).append(str(raw_col))
+        if col in merged:
+            merged[col] = merged[col].where(merged[col].notna(), series)
+        else:
+            merged[col] = series
+
+    duplicates = {col: cols for col, cols in sources.items() if len(cols) > 1}
+    if duplicates:
+        preview = "; ".join(f"{col} <= {cols}" for col, cols in list(duplicates.items())[:5])
+        where = f" em {context}" if context else ""
+        print(f"[INFO] Consolidei colunas equivalentes{where}: {preview}")
+
+    return pd.DataFrame(merged, index=df.index)
+
+
 def resolve_col(df: pd.DataFrame, requested: str) -> str:
     requested = str(requested).replace("\ufeff", "").strip()
     if not requested:
@@ -1401,6 +1426,7 @@ def read_kibox_csv_robust(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, sep=delim, engine="python", encoding="utf-8-sig", skiprows=header_row)
     df.columns = _normalize_cols(list(df.columns))
     df = df.loc[:, ~pd.Series(df.columns).astype(str).str.startswith("Unnamed").values].copy()
+    df = _coalesce_equivalent_columns(df, context=path.name)
     return df
 
 
@@ -2856,9 +2882,15 @@ def make_plots_from_config(
                 continue
 
             xlab = _runtime_plot_x_label(x_label, x_col_base, x_col, mestrado_x_override)
+            seen_filenames: set[str] = set()
 
             for yc in sorted(kibox_cols):
                 fn = _derive_filename_for_expansion(filename, yc)
+                fn_key = norm_key(fn)
+                if fn_key in seen_filenames:
+                    print(f"[INFO] kibox_all: filename duplicado apos normalizacao ('{fn}'). Pulei a expansao de '{yc}'.")
+                    continue
+                seen_filenames.add(fn_key)
                 tt = _derive_title_for_expansion(title, x_col=x_col, y_col=yc)
                 ylab = y_label if y_label else yc
 
