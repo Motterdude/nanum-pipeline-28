@@ -504,3 +504,26 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
 - Cada curva 3D representa um bloco medio de ciclos e usa o mesmo agrupamento de `30 ciclos por bloco`.
 - O eixo `z` usa labels no formato do bloco (`1-30`, `31-60`, etc.) para facilitar leitura lateral da evolucao ao longo dos conjuntos.
 - A visualizacao foi fixada com angulo lateral (`view_init`) para priorizar a comparacao do formato da curva entre blocos.
+
+## Viewer interativo ciclo a ciclo com slider - 2026-03-08
+- Criado o utilitario separado `standalone_kibox_cycle_viewer.py`.
+- Ele usa `matplotlib + Slider` para navegar ciclo a ciclo no mesmo arquivo do KIBOX, sem integrar nada ao `pipeline28`.
+- Estrutura da tela:
+  - subplot superior: `PCYL_1`;
+  - subplot inferior: `Q_1`;
+  - slider inferior para escolher o `CycleNumber`.
+- Comportamento:
+  - a escala dos eixos fica fixa entre ciclos, para permitir comparacao direta;
+  - o grafico pode sobrepor a media do bloco de `30 ciclos` como referencia;
+  - setas `left/right` do teclado avancam ou recuam um ciclo.
+- Reaproveitamento de logica:
+  - o viewer importa `load_cycle_dataframe` e `mean_curve_by_cycle_block` do utilitario `standalone_kibox_cycle_plots.py`, para manter o mesmo parse do CSV.
+- Parametros uteis:
+  - `--initial-cycle`;
+  - `--cycle-block-size`;
+  - `--hide-block-mean`;
+  - `--no-show` para validar carregamento sem abrir a janela.
+- Backend:
+  - `Agg` quando usado com `--no-show`;
+  - `TkAgg` se o `Tk` estiver funcional no Python local;
+  - `WebAgg` como fallback interativo quando o `Tk` estiver quebrado, abrindo o viewer via navegador local.
