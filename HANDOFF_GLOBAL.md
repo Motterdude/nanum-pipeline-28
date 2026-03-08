@@ -39,6 +39,13 @@ Arquivos de referencia:
 - Novos plots de comparacao `subida vs descida`, tabela XY nos graficos e suporte a `y_tol_plus` / `y_tol_minus`.
 - Atualizacoes de configuracao na `rev3` para emissoes, BSFC, temperaturas e limites de qualidade.
 
+### Status correto dos arquivos de configuracao
+- `config/config_incertezas_rev3.xlsx` e a configuracao ativa e autoritativa do `pipeline28`.
+- O codigo escolhe a primeira planilha existente nesta ordem: `rev3`, `rev3_renamed`, `rev2_renamed`, `rev2`, `config_incertezas.xlsx`.
+- Portanto, enquanto `rev3` existir, `rev2_renamed` nao participa da execucao normal.
+- `config/config_incertezas_rev2_renamed.xlsx` existe apenas como fallback legado e compatibilidade retroativa.
+- A importacao de `rev2_renamed` na rodada de 2026-03-08 foi conservadora, para manter esse fallback alinhado com a copia do notebook, mas nao era necessaria para a execucao principal baseada em `rev3`.
+
 ## Objetivo deste arquivo
 Registrar, para continuidade no Codex, o que ja existia no `pipeline27`, o que foi adicionado no `pipeline28`, e as regras de trabalho herdadas do historico no GPT online.
 
