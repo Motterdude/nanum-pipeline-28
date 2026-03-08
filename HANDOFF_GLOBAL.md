@@ -533,3 +533,16 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - `Agg` quando usado com `--no-show`;
   - `TkAgg` se o `Tk` estiver funcional no Python local;
   - `WebAgg` como fallback interativo quando o `Tk` estiver quebrado, abrindo o viewer via navegador local.
+
+## Otimizacao de performance do viewer interativo - 2026-03-08
+- O viewer ficou mais rapido tanto na abertura quanto na resposta do slider.
+- Mudancas principais:
+  - `PCYL_1` e `Q_1` passam a ser agregados em uma unica tabela `per_cycle`, em vez de dois `groupby` independentes sobre a base bruta;
+  - os dados de ciclo e bloco passam a ser guardados como arrays `numpy`, e nao mais como `DataFrame` por ciclo;
+  - `PMAX` do ciclo selecionado passou a ser buscado em dicionario (`dict`) em vez de filtro em `DataFrame` a cada movimento;
+  - o `TextBox` do ciclo e atualizado sem disparar callbacks extras quando o slider se move;
+  - o viewer ignora eventos redundantes quando o slider nao muda de ciclo de fato.
+- Medicao local nesta revisao:
+  - inicializacao com `--no-show --initial-cycle 150` caiu de aproximadamente `7.8 s` para `6.0 s`.
+- Observacao:
+  - nao foi usada paralelizacao por nucleos para a interface, porque o gargalo principal era estrutura de dados + redraw do `matplotlib`, e a UI continua essencialmente single-thread.

@@ -48,14 +48,26 @@ from standalone_kibox_cycle_plots import (
     DEFAULT_CYCLE_BLOCK_SIZE,
     DEFAULT_INPUT,
     load_cycle_dataframe,
-    mean_curve_by_cycle_block,
 )
 
 
 @dataclass
+class CurveData:
+    x: np.ndarray
+    y: np.ndarray
+
+
+@dataclass
+class BlockCurveData:
+    x: np.ndarray
+    y: np.ndarray
+    label: str
+
+
+@dataclass
 class ViewerSeries:
-    cycle_lookup: dict[int, pd.DataFrame]
-    block_lookup: dict[int, pd.DataFrame]
+    cycle_lookup: dict[int, CurveData]
+    block_lookup: dict[int, BlockCurveData]
     value_col: str
     y_label: str
     x_min: float
@@ -93,45 +105,87 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _build_cycle_lookup(df: pd.DataFrame, value_col: str, x_min: float, x_max: float) -> dict[int, pd.DataFrame]:
+def build_per_cycle_means(df: pd.DataFrame) -> pd.DataFrame:
     per_cycle = (
-        df.dropna(subset=[value_col])
-        .groupby(["CycleNumber", "CrankAngle_deg"], as_index=False)[value_col]
-        .mean()
+        df.groupby(["CycleNumber", "CrankAngle_deg"], as_index=False, sort=False)
+        .agg(
+            PCYL_1=("PCYL_1", "mean"),
+            Q_1=("Q_1", "mean"),
+        )
+        .sort_values(["CycleNumber", "CrankAngle_deg"])
     )
-    per_cycle = per_cycle[
-        (per_cycle["CrankAngle_deg"] >= x_min) & (per_cycle["CrankAngle_deg"] <= x_max)
-    ].sort_values(["CycleNumber", "CrankAngle_deg"])
-    return {
-        int(cycle): group[["CrankAngle_deg", value_col]].reset_index(drop=True)
-        for cycle, group in per_cycle.groupby("CycleNumber", sort=True)
-    }
+    per_cycle["CycleNumber"] = per_cycle["CycleNumber"].astype(np.int32)
+    per_cycle["CrankAngle_deg"] = per_cycle["CrankAngle_deg"].astype(np.float32)
+    per_cycle["PCYL_1"] = pd.to_numeric(per_cycle["PCYL_1"], errors="coerce", downcast="float")
+    per_cycle["Q_1"] = pd.to_numeric(per_cycle["Q_1"], errors="coerce", downcast="float")
+    return per_cycle
 
 
-def _build_block_lookup(df: pd.DataFrame, value_col: str, cycle_block_size: int, x_min: float, x_max: float) -> dict[int, pd.DataFrame]:
-    block_curve = mean_curve_by_cycle_block(df, value_col, cycle_block_size)
-    block_curve = block_curve[
-        (block_curve["CrankAngle_deg"] >= x_min) & (block_curve["CrankAngle_deg"] <= x_max)
-    ].sort_values(["CycleBlockIndex", "CrankAngle_deg"])
-    return {
-        int(block_index): group[["CrankAngle_deg", "mean_value", "CycleBlockLabel"]].reset_index(drop=True)
-        for block_index, group in block_curve.groupby("CycleBlockIndex", sort=True)
-    }
+def _build_cycle_lookup(per_cycle: pd.DataFrame, value_col: str, x_min: float, x_max: float) -> dict[int, CurveData]:
+    filtered = per_cycle[
+        (per_cycle["CrankAngle_deg"] >= x_min)
+        & (per_cycle["CrankAngle_deg"] <= x_max)
+        & per_cycle[value_col].notna()
+    ][["CycleNumber", "CrankAngle_deg", value_col]]
+    out: dict[int, CurveData] = {}
+    for cycle, group in filtered.groupby("CycleNumber", sort=True):
+        out[int(cycle)] = CurveData(
+            x=group["CrankAngle_deg"].to_numpy(dtype=np.float32, copy=True),
+            y=group[value_col].to_numpy(dtype=np.float32, copy=True),
+        )
+    return out
+
+
+def _build_block_lookup(
+    per_cycle: pd.DataFrame,
+    value_col: str,
+    cycle_block_size: int,
+    x_min: float,
+    x_max: float,
+) -> dict[int, BlockCurveData]:
+    filtered = per_cycle[
+        (per_cycle["CrankAngle_deg"] >= x_min)
+        & (per_cycle["CrankAngle_deg"] <= x_max)
+        & per_cycle[value_col].notna()
+    ][["CycleNumber", "CrankAngle_deg", value_col]].copy()
+
+    if filtered.empty:
+        return {}
+
+    filtered["CycleBlockIndex"] = ((filtered["CycleNumber"] - 1) // cycle_block_size) + 1
+    block_curve = (
+        filtered.groupby(["CycleBlockIndex", "CrankAngle_deg"], as_index=False, sort=False)[value_col]
+        .mean()
+        .sort_values(["CycleBlockIndex", "CrankAngle_deg"])
+    )
+    max_cycle = int(filtered["CycleNumber"].max())
+    block_curve["CycleBlockStart"] = ((block_curve["CycleBlockIndex"] - 1) * cycle_block_size) + 1
+    block_curve["CycleBlockEnd"] = (block_curve["CycleBlockStart"] + cycle_block_size - 1).clip(upper=max_cycle)
+    block_curve["CycleBlockLabel"] = (
+        block_curve["CycleBlockStart"].astype(str) + "-" + block_curve["CycleBlockEnd"].astype(str)
+    )
+
+    out: dict[int, BlockCurveData] = {}
+    for block_index, group in block_curve.groupby("CycleBlockIndex", sort=True):
+        out[int(block_index)] = BlockCurveData(
+            x=group["CrankAngle_deg"].to_numpy(dtype=np.float32, copy=True),
+            y=group[value_col].to_numpy(dtype=np.float32, copy=True),
+            label=str(group["CycleBlockLabel"].iloc[0]),
+        )
+    return out
 
 
 def _compute_y_limits(
-    cycle_lookup: dict[int, pd.DataFrame],
-    block_lookup: dict[int, pd.DataFrame],
-    *,
-    value_col: str,
+    cycle_lookup: dict[int, CurveData],
+    block_lookup: dict[int, BlockCurveData],
 ) -> tuple[float, float]:
     values: list[np.ndarray] = []
     for d in cycle_lookup.values():
-        arr = pd.to_numeric(d[value_col], errors="coerce").dropna().to_numpy(dtype=float)
+        arr = np.asarray(d.y, dtype=float)
         if arr.size:
             values.append(arr)
     for d in block_lookup.values():
-        arr = pd.to_numeric(d["mean_value"], errors="coerce").dropna().to_numpy(dtype=float)
+        arr = np.asarray(d.y, dtype=float)
         if arr.size:
             values.append(arr)
 
@@ -151,7 +205,7 @@ def _compute_y_limits(
 
 
 def build_viewer_series(
-    df: pd.DataFrame,
+    per_cycle: pd.DataFrame,
     *,
     value_col: str,
     y_label: str,
@@ -159,9 +213,9 @@ def build_viewer_series(
     cycle_block_size: int,
 ) -> ViewerSeries:
     x_min, x_max = x_range
-    cycle_lookup = _build_cycle_lookup(df, value_col, x_min, x_max)
-    block_lookup = _build_block_lookup(df, value_col, cycle_block_size, x_min, x_max)
-    y_limits = _compute_y_limits(cycle_lookup, block_lookup, value_col=value_col)
+    cycle_lookup = _build_cycle_lookup(per_cycle, value_col, x_min, x_max)
+    block_lookup = _build_block_lookup(per_cycle, value_col, cycle_block_size, x_min, x_max)
+    y_limits = _compute_y_limits(cycle_lookup, block_lookup)
     return ViewerSeries(
         cycle_lookup=cycle_lookup,
         block_lookup=block_lookup,
@@ -185,7 +239,7 @@ def build_pmax_series(df: pd.DataFrame) -> pd.DataFrame:
     return pmax
 
 
-def _nearest_available_cycle(cycle: int, available_cycles: list[int]) -> int:
+def _nearest_available_cycle(cycle: int, available_cycles: list[int] | np.ndarray) -> int:
     if cycle in available_cycles:
         return cycle
     arr = np.asarray(available_cycles, dtype=int)
@@ -208,6 +262,9 @@ def launch_viewer(
     if not available_cycles:
         raise ValueError("No cycles available for viewer.")
 
+    available_cycles_arr = np.asarray(available_cycles, dtype=np.int32)
+    cycle_to_index = {cycle: idx for idx, cycle in enumerate(available_cycles)}
+    pmax_map = dict(zip(pmax_series["CycleNumber"].astype(int), pmax_series["PMAX_bar"].astype(float)))
     initial_cycle = _nearest_available_cycle(initial_cycle, available_cycles)
 
     fig, (ax_pcyl, ax_q1, ax_pmax) = plt.subplots(3, 1, figsize=(12, 10))
@@ -264,68 +321,81 @@ def launch_viewer(
     cycle_slider.valtext.set_visible(False)
     cycle_input_ax = fig.add_axes([0.77, 0.052, 0.12, 0.045])
     cycle_input = TextBox(cycle_input_ax, "Go to", initial=str(initial_cycle))
-    sync_state = {"busy": False}
+    sync_state = {"busy": False, "last_cycle": None}
 
     def update(cycle_value: float) -> None:
         if sync_state["busy"]:
             return
+        cycle = _nearest_available_cycle(int(round(cycle_value)), available_cycles)
+        if sync_state["last_cycle"] == cycle:
+            return
         sync_state["busy"] = True
         try:
-            cycle = _nearest_available_cycle(int(round(cycle_value)), available_cycles)
             block_index = ((cycle - 1) // cycle_block_size) + 1
 
-            pcyl_cycle = pcyl_series.cycle_lookup.get(cycle, pd.DataFrame(columns=["CrankAngle_deg", pcyl_series.value_col]))
-            q1_cycle = q1_series.cycle_lookup.get(cycle, pd.DataFrame(columns=["CrankAngle_deg", q1_series.value_col]))
-            pcyl_block = pcyl_series.block_lookup.get(block_index, pd.DataFrame(columns=["CrankAngle_deg", "mean_value", "CycleBlockLabel"]))
-            q1_block = q1_series.block_lookup.get(block_index, pd.DataFrame(columns=["CrankAngle_deg", "mean_value", "CycleBlockLabel"]))
+            pcyl_cycle = pcyl_series.cycle_lookup.get(cycle)
+            q1_cycle = q1_series.cycle_lookup.get(cycle)
+            pcyl_block = pcyl_series.block_lookup.get(block_index)
+            q1_block = q1_series.block_lookup.get(block_index)
 
-            pcyl_cycle_line.set_data(pcyl_cycle.get("CrankAngle_deg", []), pcyl_cycle.get(pcyl_series.value_col, []))
-            q1_cycle_line.set_data(q1_cycle.get("CrankAngle_deg", []), q1_cycle.get(q1_series.value_col, []))
+            if pcyl_cycle is not None:
+                pcyl_cycle_line.set_data(pcyl_cycle.x, pcyl_cycle.y)
+            else:
+                pcyl_cycle_line.set_data([], [])
 
-            if show_block_mean and not pcyl_block.empty:
-                pcyl_block_line.set_data(pcyl_block["CrankAngle_deg"], pcyl_block["mean_value"])
+            if q1_cycle is not None:
+                q1_cycle_line.set_data(q1_cycle.x, q1_cycle.y)
+            else:
+                q1_cycle_line.set_data([], [])
+
+            if show_block_mean and pcyl_block is not None:
+                pcyl_block_line.set_data(pcyl_block.x, pcyl_block.y)
                 pcyl_block_line.set_visible(True)
             else:
                 pcyl_block_line.set_data([], [])
                 pcyl_block_line.set_visible(False)
 
-            if show_block_mean and not q1_block.empty:
-                q1_block_line.set_data(q1_block["CrankAngle_deg"], q1_block["mean_value"])
+            if show_block_mean and q1_block is not None:
+                q1_block_line.set_data(q1_block.x, q1_block.y)
                 q1_block_line.set_visible(True)
             else:
                 q1_block_line.set_data([], [])
                 q1_block_line.set_visible(False)
 
             block_label = "n/a"
-            if not pcyl_block.empty:
-                block_label = str(pcyl_block["CycleBlockLabel"].iloc[0])
-            elif not q1_block.empty:
-                block_label = str(q1_block["CycleBlockLabel"].iloc[0])
+            if pcyl_block is not None:
+                block_label = pcyl_block.label
+            elif q1_block is not None:
+                block_label = q1_block.label
 
-            pmax_match = pmax_series.loc[pmax_series["CycleNumber"] == cycle, "PMAX_bar"]
             pmax_cursor.set_xdata([float(cycle), float(cycle)])
-            if not pmax_match.empty:
-                pmax_selected_point.set_data([float(cycle)], [float(pmax_match.iloc[0])])
+            pmax_value = pmax_map.get(cycle)
+            if pmax_value is not None:
+                pmax_selected_point.set_data([float(cycle)], [float(pmax_value)])
             else:
                 pmax_selected_point.set_data([], [])
 
+            cycle_input.eventson = False
             cycle_input.set_val(str(cycle))
+            cycle_input.eventson = True
             ax_pcyl.set_title(f"PCYL_1 - Cycle {cycle} (block {block_label})")
             ax_q1.set_title(f"Q_1 - Cycle {cycle} (block {block_label})")
             ax_pmax.set_title(f"PMAX by cycle - selected cycle {cycle}")
+            sync_state["last_cycle"] = cycle
             fig.canvas.draw_idle()
         finally:
+            cycle_input.eventson = True
             sync_state["busy"] = False
 
     def on_key(event) -> None:
         if event.key not in {"left", "right"}:
             return
         current = _nearest_available_cycle(int(round(cycle_slider.val)), available_cycles)
-        idx = available_cycles.index(current)
+        idx = cycle_to_index[current]
         if event.key == "left" and idx > 0:
-            cycle_slider.set_val(float(available_cycles[idx - 1]))
-        elif event.key == "right" and idx < len(available_cycles) - 1:
-            cycle_slider.set_val(float(available_cycles[idx + 1]))
+            cycle_slider.set_val(float(available_cycles_arr[idx - 1]))
+        elif event.key == "right" and idx < len(available_cycles_arr) - 1:
+            cycle_slider.set_val(float(available_cycles_arr[idx + 1]))
 
     def on_submit(text: str) -> None:
         if sync_state["busy"]:
@@ -368,16 +438,22 @@ def main() -> None:
         raise SystemExit(f"Input file not found: {csv_path}")
 
     df = load_cycle_dataframe(csv_path)
+    df["CycleNumber"] = df["CycleNumber"].astype(np.int32)
+    df["CrankAngle_deg"] = df["CrankAngle_deg"].astype(np.float32)
+    df["PCYL_1"] = pd.to_numeric(df["PCYL_1"], errors="coerce", downcast="float")
+    df["Q_1"] = pd.to_numeric(df["Q_1"], errors="coerce", downcast="float")
+
+    per_cycle = build_per_cycle_means(df)
     pmax_series = build_pmax_series(df)
     pcyl_series = build_viewer_series(
-        df,
+        per_cycle,
         value_col="PCYL_1",
         y_label="P_CYL (bar)",
         x_range=PCYL_X_RANGE,
         cycle_block_size=args.cycle_block_size,
     )
     q1_series = build_viewer_series(
-        df,
+        per_cycle,
         value_col="Q_1",
         y_label="Q_1 (J/deg CA)",
         x_range=Q1_X_RANGE,
