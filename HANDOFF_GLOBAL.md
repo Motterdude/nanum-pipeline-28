@@ -139,6 +139,30 @@ Arquivos de referencia:
 - no merge final em memoria, o output ficou com `30` linhas totais e `209` colunas prefixadas com `Motec_`;
 - os dados MOTEC entraram corretamente nas linhas `E94H6` de `5` a `50 kW`, com `Motec_N_trechos_validos = 74` na maioria dos arquivos e `98` para `50 kW`.
 
+## Novos plots MOTEC via Excel - 2026-03-08
+- Mudanca feita exclusivamente pela aba `Plots` de `config/config_incertezas_rev3.xlsx`, mantendo a estrutura de configuracao por planilha.
+- Plot adicionado:
+- `motec_lambda_vs_power_all.png`
+- `plot_type = all_fuels_yx`
+- `x_col = Load_kW`
+- `y_col = Motec_Exhaust Lambda_mean_of_windows`
+- `yerr_col = off`
+- eixo Y fixo em `0.90 .. 1.10` com passo `0.02`
+- label Y: `Lambda (-)`
+- Plot adicionado:
+- `motec_ignition_advance_vs_power_all.png`
+- `plot_type = all_fuels_yx`
+- `x_col = Load_kW`
+- `y_col = Motec_Ignition Timing_mean_of_windows`
+- `yerr_col = Motec_Ignition Timing_sd_of_windows`
+- eixo Y em autoscale
+- label Y: `Ignition advance (deg BTDC)`
+- o titulo tambem explicita `BTDC` para deixar claro o significado do valor plotado.
+- Validacao:
+- as duas linhas foram confirmadas na aba `Plots`;
+- as colunas `Motec_Exhaust Lambda_mean_of_windows`, `Motec_Ignition Timing_mean_of_windows` e `Motec_Ignition Timing_sd_of_windows` existem no `lv_kpis_clean.xlsx` real do mestrado;
+- nenhuma pasta temporaria de debug foi criada nesta alteracao, porque a verificacao foi apenas estrutural na planilha e no output existente.
+
 ## Objetivo deste arquivo
 Registrar, para continuidade no Codex, o que ja existia no `pipeline27`, o que foi adicionado no `pipeline28`, e as regras de trabalho herdadas do historico no GPT online.
 
