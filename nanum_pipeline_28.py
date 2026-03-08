@@ -19,9 +19,13 @@ import matplotlib.pyplot as plt
 # Paths / constants
 # =========================
 BASE_DIR = Path(__file__).resolve().parent
-RAW_DIR = BASE_DIR / "raw"
-PROCESS_DIR = RAW_DIR / "PROCESSAR"
-OUT_DIR = BASE_DIR / "out"
+DEFAULT_RAW_DIR = BASE_DIR / "raw"
+DEFAULT_PROCESS_DIR = DEFAULT_RAW_DIR / "PROCESSAR"
+DEFAULT_OUT_DIR = BASE_DIR / "out"
+
+RAW_DIR = DEFAULT_RAW_DIR
+PROCESS_DIR = DEFAULT_PROCESS_DIR
+OUT_DIR = DEFAULT_OUT_DIR
 PLOTS_DIR = OUT_DIR / "plots"
 CFG_DIR = BASE_DIR / "config"
 
@@ -1496,8 +1500,61 @@ def _load_data_quality_config(xlsx_path: Path) -> Dict[str, float]:
     return cfg
 
 
-def load_config_excel() -> Tuple[dict, pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, float]]:
-    p = _choose_config_path()
+def _load_defaults_config(xlsx_path: Path) -> Dict[str, str]:
+    cfg: Dict[str, str] = {}
+
+    defaults_df = _try_read_sheet(xlsx_path, "Defaults")
+    if defaults_df is None or defaults_df.empty:
+        return cfg
+
+    defaults_df.columns = _normalize_cols(list(defaults_df.columns))
+    param_col = "param" if "param" in defaults_df.columns else (defaults_df.columns[0] if len(defaults_df.columns) >= 1 else None)
+    value_col = "value" if "value" in defaults_df.columns else (defaults_df.columns[1] if len(defaults_df.columns) >= 2 else None)
+    if param_col is None or value_col is None:
+        return cfg
+
+    for _, row in defaults_df.iterrows():
+        param = str(row.get(param_col, "")).replace("\ufeff", "").strip()
+        if not param or "global parameter name" in param.lower():
+            continue
+        value = row.get(value_col, "")
+        if pd.isna(value):
+            value = ""
+        cfg[norm_key(param)] = str(value).replace("\ufeff", "").strip()
+
+    return cfg
+
+
+def _resolve_runtime_dir(value: object, default_path: Path) -> Path:
+    raw = str(value or "").replace("\ufeff", "").strip().strip('"').strip("'")
+    if not raw:
+        return default_path
+
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        p = (BASE_DIR / p).resolve()
+    return p
+
+
+def apply_runtime_path_overrides(defaults_cfg: Dict[str, str]) -> None:
+    global RAW_DIR, PROCESS_DIR, OUT_DIR, PLOTS_DIR
+
+    input_dir = _resolve_runtime_dir(defaults_cfg.get(norm_key("RAW_INPUT_DIR"), ""), DEFAULT_PROCESS_DIR)
+    out_dir = _resolve_runtime_dir(defaults_cfg.get(norm_key("OUT_DIR"), ""), DEFAULT_OUT_DIR)
+
+    if not input_dir.exists():
+        raise FileNotFoundError(f"Nao encontrei o diretorio configurado em RAW_INPUT_DIR: {input_dir}")
+    if not input_dir.is_dir():
+        raise NotADirectoryError(f"RAW_INPUT_DIR nao aponta para um diretorio: {input_dir}")
+
+    RAW_DIR = input_dir.parent
+    PROCESS_DIR = input_dir
+    OUT_DIR = out_dir
+    PLOTS_DIR = OUT_DIR / "plots"
+
+
+def load_config_excel(xlsx_path: Optional[Path] = None) -> Tuple[dict, pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[str, str]]:
+    p = _choose_config_path() if xlsx_path is None else xlsx_path
 
     m = _read_excel(p, sheet_name="Mappings")
     m.columns = _normalize_cols(list(m.columns))
@@ -1640,8 +1697,9 @@ def load_config_excel() -> Tuple[dict, pd.DataFrame, pd.DataFrame, pd.DataFrame,
         )
 
     data_quality_cfg = _load_data_quality_config(p)
+    defaults_cfg = _load_defaults_config(p)
 
-    return mappings, instruments_df, rep, plots, data_quality_cfg
+    return mappings, instruments_df, rep, plots, data_quality_cfg, defaults_cfg
 
 
 def load_lhv_lookup() -> pd.DataFrame:
@@ -2998,7 +3056,12 @@ def make_plots_from_config(
 # =========================
 def main() -> None:
     print(f"[INFO] Base do script: {BASE_DIR}")
+    config_path = _choose_config_path()
+    mappings, instruments_df, reporting_df, plots_df, data_quality_cfg, defaults_cfg = load_config_excel(config_path)
+    apply_runtime_path_overrides(defaults_cfg)
+    print(f"[INFO] Config: {config_path}")
     print(f"[INFO] Entrada LabVIEW/Kibox: {PROCESS_DIR}")
+    print(f"[INFO] Saida: {OUT_DIR}")
     clear_output_dir(OUT_DIR)
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -3037,8 +3100,6 @@ def main() -> None:
             f"[INFO] {len(missing_load)} arquivo(s) sem carga explÃ­cita no nome; "
             f"vou tentar inferir Load_kW pela coluna de carga. Exemplos: {preview}{suffix}"
         )
-
-    mappings, instruments_df, reporting_df, plots_df, data_quality_cfg = load_config_excel()
 
     lv_all: List[pd.DataFrame] = []
     for m in lv_files:

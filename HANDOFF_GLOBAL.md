@@ -44,6 +44,18 @@ Arquivos de referencia:
 - Para reduzir ambiguidade operacional, `config/config_incertezas_rev2_renamed.xlsx` foi removido do repositorio em 2026-03-08.
 - A pasta `config` fica intencionalmente reduzida ao minimo operacional: `config_incertezas_rev3.xlsx`, `lhv.csv` e `rules_consumo.csv`.
 
+## Atualizacao de runtime paths - 2026-03-08
+- A aba `Defaults` de `config/config_incertezas_rev3.xlsx` passou a aceitar dois parametros textuais:
+- `RAW_INPUT_DIR`
+- `OUT_DIR`
+- `RAW_INPUT_DIR` define o diretorio que sera varrido recursivamente para ler os arquivos LabVIEW/Kibox.
+- `OUT_DIR` define o diretorio onde os Excel e plots serao gravados.
+- Se as celulas ficarem em branco, o comportamento padrao continua:
+- `RAW_INPUT_DIR = BASE_DIR/raw/PROCESSAR`
+- `OUT_DIR = BASE_DIR/out`
+- Os dois parametros aceitam caminho absoluto ou relativo ao diretorio do script.
+- O pipeline agora imprime no inicio os caminhos efetivos de `Config`, `Entrada LabVIEW/Kibox` e `Saida`.
+
 ## Objetivo deste arquivo
 Registrar, para continuidade no Codex, o que ja existia no `pipeline27`, o que foi adicionado no `pipeline28`, e as regras de trabalho herdadas do historico no GPT online.
 
