@@ -491,3 +491,16 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - o bloco passa a ser calculado em cima da tabela `per_cycle`, muito menor;
   - deixa de existir `drop_duplicates()` na massa bruta;
   - o run standalone direto volta a terminar em tempo normal.
+
+## Plots 3D adicionais no standalone por bloco de ciclos - 2026-03-08
+- O utilitario `standalone_kibox_cycle_plots.py` ganhou dois plots adicionais em pseudo-3D, sem remover os plots 2D existentes.
+- Novas saidas:
+  - `*_pcyl_mean_vs_crank_angle_3d.png`;
+  - `*_q1_mean_vs_crank_angle_3d.png`.
+- Estrutura dos eixos nesses plots:
+  - `x`: `Crank angle`;
+  - `y`: valor medio (`P_CYL` ou `Q_1`);
+  - `z`: posicao do bloco de ciclos.
+- Cada curva 3D representa um bloco medio de ciclos e usa o mesmo agrupamento de `30 ciclos por bloco`.
+- O eixo `z` usa labels no formato do bloco (`1-30`, `31-60`, etc.) para facilitar leitura lateral da evolucao ao longo dos conjuntos.
+- A visualizacao foi fixada com angulo lateral (`view_init`) para priorizar a comparacao do formato da curva entre blocos.

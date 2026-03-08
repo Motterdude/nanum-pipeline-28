@@ -5,6 +5,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 
 DEFAULT_INPUT = Path(
@@ -130,6 +131,58 @@ def save_plot(
     plt.close(fig)
 
 
+def save_waterfall_plot_3d(
+    curve: pd.DataFrame,
+    *,
+    value_label: str,
+    x_min: float,
+    x_max: float,
+    title: str,
+    out_path: Path,
+) -> None:
+    window = curve[(curve["CrankAngle_deg"] >= x_min) & (curve["CrankAngle_deg"] <= x_max)].copy()
+    if window.empty:
+        raise ValueError(f"No data available for range {x_min} to {x_max} deg CA.")
+
+    block_groups = list(window.groupby("CycleBlockLabel", sort=False))
+    fig = plt.figure(figsize=(11, 7))
+    ax = fig.add_subplot(111, projection="3d")
+    cmap = plt.get_cmap("turbo")
+    z_ticks: list[float] = []
+    z_labels: list[str] = []
+
+    for idx, (block_label, d) in enumerate(block_groups):
+        d = d.sort_values("CrankAngle_deg")
+        block_start = float(d["CycleBlockStart"].iloc[0])
+        block_end = float(d["CycleBlockEnd"].iloc[0])
+        z_pos = (block_start + block_end) / 2.0
+        color = cmap(idx / max(len(block_groups) - 1, 1))
+        ax.plot(
+            d["CrankAngle_deg"].to_numpy(),
+            d["mean_value"].to_numpy(),
+            zs=z_pos,
+            zdir="z",
+            color=color,
+            linewidth=1.2,
+            alpha=0.95,
+        )
+        z_ticks.append(z_pos)
+        z_labels.append(block_label)
+
+    ax.set_xlim(x_min, x_max)
+    ax.set_xlabel("Crank angle (deg CA)")
+    ax.set_ylabel(value_label)
+    ax.set_zlabel("Cycle block")
+    ax.set_zticks(z_ticks)
+    ax.set_zticklabels(z_labels, fontsize=7)
+    ax.view_init(elev=22, azim=-118)
+    ax.grid(True)
+    ax.set_title(title)
+    fig.subplots_adjust(left=0.05, right=0.88, bottom=0.08, top=0.92)
+    fig.savefig(out_path, dpi=200)
+    plt.close(fig)
+
+
 def main() -> None:
     args = parse_args()
     csv_path = args.input.resolve()
@@ -148,6 +201,8 @@ def main() -> None:
 
     pcyl_plot = output_dir / f"{csv_path.stem}_pcyl_mean_vs_crank_angle.png"
     q1_plot = output_dir / f"{csv_path.stem}_q1_mean_vs_crank_angle.png"
+    pcyl_plot_3d = output_dir / f"{csv_path.stem}_pcyl_mean_vs_crank_angle_3d.png"
+    q1_plot_3d = output_dir / f"{csv_path.stem}_q1_mean_vs_crank_angle_3d.png"
     summary_csv = output_dir / f"{csv_path.stem}_cycle_block_mean_curves.csv"
 
     save_plot(
@@ -165,6 +220,22 @@ def main() -> None:
         x_max=90.0,
         title=f"Mean Q_1 vs Crank angle ({cycle_count} cycles, blocks of {args.cycle_block_size})",
         out_path=q1_plot,
+    )
+    save_waterfall_plot_3d(
+        pcyl_curve,
+        value_label="P_CYL (bar)",
+        x_min=-40.0,
+        x_max=80.0,
+        title=f"3D P_CYL vs Crank angle ({cycle_count} cycles, blocks of {args.cycle_block_size})",
+        out_path=pcyl_plot_3d,
+    )
+    save_waterfall_plot_3d(
+        q1_curve,
+        value_label="Q_1 (J/deg CA)",
+        x_min=-30.0,
+        x_max=90.0,
+        title=f"3D Q_1 vs Crank angle ({cycle_count} cycles, blocks of {args.cycle_block_size})",
+        out_path=q1_plot_3d,
     )
 
     merged = pcyl_curve.rename(
@@ -192,6 +263,8 @@ def main() -> None:
     print(f"[OK] Cycle blocks: {block_count} (size={args.cycle_block_size})")
     print(f"[OK] Saved: {pcyl_plot}")
     print(f"[OK] Saved: {q1_plot}")
+    print(f"[OK] Saved: {pcyl_plot_3d}")
+    print(f"[OK] Saved: {q1_plot_3d}")
     print(f"[OK] Saved: {summary_csv}")
 
 
