@@ -864,12 +864,16 @@ def read_labview_xlsx(meta: FileMeta) -> pd.DataFrame:
     df["WindowID"] = df["Index"] // SAMPLES_PER_WINDOW
 
     load_series = pd.Series(meta.load_kw, index=df.index, dtype="float64")
+    load_signal_series = pd.Series(np.nan, index=df.index, dtype="float64")
     dies_series = pd.Series(meta.dies_pct, index=df.index, dtype="float64")
     biod_series = pd.Series(meta.biod_pct, index=df.index, dtype="float64")
     etoh_series = pd.Series(meta.etoh_pct, index=df.index, dtype="float64")
     h2o_series = pd.Series(meta.h2o_pct, index=df.index, dtype="float64")
     inferred_load = _infer_load_series_from_signal(df)
     inferred_single = _infer_single_load_from_signal(df)
+
+    if inferred_load is not None and inferred_load.notna().any():
+        load_signal_series = pd.to_numeric(inferred_load, errors="coerce")
 
     if meta.load_kw is None or meta.load_parse == "ambiguous_filename":
         if inferred_load is not None and inferred_load.notna().any():
@@ -878,22 +882,22 @@ def read_labview_xlsx(meta: FileMeta) -> pd.DataFrame:
         elif meta.load_kw is None:
             print(f"[WARN] Load_kW nÃ£o identificado para {meta.basename}; a coluna ficarÃ¡ vazia no output.")
     elif inferred_single is not None and abs(inferred_single - float(meta.load_kw)) > 0.75:
-        load_series = pd.Series(inferred_single, index=df.index, dtype="float64")
         print(
             f"[WARN] Load_kW do nome ({meta.load_kw:g}) difere da carga medida ({inferred_single:g}) "
-            f"em {meta.basename}. Vou usar a carga medida."
+            f"em {meta.basename}. Vou preservar o load nominal do nome e guardar a carga inferida em Load_Signal_kW."
         )
 
     df = df.assign(
         BaseName=meta.basename,
         Load_kW=load_series,
+        Load_Signal_kW=load_signal_series,
         DIES_pct=dies_series,
         BIOD_pct=biod_series,
         EtOH_pct=etoh_series,
         H2O_pct=h2o_series,
     )
 
-    first_cols = ["BaseName", "Load_kW", "DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct", "Index", "WindowID"]
+    first_cols = ["BaseName", "Load_kW", "Load_Signal_kW", "DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct", "Index", "WindowID"]
     rest = [c for c in df.columns if c not in first_cols]
     return df[first_cols + rest].copy()
 
@@ -2394,40 +2398,8 @@ def _add_xy_value_table(
     rows: List[Tuple[str, object, object]],
     max_rows: int = 12,
 ) -> None:
-    if not rows:
-        return
-
-    filtered = [(str(lbl or ""), x, y) for lbl, x, y in rows if np.isfinite(_to_float(x, np.nan)) and np.isfinite(_to_float(y, np.nan))]
-    if not filtered:
-        return
-
-    use_series = any(lbl for lbl, _, _ in filtered)
-    trimmed = filtered[:max_rows]
-    if len(filtered) > max_rows:
-        trimmed.append(("...", "...", "..."))
-
-    if use_series:
-        col_labels = ["Serie", "X", "Y"]
-        cell_text = [[lbl, _fmt_table_number(x), _fmt_table_number(y)] for lbl, x, y in trimmed]
-        bbox = [0.62, 0.02, 0.36, 0.30]
-    else:
-        col_labels = ["X", "Y"]
-        cell_text = [[_fmt_table_number(x), _fmt_table_number(y)] for _, x, y in trimmed]
-        bbox = [0.72, 0.02, 0.26, 0.28]
-
-    table = ax.table(
-        cellText=cell_text,
-        colLabels=col_labels,
-        cellLoc="right",
-        colLoc="right",
-        bbox=bbox,
-    )
-    table.auto_set_font_size(False)
-    table.set_fontsize(6)
-    for (r, _c), cell in table.get_celld().items():
-        cell.set_alpha(0.85)
-        if r == 0:
-            cell.set_text_props(weight="bold")
+    # Tabelas embutidas nos plots foram desativadas por decisao de usabilidade.
+    return
 
 
 def plot_all_fuels(

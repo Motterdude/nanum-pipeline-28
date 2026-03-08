@@ -80,6 +80,25 @@ Arquivos de referencia:
 - o `lv_kpis_clean.xlsx` gerado nessa validacao manteve `30` linhas e passou a expor os bins reais do UPD, por exemplo `4.8`, `9.6`, `14.3`, `14.4`, `19.1`, `23.8`, `30.8`, `30.9`, `35.6`, `40.2`, `44.9`, `45.0`, `49.1`, `49.4`;
 - confirmacao visual feita em `nth_vs_power_all.png`: os pontos e a tabela XY usam a potencia medida do UPD, e o eixo X ficou rotulado como `Potencia UPD medida (kW, bin 0.1)`.
 
+## Correcao de carga nominal, KIBOX e limpeza visual - 2026-03-08
+- Problema observado no dataset do mestrado quando o script era executado fora do `cwd` do mestrado:
+- os plots principais em `Load_kW` paravam em `47.5`, porque os ensaios nominais de `45` e `50 kW` estavam sendo colapsados pelo sinal inferido da coluna de carga;
+- o merge do KIBOX desaparecia de `30` a `50 kW`, porque o LabVIEW estava com `Load_kW = 32.5/37.5/42.5/47.5`, enquanto o KIBOX continuava com a carga nominal do nome do arquivo (`30/35/40/45/50`);
+- as tabelas embutidas nos plots ficaram visualmente ruins e foram removidas.
+- Causa raiz:
+- `read_labview_xlsx()` estava sobrescrevendo `Load_kW` com a carga inferida do sinal quando o valor divergisse mais de `0.75 kW` do nome do arquivo;
+- no mestrado, esse sinal inferido fica coerente ate `25 kW`, mas acima disso assume degraus `32.5/37.5/42.5/47.5` e nao deve ser usado como identificador nominal do ensaio.
+- Correcao aplicada:
+- `Load_kW` voltou a representar a carga nominal/indexada do nome do arquivo sempre que essa informacao existir;
+- a carga inferida do sinal agora e preservada separadamente em `Load_Signal_kW` e, apos agregacao, aparece como `Load_Signal_kW_mean_of_windows`;
+- o merge do KIBOX voltou a casar por `Load_kW` nominal + composicao, recuperando os dados de `30`, `35`, `40`, `45` e `50 kW`;
+- `_add_xy_value_table()` foi desativada, removendo as tabelas de todos os graficos.
+- Validacao executada em 2026-03-08 no output temporario `D:\Drive\Faculdade\PUC\Mestrado\Dados_Ensaios\Processamento_Pyton\out_repo_mode_135955`:
+- `lv_kpis_clean.xlsx` voltou a ter `Load_kW = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]`;
+- `Load_Signal_kW_mean_of_windows` preservou o comportamento anomalo do sinal (`32.5`, `37.5`, `42.5`, `47.5`) para diagnostico, sem contaminar o identificador nominal;
+- `rows with any kibox = 30`, ou seja, o KIBOX voltou para todas as linhas do ensaio;
+- confirmacao visual feita em `t_radiador_vs_power_all.png`: sem tabela embutida e com pontos ate `50 kW` sem colapso em `47.5`.
+
 ## Objetivo deste arquivo
 Registrar, para continuidade no Codex, o que ja existia no `pipeline27`, o que foi adicionado no `pipeline28`, e as regras de trabalho herdadas do historico no GPT online.
 
