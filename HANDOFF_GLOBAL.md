@@ -163,6 +163,19 @@ Arquivos de referencia:
 - as colunas `Motec_Exhaust Lambda_mean_of_windows`, `Motec_Ignition Timing_mean_of_windows` e `Motec_Ignition Timing_sd_of_windows` existem no `lv_kpis_clean.xlsx` real do mestrado;
 - nenhuma pasta temporaria de debug foi criada nesta alteracao, porque a verificacao foi apenas estrutural na planilha e no output existente.
 
+## Ajuste de incerteza no plot MOTEC de lambda - 2026-03-08
+- O plot `motec_lambda_vs_power_all.png` deixou de usar `yerr_col = off`.
+- A partir desta revisao, o plot usa `yerr_col = Motec_Exhaust Lambda_sd_of_windows`.
+- Decisao explicitada: por agora, a barra de erro do lambda deve refletir apenas o desvio padrao entre trechos, sem incorporar incerteza de equipamento.
+- O restante da configuracao foi mantido:
+- `x_col = Load_kW`
+- `y_col = Motec_Exhaust Lambda_mean_of_windows`
+- eixo Y fixo `0.90 .. 1.10`
+- passo `0.02`
+- Validacao:
+- a linha correspondente na aba `Plots` foi confirmada apos a edicao;
+- as colunas `Motec_Exhaust Lambda_mean_of_windows` e `Motec_Exhaust Lambda_sd_of_windows` existem no output real do mestrado.
+
 ## Objetivo deste arquivo
 Registrar, para continuidade no Codex, o que ja existia no `pipeline27`, o que foi adicionado no `pipeline28`, e as regras de trabalho herdadas do historico no GPT online.
 
