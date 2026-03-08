@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import re
 import shutil
 import unicodedata
@@ -709,7 +710,7 @@ def _cp_moist_air_kj_kgk(T_C: pd.Series, RH_pct: pd.Series, P_kPa_abs: pd.Series
 class FileMeta:
     path: Path
     basename: str
-    source_type: str  # "LABVIEW" or "KIBOX"
+    source_type: str  # "LABVIEW" or "KIBOX" or "MOTEC"
     load_kw: Optional[float]
     dies_pct: Optional[float]
     biod_pct: Optional[float]
@@ -778,7 +779,13 @@ def parse_meta(path: Path) -> FileMeta:
         except Exception:
             basename = "__".join((path.parent.name, path.stem))
 
-    source_type = "KIBOX" if path.stem.lower().endswith("_i") else "LABVIEW"
+    stem_lower = path.stem.lower()
+    if stem_lower.endswith("_i"):
+        source_type = "KIBOX"
+    elif stem_lower.endswith("_m"):
+        source_type = "MOTEC"
+    else:
+        source_type = "LABVIEW"
 
     load_tokens = re.findall(r"(\d+(?:[.,]\d+)?)\s*[-_ ]?\s*kw", path.stem, flags=re.IGNORECASE)
     if not load_tokens:
@@ -923,6 +930,72 @@ def read_labview_xlsx(meta: FileMeta) -> pd.DataFrame:
     )
 
     first_cols = ["BaseName", "Load_kW", "Load_Signal_kW", "DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct", "Index", "WindowID"]
+    rest = [c for c in df.columns if c not in first_cols]
+    return df[first_cols + rest].copy()
+
+
+def _read_motec_metadata(path: Path, delim: str = ",") -> Dict[str, float]:
+    meta: Dict[str, float] = {}
+    with path.open("r", encoding="latin-1", errors="ignore", newline="") as fh:
+        reader = csv.reader(fh, delimiter=delim)
+        for i, row in enumerate(reader, start=1):
+            if i > 14:
+                break
+            if not row:
+                continue
+            key = str(row[0]).replace("\ufeff", "").strip().strip('"')
+            key_norm = norm_key(key)
+            if key_norm == "sample rate" and len(row) > 1:
+                meta["Motec_SampleRate_Hz"] = _to_float(row[1], default=np.nan)
+            elif key_norm == "duration" and len(row) > 1:
+                meta["Motec_Duration_s"] = _to_float(row[1], default=np.nan)
+    return meta
+
+
+def read_motec_csv(meta: FileMeta) -> pd.DataFrame:
+    text = meta.path.read_text(encoding="latin-1", errors="ignore")
+    sample = "\n".join(text.splitlines()[:20])
+    delim = _sniff_delimiter(sample)
+
+    try:
+        df = pd.read_csv(meta.path, sep=delim, engine="python", encoding="utf-8-sig", skiprows=14)
+    except UnicodeDecodeError:
+        df = pd.read_csv(meta.path, sep=delim, engine="python", encoding="latin-1", skiprows=14)
+    df.columns = _normalize_cols(list(df.columns))
+    df = df.loc[:, ~pd.Series(df.columns).astype(str).str.startswith("Unnamed").values].copy()
+    if len(df) < 1:
+        raise ValueError(f"Arquivo MOTEC sem linhas de dados apos o cabecalho: {meta.path.name}")
+
+    # Row 16 in the source file contains units. Data starts on row 17.
+    df = df.iloc[1:].reset_index(drop=True).copy()
+    motec_cols = []
+    for i, c in enumerate(df.columns):
+        clean = str(c).replace("\ufeff", "").strip()
+        if not clean:
+            clean = f"Col_{i + 1}"
+        motec_cols.append(f"Motec_{clean}")
+    df.columns = motec_cols
+
+    meta_cols = _read_motec_metadata(meta.path, delim=delim)
+    for key, value in meta_cols.items():
+        df[key] = value
+
+    time_col = next((c for c in df.columns if norm_key(c) == norm_key("Motec_Time")), "")
+    if time_col:
+        t = pd.to_numeric(df[time_col], errors="coerce")
+        df["Motec_Time_Delta_s"] = t.diff()
+
+    df = df.reset_index(drop=True)
+    df["Index"] = range(len(df))
+    df["WindowID"] = df["Index"] // SAMPLES_PER_WINDOW
+    df["BaseName"] = meta.basename
+    df["Load_kW"] = pd.Series(meta.load_kw, index=df.index, dtype="float64")
+    df["DIES_pct"] = pd.Series(meta.dies_pct, index=df.index, dtype="float64")
+    df["BIOD_pct"] = pd.Series(meta.biod_pct, index=df.index, dtype="float64")
+    df["EtOH_pct"] = pd.Series(meta.etoh_pct, index=df.index, dtype="float64")
+    df["H2O_pct"] = pd.Series(meta.h2o_pct, index=df.index, dtype="float64")
+
+    first_cols = ["BaseName", "Load_kW", "DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct", "Index", "WindowID"]
     rest = [c for c in df.columns if c not in first_cols]
     return df[first_cols + rest].copy()
 
@@ -1950,6 +2023,59 @@ def compute_ponto_stats(trechos: pd.DataFrame) -> pd.DataFrame:
     return out.copy()
 
 
+def compute_motec_trechos_stats(motec_raw: pd.DataFrame) -> pd.DataFrame:
+    if motec_raw.empty:
+        return pd.DataFrame()
+
+    group_cols = ["BaseName", "Load_kW", "DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct", "WindowID"]
+    ignore_cols = set(group_cols + ["Index"])
+    candidate_cols = [c for c in motec_raw.columns if c not in ignore_cols]
+
+    mot = motec_raw.copy()
+    if candidate_cols:
+        mot[candidate_cols] = mot[candidate_cols].apply(pd.to_numeric, errors="coerce")
+
+    g = mot.groupby(group_cols, dropna=False, sort=True)
+    n_df = g.size().reset_index(name="Motec_N_samples")
+    valid_groups = n_df[n_df["Motec_N_samples"] >= MIN_SAMPLES_PER_WINDOW][group_cols].copy()
+    if valid_groups.empty:
+        return pd.DataFrame(columns=group_cols + ["Motec_N_samples"])
+
+    mot_valid = mot.merge(valid_groups, on=group_cols, how="inner")
+    gv = mot_valid.groupby(group_cols, dropna=False, sort=True)
+
+    means = gv[candidate_cols].mean(numeric_only=True).add_suffix("_mean").copy()
+    n2 = gv.size().rename("Motec_N_samples")
+
+    out = pd.concat([means, n2], axis=1).reset_index().copy()
+    keep = group_cols + [c for c in out.columns if c.endswith("_mean")] + ["Motec_N_samples"]
+    return out[keep].copy()
+
+
+def compute_motec_ponto_stats(motec_trechos: pd.DataFrame) -> pd.DataFrame:
+    if motec_trechos.empty:
+        return pd.DataFrame(columns=["Load_kW", "DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct"])
+
+    group_cols = ["Load_kW", "DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct"]
+    value_cols = [c for c in motec_trechos.columns if c not in set(group_cols + ["BaseName", "WindowID", "Motec_N_samples"])]
+
+    mot = motec_trechos.copy()
+    if value_cols:
+        mot[value_cols] = mot[value_cols].apply(pd.to_numeric, errors="coerce")
+
+    g = mot.groupby(group_cols, dropna=False, sort=True)
+    mean_of_windows = g[value_cols].mean(numeric_only=True).add_suffix("_mean_of_windows").copy()
+    sd_of_windows = g[value_cols].std(ddof=1, numeric_only=True).add_suffix("_sd_of_windows").copy()
+    mean_of_windows.columns = [_normalize_repeated_stat_tokens_in_name(c) for c in mean_of_windows.columns]
+    sd_of_windows.columns = [_normalize_repeated_stat_tokens_in_name(c) for c in sd_of_windows.columns]
+    n_trechos = g.size().rename("Motec_N_trechos_validos")
+    n_files = g["BaseName"].nunique().rename("Motec_N_files")
+    mean_samples = g["Motec_N_samples"].mean().rename("Motec_N_samples_mean_of_windows")
+
+    out = pd.concat([mean_of_windows, sd_of_windows, n_trechos, n_files, mean_samples], axis=1).reset_index().copy()
+    return out
+
+
 # =========================
 # Uncertainty workflow (generic, mapping-driven)
 # =========================
@@ -2130,6 +2256,7 @@ def build_final_table(
     ponto: pd.DataFrame,
     lhv: pd.DataFrame,
     kibox_agg: pd.DataFrame,
+    motec_ponto: pd.DataFrame,
     mappings: dict,
     instruments_df: pd.DataFrame,
     reporting_df: pd.DataFrame,
@@ -2137,6 +2264,8 @@ def build_final_table(
     df = _left_merge_on_fuel_keys(ponto, lhv)
     if kibox_agg is not None and not kibox_agg.empty:
         df = _left_merge_on_fuel_keys(df, kibox_agg, extra_on=["Load_kW"])
+    if motec_ponto is not None and not motec_ponto.empty:
+        df = _left_merge_on_fuel_keys(df, motec_ponto, extra_on=["Load_kW"])
 
     kibox_bug_cols = ["KIBOX_MBF_10_90_1", "KIBOX_MBF_10_90_AVG_1"]
     drop_now = [c for c in kibox_bug_cols if c in df.columns]
@@ -3117,6 +3246,7 @@ def main() -> None:
 
     lv_files = [m for m in metas if m.source_type == "LABVIEW" and m.path.suffix.lower() == ".xlsx"]
     kibox_files = [m for m in metas if m.source_type == "KIBOX" and m.path.suffix.lower() == ".csv"]
+    motec_files = [m for m in metas if m.source_type == "MOTEC" and m.path.suffix.lower() == ".csv"]
 
     if not lv_files:
         raise SystemExit(f"NÃ£o achei .xlsx do LabVIEW em {PROCESS_DIR}.")
@@ -3248,8 +3378,30 @@ def main() -> None:
         if kibox_files
         else pd.DataFrame(columns=["Load_kW", "DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct"])
     )
+    motec_ponto = pd.DataFrame(columns=["Load_kW", "DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct"])
+    if motec_files:
+        motec_all: List[pd.DataFrame] = []
+        for m in motec_files:
+            try:
+                df_i = read_motec_csv(m)
+                if not df_i.empty:
+                    motec_all.append(df_i)
+            except Exception as e:
+                print(f"[ERROR] Falha lendo MOTEC {m.path.name}: {e}")
 
-    out = build_final_table(ponto, lhv, kibox_agg, mappings, instruments_df, reporting_df)
+        if motec_all:
+            motec_raw = pd.concat(motec_all, ignore_index=True)
+            motec_trechos = compute_motec_trechos_stats(motec_raw)
+            motec_ponto = compute_motec_ponto_stats(motec_trechos)
+            print(
+                f"[INFO] MOTEC: {len(motec_files)} arquivo(s), "
+                f"{len(motec_trechos)} trecho(s) valido(s), "
+                f"{len(motec_ponto)} ponto(s) agregado(s)."
+            )
+        else:
+            print("[WARN] Arquivos MOTEC encontrados, mas nenhum foi lido com sucesso.")
+
+    out = build_final_table(ponto, lhv, kibox_agg, motec_ponto, mappings, instruments_df, reporting_df)
 
     out_xlsx = safe_to_excel(out, OUT_DIR / "lv_kpis_clean.xlsx")
     print(f"[OK] Excel gerado: {out_xlsx}")

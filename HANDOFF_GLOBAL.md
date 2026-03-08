@@ -114,6 +114,31 @@ Arquivos de referencia:
 - os diretorios temporarios de validacao (`out_repo_mode_*`, `out_runtime_test_*`) e logs de runtime criados para debug local devem ser removidos ao final da verificacao;
 - nesta rodada, os residuos temporarios usados na analise foram efetivamente apagados da pasta `D:\Drive\Faculdade\PUC\Mestrado\Dados_Ensaios\Processamento_Pyton`.
 
+## Integracao MOTEC CSV - 2026-03-08
+- Novo tipo de fonte suportado: arquivos MOTEC em `.csv` com sufixo `_m`, por exemplo `50KW_E94H6_2_m.csv`.
+- Regras de identificacao do nome:
+- a carga nominal continua sendo lida no inicio do nome (`50KW`);
+- a composicao etanol/agua segue o mesmo parse dos arquivos LabVIEW (`E94H6`);
+- o sufixo `_m` marca a origem MOTEC e ativa a leitura dedicada.
+- Estrutura do arquivo:
+- linhas `1..14`: metadados;
+- linha `15`: nomes das variaveis;
+- linha `16`: unidades;
+- dados a partir da linha `17`.
+- Implementacao:
+- `parse_meta()` passou a classificar `_m.csv` como `source_type = MOTEC`;
+- `read_motec_csv()` le o header da linha `15`, descarta a linha de unidades, prefixa todas as variaveis com `Motec_` e adiciona `Motec_SampleRate_Hz`, `Motec_Duration_s` e `Motec_Time_Delta_s`;
+- a leitura usa fallback de codificacao para `latin-1`, necessario para os CSVs reais da MOTEC observados no mestrado;
+- o processamento da MOTEC usa blocos de `30` amostras (`SAMPLES_PER_WINDOW = 30`), mas sem assumir `DT_S = 1.0`; a taxa real fica preservada nas colunas `Motec_SampleRate_Hz_*` e `Motec_Time_Delta_s_*`;
+- `compute_motec_trechos_stats()` agrega medias por bloco valido;
+- `compute_motec_ponto_stats()` gera `Motec_*_mean_of_windows`, `Motec_*_sd_of_windows`, `Motec_N_trechos_validos`, `Motec_N_files` e `Motec_N_samples_mean_of_windows`;
+- o merge final com o output do pipeline e feito por `Load_kW` nominal + composicao, sem depender do `BaseName` exato do arquivo MOTEC.
+- Validacao executada em 2026-03-08:
+- leitura unitaria confirmada em `50KW_E94H6_2_m.csv`: `2962` linhas de dados, `99` janelas de `30` amostras, `Motec_SampleRate_Hz = 10.0` e `Motec_Time_Delta_s = 0.1`;
+- agregacao MOTEC no conjunto do mestrado: `10` arquivos, `22960` linhas brutas, `764` trechos validos e `10` pontos agregados (`Load_kW = 5..50`);
+- no merge final em memoria, o output ficou com `30` linhas totais e `209` colunas prefixadas com `Motec_`;
+- os dados MOTEC entraram corretamente nas linhas `E94H6` de `5` a `50 kW`, com `Motec_N_trechos_validos = 74` na maioria dos arquivos e `98` para `50 kW`.
+
 ## Objetivo deste arquivo
 Registrar, para continuidade no Codex, o que ja existia no `pipeline27`, o que foi adicionado no `pipeline28`, e as regras de trabalho herdadas do historico no GPT online.
 
