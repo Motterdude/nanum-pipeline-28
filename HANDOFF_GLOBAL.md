@@ -546,3 +546,26 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - inicializacao com `--no-show --initial-cycle 150` caiu de aproximadamente `7.8 s` para `6.0 s`.
 - Observacao:
   - nao foi usada paralelizacao por nucleos para a interface, porque o gargalo principal era estrutura de dados + redraw do `matplotlib`, e a UI continua essencialmente single-thread.
+
+## Viewer rapido em PyQtGraph/Qt - 2026-03-08
+- Como o arrasto do slider no `matplotlib + WebAgg` continuou lento, foi criado um viewer rapido separado: `standalone_kibox_cycle_viewer_fast.py`.
+- Stack adotada:
+  - `PySide6`;
+  - `pyqtgraph`.
+- Dependencias instaladas na `.venv` do mestrado:
+  - `PySide6 6.10.2`;
+  - `pyqtgraph 0.14.0`.
+- Para reprodutibilidade no repo, foi criado `requirements_gui_viewer.txt` com essas dependencias opcionais do viewer rapido.
+- O viewer rapido preserva a mesma estrutura funcional:
+  - `PCYL_1` ciclo a ciclo;
+  - `Q_1` ciclo a ciclo;
+  - `PMAX` por ciclo;
+  - cursor vertical sincronizado em `PMAX`;
+  - caixa `Go to`;
+  - sobreposicao opcional da media do bloco.
+- Diferenca principal:
+  - a renderizacao e o controle do slider passam a ser feitos em Qt nativo, sem `matplotlib` e sem `WebAgg`, o que melhora muito a fluidez do arrasto.
+- Validacao feita:
+  - `py_compile` do arquivo;
+  - `--no-show`;
+  - instanciacao real do widget com `QT_QPA_PLATFORM=offscreen`, confirmando inicializacao do viewer com ciclo `150`.
