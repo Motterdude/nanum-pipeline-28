@@ -43,6 +43,19 @@ class ViewerSeries:
     y_limits: tuple[float, float]
 
 
+@dataclass
+class ViewerDataset:
+    csv_path: Path
+    pcyl_series: ViewerSeries
+    q1_series: ViewerSeries
+    pmax_cycles: np.ndarray
+    pmax_values: np.ndarray
+    pmax_map: dict[int, float]
+    available_cycles: np.ndarray
+    min_cycle: int
+    max_cycle: int
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Fast Qt/PyQtGraph cycle-by-cycle KIBOX viewer."
@@ -203,42 +216,78 @@ def _nearest_available_cycle(cycle: int, available_cycles: np.ndarray) -> int:
     return int(available_cycles[idx])
 
 
+def prepare_viewer_dataset(csv_path: Path, cycle_block_size: int) -> ViewerDataset:
+    df = load_cycle_dataframe(csv_path)
+    df["CycleNumber"] = df["CycleNumber"].astype(np.int32)
+    df["CrankAngle_deg"] = df["CrankAngle_deg"].astype(np.float32)
+    df["PCYL_1"] = pd.to_numeric(df["PCYL_1"], errors="coerce", downcast="float")
+    df["Q_1"] = pd.to_numeric(df["Q_1"], errors="coerce", downcast="float")
+
+    per_cycle = build_per_cycle_means(df)
+    pmax_series = build_pmax_series(df)
+    pcyl_series = build_viewer_series(
+        per_cycle,
+        value_col="PCYL_1",
+        y_label="P_CYL (bar)",
+        x_range=PCYL_X_RANGE,
+        cycle_block_size=cycle_block_size,
+    )
+    q1_series = build_viewer_series(
+        per_cycle,
+        value_col="Q_1",
+        y_label="Q_1 (J/deg CA)",
+        x_range=Q1_X_RANGE,
+        cycle_block_size=cycle_block_size,
+    )
+    available_cycles = np.asarray(
+        sorted(set(pcyl_series.cycle_lookup) | set(q1_series.cycle_lookup)),
+        dtype=np.int32,
+    )
+    if available_cycles.size == 0:
+        raise ValueError(f"No cycles available in {csv_path}.")
+
+    pmax_cycles = pmax_series["CycleNumber"].to_numpy(dtype=np.int32, copy=True)
+    pmax_values = pmax_series["PMAX_bar"].to_numpy(dtype=np.float32, copy=True)
+    pmax_map = dict(zip(pmax_cycles.tolist(), pmax_values.tolist()))
+    return ViewerDataset(
+        csv_path=csv_path,
+        pcyl_series=pcyl_series,
+        q1_series=q1_series,
+        pmax_cycles=pmax_cycles,
+        pmax_values=pmax_values,
+        pmax_map=pmax_map,
+        available_cycles=available_cycles,
+        min_cycle=int(available_cycles[0]),
+        max_cycle=int(available_cycles[-1]),
+    )
+
+
 class FastCycleViewer(QtWidgets.QWidget):
     def __init__(
         self,
         *,
-        csv_path: Path,
-        pcyl_series: ViewerSeries,
-        q1_series: ViewerSeries,
-        pmax_series: pd.DataFrame,
+        dataset: ViewerDataset,
         cycle_block_size: int,
         initial_cycle: int,
         show_block_mean: bool,
     ) -> None:
         super().__init__()
-        self.csv_path = csv_path
-        self.pcyl_series = pcyl_series
-        self.q1_series = q1_series
         self.cycle_block_size = cycle_block_size
         self.show_block_mean = show_block_mean
-
-        self.available_cycles = np.asarray(
-            sorted(set(pcyl_series.cycle_lookup) | set(q1_series.cycle_lookup)),
-            dtype=np.int32,
-        )
-        if self.available_cycles.size == 0:
-            raise ValueError("No cycles available for fast viewer.")
-
-        self.min_cycle = int(self.available_cycles[0])
-        self.max_cycle = int(self.available_cycles[-1])
-        self.cycle_to_index = {int(c): i for i, c in enumerate(self.available_cycles.tolist())}
         self.current_cycle: int | None = None
-        initial_cycle = _nearest_available_cycle(initial_cycle, self.available_cycles)
-        self.initial_cycle = initial_cycle
-        self.pmax_cycles = pmax_series["CycleNumber"].to_numpy(dtype=np.int32, copy=True)
-        self.pmax_values = pmax_series["PMAX_bar"].to_numpy(dtype=np.float32, copy=True)
-        self.pmax_map = dict(zip(self.pmax_cycles.tolist(), self.pmax_values.tolist()))
         self._syncing = False
+        self.dataset = dataset
+        self.csv_path = dataset.csv_path
+        self.pcyl_series = dataset.pcyl_series
+        self.q1_series = dataset.q1_series
+        self.pmax_cycles = dataset.pmax_cycles
+        self.pmax_values = dataset.pmax_values
+        self.pmax_map = dataset.pmax_map
+        self.available_cycles = dataset.available_cycles
+        self.min_cycle = dataset.min_cycle
+        self.max_cycle = dataset.max_cycle
+        self.cycle_to_index = {int(c): i for i, c in enumerate(self.available_cycles.tolist())}
+        self.initial_cycle = _nearest_available_cycle(initial_cycle, self.available_cycles)
 
         self._setup_ui()
         self._configure_plots()
@@ -246,7 +295,7 @@ class FastCycleViewer(QtWidgets.QWidget):
 
     def _setup_ui(self) -> None:
         self.setWindowTitle(f"Fast KIBOX cycle viewer - {self.csv_path.name}")
-        self.resize(1500, 1000)
+        self.resize(1650, 1050)
 
         layout = QtWidgets.QVBoxLayout(self)
         self.graphics = pg.GraphicsLayoutWidget()
@@ -258,6 +307,14 @@ class FastCycleViewer(QtWidgets.QWidget):
 
         control_layout = QtWidgets.QHBoxLayout()
         layout.addLayout(control_layout)
+
+        self.open_button = QtWidgets.QPushButton("Open CSV")
+        self.open_button.clicked.connect(self._open_csv_dialog)
+        control_layout.addWidget(self.open_button)
+
+        self.file_label = QtWidgets.QLabel(self.csv_path.name)
+        self.file_label.setMinimumWidth(320)
+        control_layout.addWidget(self.file_label)
 
         control_layout.addWidget(QtWidgets.QLabel("Cycle"))
         self.slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
@@ -281,7 +338,7 @@ class FastCycleViewer(QtWidgets.QWidget):
         self.cycle_edit.returnPressed.connect(self._on_cycle_edit_submitted)
 
     def _configure_plots(self) -> None:
-        pg.setConfigOptions(antialias=False, useOpenGL=True)
+        pg.setConfigOptions(antialias=True, useOpenGL=True)
 
         self.pcyl_plot.showGrid(x=True, y=True, alpha=0.25)
         self.q1_plot.showGrid(x=True, y=True, alpha=0.25)
@@ -305,11 +362,11 @@ class FastCycleViewer(QtWidgets.QWidget):
         self.pmax_plot.setXRange(float(self.min_cycle), float(self.max_cycle), padding=0.0)
         self.pmax_plot.setYRange(pmax_min - pmax_pad, pmax_max + pmax_pad, padding=0.0)
 
-        blue = pg.mkPen(color=(31, 119, 180), width=2)
-        orange = pg.mkPen(color=(255, 127, 14), width=2)
-        black = pg.mkPen(color=(40, 40, 40), width=2, style=QtCore.Qt.PenStyle.DashLine)
-        green = pg.mkPen(color=(44, 160, 44), width=2)
-        crimson = pg.mkPen(color=(220, 20, 60), width=2)
+        blue = pg.mkPen(color=(31, 119, 180), width=1)
+        orange = pg.mkPen(color=(255, 127, 14), width=1)
+        black = pg.mkPen(color=(40, 40, 40), width=0.9, style=QtCore.Qt.PenStyle.DashLine)
+        green = pg.mkPen(color=(44, 160, 44), width=1)
+        crimson = pg.mkPen(color=(220, 20, 60), width=1)
 
         self.pcyl_curve = self.pcyl_plot.plot(pen=blue, name="Selected cycle")
         self.pcyl_block_curve = self.pcyl_plot.plot(pen=black, name="Block mean")
@@ -318,7 +375,7 @@ class FastCycleViewer(QtWidgets.QWidget):
         self.pmax_curve = self.pmax_plot.plot(self.pmax_cycles, self.pmax_values, pen=green, name="PMAX per cycle")
         self.pmax_cursor = pg.InfiniteLine(pos=float(self.initial_cycle), angle=90, pen=crimson)
         self.pmax_plot.addItem(self.pmax_cursor)
-        self.pmax_point = pg.ScatterPlotItem(size=9, brush=pg.mkBrush(220, 20, 60), pen=pg.mkPen(None))
+        self.pmax_point = pg.ScatterPlotItem(size=6, brush=pg.mkBrush(220, 20, 60), pen=pg.mkPen(None))
         self.pmax_plot.addItem(self.pmax_point)
 
         if not self.show_block_mean:
@@ -335,6 +392,68 @@ class FastCycleViewer(QtWidgets.QWidget):
 
         legend3 = self.pmax_plot.addLegend(offset=(10, 10))
         legend3.addItem(self.pmax_curve, "PMAX per cycle")
+
+    def _apply_dataset(self, dataset: ViewerDataset, initial_cycle: int | None = None) -> None:
+        self.dataset = dataset
+        self.csv_path = dataset.csv_path
+        self.pcyl_series = dataset.pcyl_series
+        self.q1_series = dataset.q1_series
+        self.pmax_cycles = dataset.pmax_cycles
+        self.pmax_values = dataset.pmax_values
+        self.pmax_map = dataset.pmax_map
+        self.available_cycles = dataset.available_cycles
+        self.min_cycle = dataset.min_cycle
+        self.max_cycle = dataset.max_cycle
+        self.cycle_to_index = {int(c): i for i, c in enumerate(self.available_cycles.tolist())}
+
+        target_cycle = self.current_cycle if initial_cycle is None else initial_cycle
+        self.initial_cycle = _nearest_available_cycle(int(target_cycle), self.available_cycles)
+        self.file_label.setText(self.csv_path.name)
+        self.setWindowTitle(f"Fast KIBOX cycle viewer - {self.csv_path.name}")
+
+        self.pcyl_plot.setXRange(self.pcyl_series.x_min, self.pcyl_series.x_max, padding=0.0)
+        self.q1_plot.setXRange(self.q1_series.x_min, self.q1_series.x_max, padding=0.0)
+        self.pcyl_plot.setYRange(*self.pcyl_series.y_limits, padding=0.0)
+        self.q1_plot.setYRange(*self.q1_series.y_limits, padding=0.0)
+
+        pmax_min = float(np.nanmin(self.pmax_values))
+        pmax_max = float(np.nanmax(self.pmax_values))
+        pmax_pad = max((pmax_max - pmax_min) * 0.05, 1.0)
+        self.pmax_plot.setXRange(float(self.min_cycle), float(self.max_cycle), padding=0.0)
+        self.pmax_plot.setYRange(pmax_min - pmax_pad, pmax_max + pmax_pad, padding=0.0)
+        self.pmax_curve.setData(self.pmax_cycles, self.pmax_values)
+        self.pmax_cursor.setValue(float(self.initial_cycle))
+
+        self._syncing = True
+        self.slider.setMinimum(self.min_cycle)
+        self.slider.setMaximum(self.max_cycle)
+        self.slider.setValue(self.initial_cycle)
+        self.cycle_edit.setText(str(self.initial_cycle))
+        self._syncing = False
+        self.current_cycle = None
+        self.update_cycle(self.initial_cycle)
+
+    def _open_csv_dialog(self) -> None:
+        selected, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Open KIBOX CSV",
+            str(self.csv_path.parent),
+            "CSV Files (*.csv);;All Files (*.*)",
+        )
+        if not selected:
+            return
+
+        csv_path = Path(selected)
+        self.setCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            dataset = prepare_viewer_dataset(csv_path, self.cycle_block_size)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "Open CSV", f"Failed to load file:\n{csv_path}\n\n{exc}")
+            return
+        finally:
+            self.unsetCursor()
+
+        self._apply_dataset(dataset)
 
     def _on_slider_changed(self, value: int) -> None:
         if self._syncing:
@@ -425,34 +544,10 @@ def main() -> None:
     csv_path = args.input.resolve()
     if not csv_path.exists():
         raise SystemExit(f"Input file not found: {csv_path}")
-
-    df = load_cycle_dataframe(csv_path)
-    df["CycleNumber"] = df["CycleNumber"].astype(np.int32)
-    df["CrankAngle_deg"] = df["CrankAngle_deg"].astype(np.float32)
-    df["PCYL_1"] = pd.to_numeric(df["PCYL_1"], errors="coerce", downcast="float")
-    df["Q_1"] = pd.to_numeric(df["Q_1"], errors="coerce", downcast="float")
-
-    per_cycle = build_per_cycle_means(df)
-    pmax_series = build_pmax_series(df)
-    pcyl_series = build_viewer_series(
-        per_cycle,
-        value_col="PCYL_1",
-        y_label="P_CYL (bar)",
-        x_range=PCYL_X_RANGE,
-        cycle_block_size=args.cycle_block_size,
-    )
-    q1_series = build_viewer_series(
-        per_cycle,
-        value_col="Q_1",
-        y_label="Q_1 (J/deg CA)",
-        x_range=Q1_X_RANGE,
-        cycle_block_size=args.cycle_block_size,
-    )
-
-    available_cycles = sorted(set(pcyl_series.cycle_lookup) | set(q1_series.cycle_lookup))
+    dataset = prepare_viewer_dataset(csv_path, args.cycle_block_size)
     if args.no_show:
         print(f"[OK] Fast viewer prepared for {csv_path}")
-        print(f"[OK] Available cycles: {len(available_cycles)}")
+        print(f"[OK] Available cycles: {len(dataset.available_cycles)}")
         print(f"[OK] Initial cycle: {args.initial_cycle}")
         print(f"[OK] Block mean overlay: {not args.hide_block_mean}")
         return
@@ -460,10 +555,7 @@ def main() -> None:
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     app.setApplicationName("Fast KIBOX Cycle Viewer")
     viewer = FastCycleViewer(
-        csv_path=csv_path,
-        pcyl_series=pcyl_series,
-        q1_series=q1_series,
-        pmax_series=pmax_series,
+        dataset=dataset,
         cycle_block_size=args.cycle_block_size,
         initial_cycle=args.initial_cycle,
         show_block_mean=not args.hide_block_mean,

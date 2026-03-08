@@ -569,3 +569,20 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - `py_compile` do arquivo;
   - `--no-show`;
   - instanciacao real do widget com `QT_QPA_PLATFORM=offscreen`, confirmando inicializacao do viewer com ciclo `150`.
+
+## Refinos visuais e Open CSV no viewer rapido - 2026-03-08
+- O `standalone_kibox_cycle_viewer_fast.py` foi refinado para deixar a visualizacao mais limpa e mais pratica.
+- Ajustes visuais:
+  - espessura das linhas reduzida nos tres graficos;
+  - `antialias=True` no `pyqtgraph` para melhorar a nitidez da renderizacao;
+  - janela inicial ampliada para `1650x1050`, melhorando a leitura do conjunto todo.
+- Open file:
+  - adicionado botao `Open CSV` dentro da propria aplicacao;
+  - a selecao de arquivo usa `QFileDialog`;
+  - ao abrir um novo CSV, o viewer recarrega os dados na mesma janela, sem precisar fechar e relancar o script.
+- Estrutura tecnica:
+  - foi criado `prepare_viewer_dataset(...)` para centralizar o parse e permitir recarga limpa de qualquer CSV compatível.
+- Validacao:
+  - `py_compile`;
+  - `--no-show`;
+  - smoke test em `offscreen`, confirmando criacao do botao `Open CSV`, label do arquivo e inicializacao normal do widget.
