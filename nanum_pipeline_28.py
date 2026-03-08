@@ -18,11 +18,12 @@ import matplotlib.pyplot as plt
 # =========================
 # Paths / constants
 # =========================
-RAW_DIR = Path("raw")
+BASE_DIR = Path(__file__).resolve().parent
+RAW_DIR = BASE_DIR / "raw"
 PROCESS_DIR = RAW_DIR / "PROCESSAR"
-OUT_DIR = Path("out")
+OUT_DIR = BASE_DIR / "out"
 PLOTS_DIR = OUT_DIR / "plots"
-CFG_DIR = Path("config")
+CFG_DIR = BASE_DIR / "config"
 
 PREFERRED_SHEET_NAME = "labview"
 B_ETANOL_COL_CANDIDATES = ["B_Etanol", "B_ETANOL", "B_ETANOL (kg)", "B_Etanol (kg)"]
@@ -36,6 +37,7 @@ TIME_DELTA_PLOT_YMAX_S = 1.6
 TIME_DELTA_PLOT_YSTEP_S = 0.1
 DEFAULT_MAX_DELTA_BETWEEN_SAMPLES_MS = 1200.0
 DEFAULT_MAX_ACT_CONTROL_ERROR_C = 5.0
+DEFAULT_MAX_ECT_CONTROL_ERROR_C = 2.0
 K_COVERAGE = 2.0
 
 FUEL_H2O_LEVELS = [6, 25, 35]  # “combustíveis” por hidratação
@@ -105,6 +107,29 @@ def _canon_name(x: object) -> str:
     return re.sub(r"\s+", " ", s)
 
 
+def _normalize_repeated_stat_tokens_in_name(x: object) -> str:
+    s = str(x).replace("\ufeff", "").strip()
+    if not s:
+        return s
+
+    replacements = [
+        ("_mean_mean_of_windows", "_mean_of_windows"),
+        ("_mean_sd_of_windows", "_sd_of_windows"),
+        ("_sd_mean_of_windows", "_sd_of_windows"),
+        ("_sd_sd_of_windows", "_sd_of_windows"),
+        ("_mean_mean", "_mean"),
+        ("_sd_sd", "_sd"),
+    ]
+
+    prev = None
+    while prev != s:
+        prev = s
+        for old, new in replacements:
+            s = s.replace(old, new)
+    s = re.sub(r"__+", "_", s)
+    return s
+
+
 def resolve_col(df: pd.DataFrame, requested: str) -> str:
     requested = str(requested).replace("\ufeff", "").strip()
     if not requested:
@@ -122,6 +147,28 @@ def resolve_col(df: pd.DataFrame, requested: str) -> str:
     req_canon = _canon_name(requested)
     if req_canon in canon_map:
         return canon_map[req_canon]
+
+    req_stats_norm = _normalize_repeated_stat_tokens_in_name(requested)
+    if req_stats_norm in df.columns:
+        return req_stats_norm
+
+    stats_norm_map: Dict[str, str] = {}
+    for c in df.columns:
+        c_norm = _normalize_repeated_stat_tokens_in_name(c)
+        if c_norm not in stats_norm_map:
+            stats_norm_map[c_norm] = c
+    if req_stats_norm in stats_norm_map:
+        return stats_norm_map[req_stats_norm]
+
+    stats_norm_canon_map: Dict[str, str] = {}
+    for c in df.columns:
+        c_norm = _normalize_repeated_stat_tokens_in_name(c)
+        c_norm_canon = _canon_name(c_norm)
+        if c_norm_canon not in stats_norm_canon_map:
+            stats_norm_canon_map[c_norm_canon] = c
+    req_stats_canon = _canon_name(req_stats_norm)
+    if req_stats_canon in stats_norm_canon_map:
+        return stats_norm_canon_map[req_stats_canon]
 
     suggestion = difflib.get_close_matches(requested, list(df.columns), n=6)
     sug_txt = f" Sugestões: {suggestion}" if suggestion else ""
@@ -144,6 +191,10 @@ def clear_output_dir(path: Path) -> None:
     for child in path.iterdir():
         if child.is_dir():
             clear_output_dir(child)
+            try:
+                child.rmdir()
+            except OSError:
+                pass
             continue
         try:
             child.unlink()
@@ -279,6 +330,170 @@ def iter_source_plot_groups(df: pd.DataFrame, root: Path | None = None) -> List[
         plot_dir = _basename_source_plot_dir(basename_example, root=root)
         groups.append((str(source_folder or ""), plot_dir, d.copy()))
     return groups
+
+
+def _source_folder_leaf(source_folder: object) -> str:
+    s = str(source_folder or "").strip()
+    if not s:
+        return ""
+    parts = [p.strip() for p in s.split("/") if p.strip()]
+    return parts[-1] if parts else s
+
+
+def _normalize_compare_series_name(source_folder: object) -> str:
+    leaf = _source_folder_leaf(source_folder)
+    if not leaf:
+        return "origem_desconhecida"
+
+    s = _canon_name(leaf).replace(" ", "_").replace("-", "_")
+    s = re.sub(r"_+", "_", s).strip("_")
+    s = re.sub(r"(^|_)subindo(?=_|$)", r"\1subida", s)
+    s = re.sub(r"(^|_)descendo(?=_|$)", r"\1descida", s)
+    if not s:
+        return "origem_desconhecida"
+    return s
+
+
+def _safe_folder_name(name: object) -> str:
+    s = str(name or "").strip()
+    if not s:
+        return "compare"
+    s = re.sub(r'[<>:"/\\|?*]', "_", s)
+    s = s.strip().rstrip(".")
+    return s if s else "compare"
+
+
+def _infer_source_direction_from_folder_name(source_folder: object) -> Optional[str]:
+    s = _canon_name(source_folder).replace("_", " ").replace("-", " ")
+    if "subindo" in s or "subida" in s or re.search(r"\bup\b", s):
+        return "subindo"
+    if "descendo" in s or "descida" in s or re.search(r"\bdown\b", s):
+        return "descendo"
+    return None
+
+
+def _compare_group_key_from_source_folder(source_folder: object) -> str:
+    s = str(source_folder or "").strip()
+    if not s:
+        return ""
+
+    parts = [p.strip() for p in s.split("/") if p.strip()]
+    clean_parts: List[str] = []
+    for part in parts:
+        t = _canon_name(part).replace("_", " ").replace("-", " ")
+        t = re.sub(r"\b(subindo|subida|descendo|descida|up|down)\b", " ", t)
+        t = re.sub(r"\s+", " ", t).strip()
+        if t:
+            clean_parts.append(t)
+
+    if not clean_parts:
+        return ""
+    return "__".join(_safe_name(p) for p in clean_parts)
+
+
+def iter_compare_plot_groups(df: pd.DataFrame, root: Path | None = None) -> List[Tuple[str, Path, pd.DataFrame]]:
+    """
+    Build compare groups combining subida/descida datasets for the same run key.
+    Output path pattern: <root>/compare/<group_key>/...
+    """
+    if df is None or df.empty:
+        return []
+
+    tmp = add_source_identity_columns(df)
+    if "SourceFolder" not in tmp.columns:
+        return []
+
+    tmp = tmp.copy()
+    tmp["_COMPARE_GROUP"] = tmp["SourceFolder"].map(_compare_group_key_from_source_folder)
+    tmp["_COMPARE_SERIES"] = tmp["SourceFolder"].map(_normalize_compare_series_name)
+    tmp["_COMPARE_DIRECTION"] = tmp["SourceFolder"].map(_infer_source_direction_from_folder_name)
+    tmp["_COMPARE_SERIES"] = tmp["_COMPARE_SERIES"].where(
+        tmp["_COMPARE_SERIES"].map(lambda x: not _is_blank_cell(x)),
+        "origem_desconhecida",
+    )
+
+    base_root = (PLOTS_DIR if root is None else root) / "compare"
+    groups: List[Tuple[str, Path, pd.DataFrame]] = []
+    for group_key, d in tmp.groupby("_COMPARE_GROUP", dropna=False, sort=True):
+        gk = str(group_key or "").strip()
+        if not gk:
+            continue
+
+        dirs = set(str(x).strip().lower() for x in d["_COMPARE_DIRECTION"].dropna().tolist() if str(x).strip())
+        # Compare plots are only useful when both directions exist.
+        if "subindo" not in dirs or "descendo" not in dirs:
+            continue
+
+        subida_vals = sorted(
+            set(
+                str(v).strip()
+                for v in d.loc[d["_COMPARE_DIRECTION"].eq("subindo"), "_COMPARE_SERIES"].dropna().tolist()
+                if str(v).strip()
+            )
+        )
+        descida_vals = sorted(
+            set(
+                str(v).strip()
+                for v in d.loc[d["_COMPARE_DIRECTION"].eq("descendo"), "_COMPARE_SERIES"].dropna().tolist()
+                if str(v).strip()
+            )
+        )
+        if subida_vals and descida_vals:
+            compare_name = f"{subida_vals[0]} vs {descida_vals[0]}"
+        else:
+            uniq = sorted(
+                set(str(v).strip() for v in d["_COMPARE_SERIES"].dropna().tolist() if str(v).strip())
+            )
+            compare_name = " vs ".join(uniq[:2]) if uniq else gk
+
+        plot_dir = base_root / _safe_folder_name(compare_name)
+        groups.append((gk, plot_dir, d.copy()))
+
+    return groups
+
+
+def _infer_sentido_carga_from_folder_parts(parts: List[str]) -> object:
+    for part in reversed(parts):
+        s = _canon_name(part).replace("_", " ").replace("-", " ")
+        if "subindo" in s or "subida" in s or re.search(r"\bup\b", s):
+            return "subida"
+        if "descendo" in s or "descida" in s or re.search(r"\bdown\b", s):
+            return "descida"
+    return pd.NA
+
+
+def _infer_iteracao_from_folder_parts(parts: List[str]) -> object:
+    for part in reversed(parts):
+        m = re.search(r"(\d+)\s*$", str(part))
+        if m:
+            return int(m.group(1))
+
+    for part in reversed(parts):
+        nums = re.findall(r"\d+", str(part))
+        if nums:
+            return int(nums[-1])
+
+    return pd.NA
+
+
+def _sentido_carga_rank(x: object) -> int:
+    s = _canon_name(x).replace("_", " ").replace("-", " ")
+    if "subida" in s or "subindo" in s or re.search(r"\bup\b", s):
+        return 0
+    if "descida" in s or "descendo" in s or re.search(r"\bdown\b", s):
+        return 1
+    return 9
+
+
+def add_run_context_columns(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty or "BaseName" not in df.columns:
+        return df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+
+    out = df.copy()
+    folder_parts = out["BaseName"].map(_basename_source_folder_parts)
+    out["Sentido_Carga"] = folder_parts.map(_infer_sentido_carga_from_folder_parts)
+    out["Iteracao"] = pd.to_numeric(folder_parts.map(_infer_iteracao_from_folder_parts), errors="coerce").astype("Int64")
+    return out
 
 
 def _find_kibox_col_by_tokens(df: pd.DataFrame, tokens: List[str]) -> Optional[str]:
@@ -697,6 +912,10 @@ def build_time_diagnostics(
         quality_cfg.get("MAX_ACT_CONTROL_ERROR", DEFAULT_MAX_ACT_CONTROL_ERROR_C),
         DEFAULT_MAX_ACT_CONTROL_ERROR_C,
     )
+    max_ect_error_c = _to_float(
+        quality_cfg.get("MAX_ECT_CONTROL_ERROR", DEFAULT_MAX_ECT_CONTROL_ERROR_C),
+        DEFAULT_MAX_ECT_CONTROL_ERROR_C,
+    )
 
     try:
         time_col = resolve_col(lv_raw, time_col)
@@ -712,6 +931,7 @@ def build_time_diagnostics(
     base_cols = [c for c in ["BaseName", "Load_kW", "DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct", "Index"] if c in lv_raw.columns]
     out = lv_raw[base_cols + [time_col]].copy()
     out = add_source_identity_columns(out)
+    out = add_run_context_columns(out)
 
     t = _parse_time_series(out[time_col])
     out["TIME_PARSED"] = t
@@ -760,6 +980,44 @@ def build_time_diagnostics(
         out["ACT_CTRL_ERROR_C"] = act_err
         out["ACT_CTRL_ERROR_ABS_C"] = act_err.abs()
         out["ACT_CTRL_ERROR_FLAG"] = act_err.abs() > max_act_error_c
+
+    t_s_agua_col = None
+    for cand in ["T_S_AGUA", "T_S_ÁGUA", "T_S AGUA", "T_S ÁGUA"]:
+        if cand in lv_raw.columns:
+            t_s_agua_col = cand
+            break
+    if t_s_agua_col is None:
+        t_s_agua_col = _find_first_col_by_substrings(lv_raw, ["t_s", "agua"])
+    if t_s_agua_col is None:
+        t_s_agua_col = _find_first_col_by_substrings(lv_raw, ["t_s", "água"])
+
+    dem_th2o_col = None
+    for cand in ["DEM_TH2O", "DEM TH2O"]:
+        if cand in lv_raw.columns:
+            dem_th2o_col = cand
+            break
+    if dem_th2o_col is None:
+        dem_th2o_col = _find_first_col_by_substrings(lv_raw, ["dem", "th2o"])
+
+    out["MAX_ECT_CONTROL_ERROR"] = max_ect_error_c
+    out["ECT_CTRL_ACTUAL_C"] = pd.NA
+    out["ECT_CTRL_TARGET_C"] = pd.NA
+    out["ECT_CTRL_LIMIT_LOW_C"] = pd.NA
+    out["ECT_CTRL_LIMIT_HIGH_C"] = pd.NA
+    out["ECT_CTRL_ERROR_C"] = pd.NA
+    out["ECT_CTRL_ERROR_ABS_C"] = pd.NA
+    out["ECT_CTRL_ERROR_FLAG"] = pd.NA
+    if t_s_agua_col and dem_th2o_col:
+        ect_actual = pd.to_numeric(lv_raw[t_s_agua_col], errors="coerce")
+        ect_target = pd.to_numeric(lv_raw[dem_th2o_col], errors="coerce")
+        ect_err = ect_actual - ect_target
+        out["ECT_CTRL_ACTUAL_C"] = ect_actual
+        out["ECT_CTRL_TARGET_C"] = ect_target
+        out["ECT_CTRL_LIMIT_LOW_C"] = ect_target - max_ect_error_c
+        out["ECT_CTRL_LIMIT_HIGH_C"] = ect_target + max_ect_error_c
+        out["ECT_CTRL_ERROR_C"] = ect_err
+        out["ECT_CTRL_ERROR_ABS_C"] = ect_err.abs()
+        out["ECT_CTRL_ERROR_FLAG"] = ect_err.abs() > max_ect_error_c
 
     return out
 
@@ -842,18 +1100,31 @@ def summarize_time_diagnostics(time_df: pd.DataFrame) -> pd.DataFrame:
         smp_status = _time_diag_status_from_flags(time_flag)
         act_flag = d.get("ACT_CTRL_ERROR_FLAG", pd.Series([pd.NA] * len(d)))
         act_status = _time_diag_status_from_flags(act_flag)
-        dq_status = "ERRO" if "ERRO" in {smp_status, act_status} else ("OK" if {smp_status, act_status} <= {"OK"} else "NA")
+        ect_flag = d.get("ECT_CTRL_ERROR_FLAG", pd.Series([pd.NA] * len(d)))
+        ect_status = _time_diag_status_from_flags(ect_flag)
+        dq_status = "ERRO" if "ERRO" in {smp_status, act_status, ect_status} else ("OK" if {smp_status, act_status, ect_status} <= {"OK"} else "NA")
         time_error_n = int(pd.Series(time_flag).fillna(False).astype(bool).sum()) if smp_status != "NA" else 0
         act_error_n = int(pd.Series(act_flag).fillna(False).astype(bool).sum()) if act_status != "NA" else 0
+        ect_error_n = int(pd.Series(ect_flag).fillna(False).astype(bool).sum()) if ect_status != "NA" else 0
         act_abs = pd.to_numeric(d.get("ACT_CTRL_ERROR_ABS_C", pd.Series([pd.NA] * len(d))), errors="coerce")
+        ect_abs = pd.to_numeric(d.get("ECT_CTRL_ERROR_ABS_C", pd.Series([pd.NA] * len(d))), errors="coerce")
         act_transient_status = act_status
         act_transient_t_on, act_transient_t_off = _first_last_transient_times(
             act_flag,
             d.get("TIME_TEXT_ms", pd.Series([pd.NA] * len(d))),
         )
+        ect_transient_status = ect_status
+        ect_transient_t_on, ect_transient_t_off = _first_last_transient_times(
+            ect_flag,
+            d.get("TIME_TEXT_ms", pd.Series([pd.NA] * len(d))),
+        )
         max_act_error = _to_float(
             d.get("MAX_ACT_CONTROL_ERROR", pd.Series([DEFAULT_MAX_ACT_CONTROL_ERROR_C])).iloc[0],
             DEFAULT_MAX_ACT_CONTROL_ERROR_C,
+        )
+        max_ect_error = _to_float(
+            d.get("MAX_ECT_CONTROL_ERROR", pd.Series([DEFAULT_MAX_ECT_CONTROL_ERROR_C])).iloc[0],
+            DEFAULT_MAX_ECT_CONTROL_ERROR_C,
         )
 
         rows.append(
@@ -863,10 +1134,16 @@ def summarize_time_diagnostics(time_df: pd.DataFrame) -> pd.DataFrame:
                 "ACT_CTRL_ERRO_TRANSIENTE": act_transient_status,
                 "ACT_CTRL_ERRO_TRANSIENTE_t_on": act_transient_t_on,
                 "ACT_CTRL_ERRO_TRANSIENTE_t_off": act_transient_t_off,
+                "ECT_CTRL_ERRO": ect_status,
+                "ECT_CTRL_ERRO_TRANSIENTE": ect_transient_status,
+                "ECT_CTRL_ERRO_TRANSIENTE_t_on": ect_transient_t_on,
+                "ECT_CTRL_ERRO_TRANSIENTE_t_off": ect_transient_t_off,
                 "DQ_ERROR": dq_status,
                 "BaseName": basename,
                 "SourceFolder": d.get("SourceFolder", pd.Series([""])).iloc[0],
                 "SourceFile": d.get("SourceFile", pd.Series([basename])).iloc[0],
+                "Iteracao": pd.to_numeric(d.get("Iteracao", pd.Series([pd.NA])).iloc[0], errors="coerce"),
+                "Sentido_Carga": d.get("Sentido_Carga", pd.Series([pd.NA])).iloc[0],
                 "Load_kW": pd.to_numeric(d.get("Load_kW", pd.Series([pd.NA])).iloc[0], errors="coerce"),
                 "DIES_pct": pd.to_numeric(d.get("DIES_pct", pd.Series([pd.NA])).iloc[0], errors="coerce"),
                 "BIOD_pct": pd.to_numeric(d.get("BIOD_pct", pd.Series([pd.NA])).iloc[0], errors="coerce"),
@@ -892,10 +1169,18 @@ def summarize_time_diagnostics(time_df: pd.DataFrame) -> pd.DataFrame:
                 "ACT_CTRL_ERROR_PCT": (act_error_n / len(d)) * 100.0 if len(d) > 0 else np.nan,
                 "ACT_CTRL_ERROR_MEAN_ABS_C": act_abs.mean(),
                 "ACT_CTRL_ERROR_MAX_ABS_C": act_abs.max(),
+                "MAX_ECT_CONTROL_ERROR": max_ect_error,
+                "ECT_CTRL_ERROR_N": ect_error_n,
+                "ECT_CTRL_ERROR_PCT": (ect_error_n / len(d)) * 100.0 if len(d) > 0 else np.nan,
+                "ECT_CTRL_ERROR_MEAN_ABS_C": ect_abs.mean(),
+                "ECT_CTRL_ERROR_MAX_ABS_C": ect_abs.max(),
             }
         )
 
-    return pd.DataFrame(rows)
+    out = pd.DataFrame(rows)
+    if "Iteracao" in out.columns:
+        out["Iteracao"] = pd.to_numeric(out["Iteracao"], errors="coerce").astype("Int64")
+    return out
 
 
 def plot_time_delta_all_samples(
@@ -938,6 +1223,8 @@ def plot_time_delta_all_samples(
     ax.set_title("TIME delta between consecutive samples")
     _apply_time_delta_axis_format(ax)
     ax.grid(True, which="both", linestyle="--", linewidth=0.5)
+    table_rows = [("", xi, yi) for xi, yi in zip(x[valid].tolist(), y[valid].tolist())]
+    _add_xy_value_table(ax, table_rows)
     ax.legend()
 
     target_dir = PLOTS_DIR if plot_dir is None else plot_dir
@@ -1013,6 +1300,8 @@ def plot_time_delta_by_file(time_df: pd.DataFrame, plot_dir: Optional[Path] = No
         ax.set_title(" | ".join(title_parts))
         _apply_time_delta_axis_format(ax)
         ax.grid(True, which="both", linestyle="--", linewidth=0.5)
+        table_rows = [("", xi, yi) for xi, yi in zip(x[valid].tolist(), y[valid].tolist())]
+        _add_xy_value_table(ax, table_rows)
         ax.legend()
 
         error_prefix = "ERRO_" if has_sampling_error else ""
@@ -1177,6 +1466,7 @@ def _load_data_quality_config(xlsx_path: Path) -> Dict[str, float]:
     cfg = {
         "MAX_DELTA_BETWEEN_SAMPLES_ms": DEFAULT_MAX_DELTA_BETWEEN_SAMPLES_MS,
         "MAX_ACT_CONTROL_ERROR": DEFAULT_MAX_ACT_CONTROL_ERROR_C,
+        "MAX_ECT_CONTROL_ERROR": DEFAULT_MAX_ECT_CONTROL_ERROR_C,
     }
 
     dqa = _try_read_sheet(xlsx_path, "data quality assessment")
@@ -1203,6 +1493,11 @@ def _load_data_quality_config(xlsx_path: Path) -> Dict[str, float]:
             cfg["MAX_ACT_CONTROL_ERROR"] = _to_float(
                 row.get(value_col, DEFAULT_MAX_ACT_CONTROL_ERROR_C),
                 DEFAULT_MAX_ACT_CONTROL_ERROR_C,
+            )
+        elif param_norm == norm_key("MAX_ECT_CONTROL_ERROR"):
+            cfg["MAX_ECT_CONTROL_ERROR"] = _to_float(
+                row.get(value_col, DEFAULT_MAX_ECT_CONTROL_ERROR_C),
+                DEFAULT_MAX_ECT_CONTROL_ERROR_C,
             )
 
     return cfg
@@ -1343,6 +1638,8 @@ def load_config_excel() -> Tuple[dict, pd.DataFrame, pd.DataFrame, pd.DataFrame,
                 "y_min",
                 "y_max",
                 "y_step",
+                "y_tol_plus",
+                "y_tol_minus",
                 "filter_h2o_list",
                 "label_variant",
                 "notes",
@@ -1475,8 +1772,8 @@ def compute_trechos_stats(lv_raw: pd.DataFrame, instruments_df: pd.DataFrame) ->
     candidate_cols = [c for c in lv_raw.columns if c not in ignore_cols]
 
     lv = lv_raw.copy()
-    for c in candidate_cols:
-        lv[c] = pd.to_numeric(lv[c], errors="coerce")
+    if candidate_cols:
+        lv[candidate_cols] = lv[candidate_cols].apply(pd.to_numeric, errors="coerce")
 
     g = lv.groupby(group_cols, dropna=False, sort=True)
     n_df = g.size().reset_index(name="N_samples")
@@ -1487,12 +1784,12 @@ def compute_trechos_stats(lv_raw: pd.DataFrame, instruments_df: pd.DataFrame) ->
     lv_valid = lv.merge(valid_groups, on=group_cols, how="inner")
     gv = lv_valid.groupby(group_cols, dropna=False, sort=True)
 
-    means = gv[candidate_cols].mean(numeric_only=True).add_suffix("_mean")
+    means = gv[candidate_cols].mean(numeric_only=True).add_suffix("_mean").copy()
     first = gv[bcol].first().rename("BEtanol_start")
     last = gv[bcol].last().rename("BEtanol_end")
     n2 = gv.size().rename("N_samples")
 
-    out = pd.concat([means, first, last, n2], axis=1).reset_index()
+    out = pd.concat([means, first, last, n2], axis=1).reset_index().copy()
 
     out["Delta_BEtanol"] = out["BEtanol_start"] - out["BEtanol_end"]
     out["DeltaT_s"] = (out["N_samples"] - 1) * DT_S
@@ -1525,16 +1822,18 @@ def compute_ponto_stats(trechos: pd.DataFrame) -> pd.DataFrame:
     value_cols = [c for c in trechos.columns if c not in group_cols and c != "WindowID"]
 
     tre = trechos.copy()
-    for c in value_cols:
-        tre[c] = pd.to_numeric(tre[c], errors="coerce")
+    if value_cols:
+        tre[value_cols] = tre[value_cols].apply(pd.to_numeric, errors="coerce")
 
     g = tre.groupby(group_cols, dropna=False, sort=True)
 
-    mean_of_windows = g[value_cols].mean(numeric_only=True).add_suffix("_mean_of_windows")
-    sd_of_windows = g[value_cols].std(ddof=1, numeric_only=True).add_suffix("_sd_of_windows")
+    mean_of_windows = g[value_cols].mean(numeric_only=True).add_suffix("_mean_of_windows").copy()
+    sd_of_windows = g[value_cols].std(ddof=1, numeric_only=True).add_suffix("_sd_of_windows").copy()
+    mean_of_windows.columns = [_normalize_repeated_stat_tokens_in_name(c) for c in mean_of_windows.columns]
+    sd_of_windows.columns = [_normalize_repeated_stat_tokens_in_name(c) for c in sd_of_windows.columns]
     n_trechos = g.size().rename("N_trechos_validos")
 
-    out = pd.concat([mean_of_windows, sd_of_windows, n_trechos], axis=1).reset_index()
+    out = pd.concat([mean_of_windows, sd_of_windows, n_trechos], axis=1).reset_index().copy()
 
     uB_col = "uB_Consumo_kg_h"
     if uB_col in tre.columns:
@@ -1546,7 +1845,7 @@ def compute_ponto_stats(trechos: pd.DataFrame) -> pd.DataFrame:
             .apply(lambda s: float((s**2).sum()))
             .reset_index(name="sum_u2")
         )
-        out = out.merge(sum_u2_df, on=group_cols, how="left")
+        out = out.merge(sum_u2_df, on=group_cols, how="left").copy()
 
         N = pd.to_numeric(out["N_trechos_validos"], errors="coerce")
         out["uB_Consumo_kg_h_mean_of_windows"] = (pd.to_numeric(out["sum_u2"], errors="coerce") ** 0.5) / N
@@ -1799,6 +2098,28 @@ def build_final_table(
     df["U_n_th"] = K_COVERAGE * df["uc_n_th"]
     df["U_n_th_pct"] = df["U_n_th"] * 100.0
 
+    # Specific fuel consumption (g/kWh): BSFC = 1000 * fuel_kg_h / power_kW.
+    bsfc = (Fkgh * 1000.0) / PkW
+    invalid_bsfc = (PkW <= 0) | (Fkgh <= 0)
+    df["BSFC_g_kWh"] = bsfc.where(~invalid_bsfc, pd.NA)
+
+    uA_P = pd.to_numeric(df.get("uA_P_kw", pd.NA), errors="coerce")
+    uB_P = pd.to_numeric(df.get("uB_P_kw", pd.NA), errors="coerce")
+    uA_F = pd.to_numeric(df.get("uA_Consumo_kg_h", pd.NA), errors="coerce")
+    uB_F = pd.to_numeric(df.get("uB_Consumo_kg_h", pd.NA), errors="coerce")
+
+    rel_uA_bsfc = ((uA_F / Fkgh) ** 2 + (uA_P / PkW) ** 2) ** 0.5
+    rel_uB_bsfc = ((uB_F / Fkgh) ** 2 + (uB_P / PkW) ** 2) ** 0.5
+
+    df["uA_BSFC_g_kWh"] = pd.to_numeric(df["BSFC_g_kWh"], errors="coerce") * rel_uA_bsfc
+    df["uB_BSFC_g_kWh"] = pd.to_numeric(df["BSFC_g_kWh"], errors="coerce") * rel_uB_bsfc
+    ua_bsfc = pd.to_numeric(df["uA_BSFC_g_kWh"], errors="coerce")
+    ub_bsfc = pd.to_numeric(df["uB_BSFC_g_kWh"], errors="coerce")
+    df["uc_BSFC_g_kWh"] = (ua_bsfc**2 + ub_bsfc**2) ** 0.5
+    df["U_BSFC_g_kWh"] = K_COVERAGE * df["uc_BSFC_g_kWh"]
+
+    df.loc[invalid_bsfc, ["uA_BSFC_g_kWh", "uB_BSFC_g_kWh", "uc_BSFC_g_kWh", "U_BSFC_g_kWh"]] = pd.NA
+
     lambda_col = None
     if "lambda" in mappings and mappings["lambda"].get("mean"):
         try:
@@ -1808,10 +2129,10 @@ def build_final_table(
     df = add_airflow_channels_inplace(df, lambda_col=lambda_col)
 
     t_cil_cols = [
-        "T_S_CIL_1_mean_mean_of_windows",
-        "T_S_CIL_2_mean_mean_of_windows",
-        "T_S_CIL_3_mean_mean_of_windows",
-        "T_S_CIL_4_mean_mean_of_windows",
+        "T_S_CIL_1_mean_of_windows",
+        "T_S_CIL_2_mean_of_windows",
+        "T_S_CIL_3_mean_of_windows",
+        "T_S_CIL_4_mean_of_windows",
     ]
     t_cil_existing = [c for c in t_cil_cols if c in df.columns]
     if t_cil_existing:
@@ -1858,7 +2179,61 @@ def build_final_table(
     else:
         df["Q_EVAP_NET_kW"] = pd.NA
 
+    # ECT control error sign convention:
+    # positive error => coolant outlet temperature hotter than commanded setpoint.
+    t_s_agua_col = None
+    for cand in [
+        "T_S_AGUA_mean_of_windows",
+        "T_S_AGUA",
+        "T_S_ÁGUA",
+    ]:
+        if cand in df.columns:
+            t_s_agua_col = cand
+            break
+    if t_s_agua_col is None:
+        t_s_agua_col = _find_first_col_by_substrings(df, ["t_s", "agua", "mean_of_windows"])
+    if t_s_agua_col is None:
+        t_s_agua_col = _find_first_col_by_substrings(df, ["t_s", "agua"])
+    if t_s_agua_col is None:
+        t_s_agua_col = _find_first_col_by_substrings(df, ["t_s", "água"])
+
+    dem_th2o_col = None
+    for cand in [
+        "DEM_TH2O_mean_of_windows",
+        "DEM TH2O_mean_of_windows",
+        "DEM_TH2O",
+        "DEM TH2O",
+    ]:
+        if cand in df.columns:
+            dem_th2o_col = cand
+            break
+    if dem_th2o_col is None:
+        dem_th2o_col = _find_first_col_by_substrings(df, ["dem", "th2o", "mean_of_windows"])
+    if dem_th2o_col is None:
+        dem_th2o_col = _find_first_col_by_substrings(df, ["dem", "th2o"])
+
+    if t_s_agua_col and dem_th2o_col:
+        ect_actual = pd.to_numeric(df[t_s_agua_col], errors="coerce")
+        ect_target = pd.to_numeric(df[dem_th2o_col], errors="coerce")
+        df["ECT_CTRL_ACTUAL_C"] = ect_actual
+        df["ECT_CTRL_TARGET_C"] = ect_target
+        df["ECT_CTRL_ERROR_C"] = ect_actual - ect_target
+        df["ECT_CTRL_ERROR_ABS_C"] = pd.to_numeric(df["ECT_CTRL_ERROR_C"], errors="coerce").abs()
+    else:
+        df["ECT_CTRL_ACTUAL_C"] = pd.NA
+        df["ECT_CTRL_TARGET_C"] = pd.NA
+        df["ECT_CTRL_ERROR_C"] = pd.NA
+        df["ECT_CTRL_ERROR_ABS_C"] = pd.NA
+
+    df = add_run_context_columns(df)
     df = _apply_reporting_rounding(df, mappings=mappings, reporting_df=reporting_df)
+
+    # Keep run context columns at the beginning of the final spreadsheet.
+    first_cols = [c for c in ["Iteracao", "Sentido_Carga"] if c in df.columns]
+    if first_cols:
+        rest_cols = [c for c in df.columns if c not in first_cols]
+        df = df[first_cols + rest_cols].copy()
+
     return df
 
 
@@ -1888,6 +2263,105 @@ def _fuel_plot_groups(df: pd.DataFrame, fuels_override: Optional[List[int]] = No
     return groups
 
 
+def _series_fuel_plot_groups(
+    df: pd.DataFrame,
+    fuels_override: Optional[List[int]] = None,
+    series_col: Optional[str] = None,
+) -> List[Tuple[Optional[str], pd.DataFrame]]:
+    if not series_col or series_col not in df.columns:
+        return _fuel_plot_groups(df, fuels_override=fuels_override)
+
+    sv = df[series_col].map(_to_str_or_empty)
+    sv = sv.where(sv.ne(""), "origem_desconhecida")
+
+    groups: List[Tuple[Optional[str], pd.DataFrame]] = []
+    for serie in sorted(sv.dropna().unique().tolist()):
+        d_series = df[sv.eq(serie)].copy()
+        if d_series.empty:
+            continue
+        for fuel_label, d in _fuel_plot_groups(d_series, fuels_override=fuels_override):
+            if d.empty:
+                continue
+            label = str(serie)
+            if fuel_label:
+                label = f"{serie} | {fuel_label}"
+            groups.append((label, d))
+
+    if groups:
+        return groups
+    return _fuel_plot_groups(df, fuels_override=fuels_override)
+
+
+def _normalize_tol_value(v: object) -> float:
+    x = _to_float(v, 0.0)
+    if not np.isfinite(x):
+        return 0.0
+    return abs(float(x))
+
+
+def _add_y_tolerance_guides(ax: plt.Axes, y_tol_plus: object, y_tol_minus: object) -> int:
+    tp = _normalize_tol_value(y_tol_plus)
+    tm = _normalize_tol_value(y_tol_minus)
+    n = 0
+    if tp > 0:
+        ax.axhline(tp, color="red", linestyle="--", linewidth=1.2, label=f"limite +{tp:g}")
+        n += 1
+    if tm > 0:
+        ax.axhline(-tm, color="red", linestyle="--", linewidth=1.2, label=f"limite -{tm:g}")
+        n += 1
+    return n
+
+
+def _fmt_table_number(v: object) -> str:
+    x = _to_float(v, default=np.nan)
+    if not np.isfinite(x):
+        return ""
+    if abs(x) >= 1000 or (abs(x) > 0 and abs(x) < 0.01):
+        return f"{x:.3e}"
+    return f"{x:.3f}"
+
+
+def _add_xy_value_table(
+    ax: plt.Axes,
+    rows: List[Tuple[str, object, object]],
+    max_rows: int = 12,
+) -> None:
+    if not rows:
+        return
+
+    filtered = [(str(lbl or ""), x, y) for lbl, x, y in rows if np.isfinite(_to_float(x, np.nan)) and np.isfinite(_to_float(y, np.nan))]
+    if not filtered:
+        return
+
+    use_series = any(lbl for lbl, _, _ in filtered)
+    trimmed = filtered[:max_rows]
+    if len(filtered) > max_rows:
+        trimmed.append(("...", "...", "..."))
+
+    if use_series:
+        col_labels = ["Serie", "X", "Y"]
+        cell_text = [[lbl, _fmt_table_number(x), _fmt_table_number(y)] for lbl, x, y in trimmed]
+        bbox = [0.62, 0.02, 0.36, 0.30]
+    else:
+        col_labels = ["X", "Y"]
+        cell_text = [[_fmt_table_number(x), _fmt_table_number(y)] for _, x, y in trimmed]
+        bbox = [0.72, 0.02, 0.26, 0.28]
+
+    table = ax.table(
+        cellText=cell_text,
+        colLabels=col_labels,
+        cellLoc="right",
+        colLoc="right",
+        bbox=bbox,
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(6)
+    for (r, _c), cell in table.get_celld().items():
+        cell.set_alpha(0.85)
+        if r == 0:
+            cell.set_text_props(weight="bold")
+
+
 def plot_all_fuels(
     df: pd.DataFrame,
     y_col: str,
@@ -1900,7 +2374,10 @@ def plot_all_fuels(
     x_col: str = "Load_kW",
     x_label: str = "Power (kW)",
     fuels_override: Optional[List[int]] = None,
+    series_col: Optional[str] = None,
     plot_dir: Optional[Path] = None,
+    y_tol_plus: object = 0.0,
+    y_tol_minus: object = 0.0,
 ) -> None:
     target_dir = PLOTS_DIR if plot_dir is None else plot_dir
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -1908,8 +2385,10 @@ def plot_all_fuels(
     plt.figure()
     any_curve = False
     legend_entries = 0
+    table_rows: List[Tuple[str, object, object]] = []
+    table_rows: List[Tuple[str, object, object]] = []
 
-    for label, d in _fuel_plot_groups(df, fuels_override=fuels_override):
+    for label, d in _series_fuel_plot_groups(df, fuels_override=fuels_override, series_col=series_col):
         d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
         d[y_col] = pd.to_numeric(d[y_col], errors="coerce")
         if yerr_col:
@@ -1920,6 +2399,9 @@ def plot_all_fuels(
 
         if d.empty:
             continue
+
+        for xi, yi in zip(d[x_col].tolist(), d[y_col].tolist()):
+            table_rows.append((label or "", xi, yi))
 
         any_curve = True
         if yerr_col:
@@ -1958,11 +2440,15 @@ def plot_all_fuels(
         except Exception:
             pass
 
+    ax = plt.gca()
+    guide_entries = _add_y_tolerance_guides(ax, y_tol_plus=y_tol_plus, y_tol_minus=y_tol_minus)
+
     plt.xlabel(x_label)
     plt.ylabel(y_label)
     plt.title(title)
     plt.grid(True, which="both", linestyle="--", linewidth=0.5)
-    if legend_entries > 0:
+    _add_xy_value_table(ax, table_rows)
+    if legend_entries > 0 or guide_entries > 0:
         plt.legend()
     outpath = target_dir / filename
     plt.tight_layout()
@@ -1983,7 +2469,10 @@ def plot_all_fuels_xy(
     fixed_y: Optional[Tuple[float, float, float]] = None,
     fixed_x: Optional[Tuple[float, float, float]] = None,
     fuels_override: Optional[List[int]] = None,
+    series_col: Optional[str] = None,
     plot_dir: Optional[Path] = None,
+    y_tol_plus: object = 0.0,
+    y_tol_minus: object = 0.0,
 ) -> None:
     target_dir = PLOTS_DIR if plot_dir is None else plot_dir
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -1992,7 +2481,7 @@ def plot_all_fuels_xy(
     any_curve = False
     legend_entries = 0
 
-    for label, d in _fuel_plot_groups(df, fuels_override=fuels_override):
+    for label, d in _series_fuel_plot_groups(df, fuels_override=fuels_override, series_col=series_col):
         d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
         d[y_col] = pd.to_numeric(d[y_col], errors="coerce")
         if yerr_col:
@@ -2003,6 +2492,9 @@ def plot_all_fuels_xy(
 
         if d.empty:
             continue
+
+        for xi, yi in zip(d[x_col].tolist(), d[y_col].tolist()):
+            table_rows.append((label or "", xi, yi))
 
         any_curve = True
         if yerr_col:
@@ -2041,11 +2533,15 @@ def plot_all_fuels_xy(
         except Exception:
             pass
 
+    ax = plt.gca()
+    guide_entries = _add_y_tolerance_guides(ax, y_tol_plus=y_tol_plus, y_tol_minus=y_tol_minus)
+
     plt.xlabel(x_label)
     plt.ylabel(y_label)
     plt.title(title)
     plt.grid(True, which="both", linestyle="--", linewidth=0.5)
-    if legend_entries > 0:
+    _add_xy_value_table(ax, table_rows)
+    if legend_entries > 0 or guide_entries > 0:
         plt.legend()
     outpath = target_dir / filename
     plt.tight_layout()
@@ -2088,7 +2584,10 @@ def plot_all_fuels_with_value_labels(
     x_col: str = "Load_kW",
     x_label: str = "Power (kW)",
     fuels_override: Optional[List[int]] = None,
+    series_col: Optional[str] = None,
     plot_dir: Optional[Path] = None,
+    y_tol_plus: object = 0.0,
+    y_tol_minus: object = 0.0,
 ) -> None:
     target_dir = PLOTS_DIR if plot_dir is None else plot_dir
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -2096,14 +2595,18 @@ def plot_all_fuels_with_value_labels(
     fig, ax = plt.subplots()
     any_curve = False
     legend_entries = 0
+    table_rows: List[Tuple[str, object, object]] = []
 
-    for label, d in _fuel_plot_groups(df, fuels_override=fuels_override):
+    for label, d in _series_fuel_plot_groups(df, fuels_override=fuels_override, series_col=series_col):
         d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
         d[y_col] = pd.to_numeric(d[y_col], errors="coerce")
         d = d.dropna(subset=[x_col, y_col]).sort_values(x_col)
 
         if d.empty:
             continue
+
+        for xi, yi in zip(d[x_col].tolist(), d[y_col].tolist()):
+            table_rows.append((label or "", xi, yi))
 
         any_curve = True
         if label:
@@ -2139,11 +2642,14 @@ def plot_all_fuels_with_value_labels(
         except Exception:
             pass
 
+    guide_entries = _add_y_tolerance_guides(ax, y_tol_plus=y_tol_plus, y_tol_minus=y_tol_minus)
+
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.set_title(title)
     ax.grid(True, which="both", linestyle="--", linewidth=0.5)
-    if legend_entries > 0:
+    _add_xy_value_table(ax, table_rows)
+    if legend_entries > 0 or guide_entries > 0:
         ax.legend()
 
     outpath = target_dir / filename
@@ -2173,6 +2679,11 @@ def _row_enabled(v: object) -> bool:
         return False
 
 
+def _yerr_disabled_token(s: str) -> bool:
+    t = str(s or "").strip().lower()
+    return t in {"none", "off", "disable", "disabled", "0", "na", "n/a"}
+
+
 def _derive_filename_for_expansion(template: str, y_col: str) -> str:
     t = (template or "").strip()
     if not t:
@@ -2199,6 +2710,7 @@ def make_plots_from_config(
     plots_df: pd.DataFrame,
     mappings: dict,
     plot_dir: Optional[Path] = None,
+    series_col: Optional[str] = None,
 ) -> None:
     """
     Config-driven plotting (rev3):
@@ -2242,6 +2754,8 @@ def make_plots_from_config(
 
         fixed_x = _parse_axis_spec(r.get("x_min", pd.NA), r.get("x_max", pd.NA), r.get("x_step", pd.NA))
         fixed_y = _parse_axis_spec(r.get("y_min", pd.NA), r.get("y_max", pd.NA), r.get("y_step", pd.NA))
+        y_tol_plus = _to_float(r.get("y_tol_plus", r.get("tol_plus", 0.0)), 0.0)
+        y_tol_minus = _to_float(r.get("y_tol_minus", r.get("tol_minus", 0.0)), 0.0)
 
         fuels = _parse_csv_list_ints(r.get("filter_h2o_list", pd.NA))
         fuels_override = fuels if fuels is not None else None
@@ -2288,7 +2802,10 @@ def make_plots_from_config(
                     x_col=x_col,
                     x_label=xlab,
                     fuels_override=fuels_override,
+                    series_col=series_col,
                     plot_dir=plot_dir,
+                    y_tol_plus=y_tol_plus,
+                    y_tol_minus=y_tol_minus,
                 )
                 n_ok += 1
             continue
@@ -2318,11 +2835,14 @@ def make_plots_from_config(
 
             yerr_col: Optional[str] = None
             if yerr_req:
-                try:
-                    yerr_col = resolve_col(out_df, yerr_req)
-                except Exception:
+                if _yerr_disabled_token(yerr_req):
                     yerr_col = None
-                    print(f"[INFO] Plot '{filename or title}': yerr_col '{yerr_req}' não encontrado. Vou plotar sem erro.")
+                else:
+                    try:
+                        yerr_col = resolve_col(out_df, yerr_req)
+                    except Exception:
+                        yerr_col = None
+                        print(f"[INFO] Plot \'{filename or title}\': yerr_col \'{yerr_req}\' n?o encontrado. Vou plotar sem erro.")
             else:
                 yerr_col = _guess_plot_uncertainty_col(out_df, y_col, mappings)
                 if yerr_col:
@@ -2349,7 +2869,10 @@ def make_plots_from_config(
                 x_col=x_col,
                 x_label=x_label,
                 fuels_override=fuels_override,
+                series_col=series_col,
                 plot_dir=plot_dir,
+                y_tol_plus=y_tol_plus,
+                y_tol_minus=y_tol_minus,
             )
             n_ok += 1
             continue
@@ -2380,11 +2903,14 @@ def make_plots_from_config(
 
             yerr_col = None
             if yerr_req:
-                try:
-                    yerr_col = resolve_col(out_df, yerr_req)
-                except Exception:
+                if _yerr_disabled_token(yerr_req):
                     yerr_col = None
-                    print(f"[INFO] Plot '{filename or title}': yerr_col '{yerr_req}' não encontrado. Vou plotar sem erro.")
+                else:
+                    try:
+                        yerr_col = resolve_col(out_df, yerr_req)
+                    except Exception:
+                        yerr_col = None
+                        print(f"[INFO] Plot \'{filename or title}\': yerr_col \'{yerr_req}\' n?o encontrado. Vou plotar sem erro.")
             else:
                 yerr_col = _guess_plot_uncertainty_col(out_df, y_col, mappings)
                 if yerr_col:
@@ -2411,7 +2937,10 @@ def make_plots_from_config(
                 fixed_y=fixed_y,
                 fixed_x=fixed_x,
                 fuels_override=fuels_override,
+                series_col=series_col,
                 plot_dir=plot_dir,
+                y_tol_plus=y_tol_plus,
+                y_tol_minus=y_tol_minus,
             )
             n_ok += 1
             continue
@@ -2457,7 +2986,10 @@ def make_plots_from_config(
                 x_col=x_col,
                 x_label=x_label,
                 fuels_override=fuels_override,
+                series_col=series_col,
                 plot_dir=plot_dir,
+                y_tol_plus=y_tol_plus,
+                y_tol_minus=y_tol_minus,
             )
             n_ok += 1
             continue
@@ -2472,6 +3004,8 @@ def make_plots_from_config(
 # Main
 # =========================
 def main() -> None:
+    print(f"[INFO] Base do script: {BASE_DIR}")
+    print(f"[INFO] Entrada LabVIEW/Kibox: {PROCESS_DIR}")
     clear_output_dir(OUT_DIR)
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -2528,26 +3062,70 @@ def main() -> None:
     lv_raw = pd.concat(lv_all, ignore_index=True)
     lv_time_diag = build_time_diagnostics(lv_raw, quality_cfg=data_quality_cfg)
     if not lv_time_diag.empty:
+        time_diag_out = lv_time_diag.copy()
+        time_diag_out["Iteracao"] = pd.to_numeric(time_diag_out.get("Iteracao", pd.NA), errors="coerce").astype("Int64")
+        time_diag_out["_SENTIDO_rank"] = time_diag_out.get("Sentido_Carga", pd.Series([pd.NA] * len(time_diag_out))).map(_sentido_carga_rank).fillna(9)
+
+        diag_first_cols = [c for c in ["Iteracao", "Sentido_Carga", "Load_kW"] if c in time_diag_out.columns]
+        if diag_first_cols:
+            diag_rest = [c for c in time_diag_out.columns if c not in diag_first_cols]
+            time_diag_out = time_diag_out[diag_first_cols + diag_rest].copy()
+
         time_diag_xlsx = safe_to_excel(
-            lv_time_diag.sort_values(["BaseName", "Index"]).copy(),
+            time_diag_out.sort_values(
+                ["Iteracao", "_SENTIDO_rank", "Load_kW", "BaseName", "Index"],
+                ascending=[True, True, True, True, True],
+                na_position="last",
+            ).drop(columns=["_SENTIDO_rank"]).copy(),
             OUT_DIR / "lv_time_diagnostics.xlsx",
         )
         print(f"[OK] Diagnóstico de qualidade por amostra gerado: {time_diag_xlsx}")
 
         lv_time_summary = summarize_time_diagnostics(lv_time_diag)
         if not lv_time_summary.empty:
-            summary_out = lv_time_summary.copy()
+            summary_out = add_run_context_columns(lv_time_summary.copy())
+            summary_out["Iteracao"] = pd.to_numeric(summary_out.get("Iteracao", pd.NA), errors="coerce").astype("Int64")
             status_rank = {"ERRO": 0, "OK": 1, "NA": 2}
             summary_out["_DQ_rank"] = summary_out["DQ_ERROR"].map(status_rank).fillna(9)
             summary_out["_SMP_rank"] = summary_out["Smp_ERROR"].map(status_rank).fillna(9)
             summary_out["_ACT_rank"] = summary_out["ACT_CTRL_ERRO"].map(status_rank).fillna(9)
             summary_out["_ACT_TRANS_rank"] = summary_out["ACT_CTRL_ERRO_TRANSIENTE"].map(status_rank).fillna(9)
+            summary_out["_ECT_rank"] = summary_out.get("ECT_CTRL_ERRO", pd.Series([pd.NA] * len(summary_out))).map(status_rank).fillna(9)
+            summary_out["_ECT_TRANS_rank"] = summary_out.get("ECT_CTRL_ERRO_TRANSIENTE", pd.Series([pd.NA] * len(summary_out))).map(status_rank).fillna(9)
+            summary_out["_SENTIDO_rank"] = summary_out.get("Sentido_Carga", pd.Series([pd.NA] * len(summary_out))).map(_sentido_carga_rank).fillna(9)
+
+            sum_first_cols = [c for c in ["Iteracao", "Sentido_Carga", "Load_kW"] if c in summary_out.columns]
+            if sum_first_cols:
+                sum_rest = [c for c in summary_out.columns if c not in sum_first_cols]
+                summary_out = summary_out[sum_first_cols + sum_rest].copy()
             time_summary_xlsx = safe_to_excel(
                 summary_out.sort_values(
-                    ["_DQ_rank", "_SMP_rank", "_ACT_rank", "_ACT_TRANS_rank", "SourceFolder", "Load_kW", "BaseName"],
-                    ascending=[True, True, True, True, True, True, True],
+                    [
+                        "Iteracao",
+                        "_SENTIDO_rank",
+                        "Load_kW",
+                        "_DQ_rank",
+                        "_SMP_rank",
+                        "_ACT_rank",
+                        "_ACT_TRANS_rank",
+                        "_ECT_rank",
+                        "_ECT_TRANS_rank",
+                        "SourceFolder",
+                        "BaseName",
+                    ],
+                    ascending=[True, True, True, True, True, True, True, True, True, True, True],
                     na_position="last",
-                ).drop(columns=["_DQ_rank", "_SMP_rank", "_ACT_rank", "_ACT_TRANS_rank"]).copy(),
+                ).drop(
+                    columns=[
+                        "_DQ_rank",
+                        "_SMP_rank",
+                        "_ACT_rank",
+                        "_ACT_TRANS_rank",
+                        "_ECT_rank",
+                        "_ECT_TRANS_rank",
+                        "_SENTIDO_rank",
+                    ]
+                ).copy(),
                 OUT_DIR / "lv_diagnostics_summay.xlsx",
             )
             print(f"[OK] Resumo geral de qualidade gerado: {time_summary_xlsx}")
@@ -2579,6 +3157,26 @@ def main() -> None:
         source_label = source_folder if source_folder else "(raiz PROCESSAR)"
         print(f"[INFO] Gerando plots finais em {plot_dir} para {source_label}.")
         make_plots_from_config(out_group, plots_df, mappings=mappings, plot_dir=plot_dir)
+
+    compare_groups = iter_compare_plot_groups(out, root=PLOTS_DIR)
+    if compare_groups:
+        for compare_key, plot_dir, cmp_group in compare_groups:
+            series_vals = sorted(
+                str(v).strip()
+                for v in cmp_group.get("_COMPARE_SERIES", pd.Series([], dtype="object")).dropna().unique().tolist()
+                if str(v).strip()
+            )
+            series_txt = ", ".join(series_vals) if series_vals else "origens desconhecidas"
+            print(f"[INFO] Gerando plots de comparacao em {plot_dir} para '{compare_key}' ({series_txt}).")
+            make_plots_from_config(
+                cmp_group,
+                plots_df,
+                mappings=mappings,
+                plot_dir=plot_dir,
+                series_col="_COMPARE_SERIES",
+            )
+    else:
+        print("[INFO] Nenhum par subida/descida detectado para gerar plots em compare/.")
 
     if kibox_files:
         print("[INFO] Kibox csv em raw/ detectado. (Histogramas KPEAK continuam fora do workflow por enquanto.)")
