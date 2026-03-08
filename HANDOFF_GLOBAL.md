@@ -448,3 +448,37 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
 - A escala do Y continua em `autoscale`; apenas o espacamento dos ticks foi forzado para `1 deg`.
 - Para suportar isso sem travar `y_min/y_max`, `make_plots_from_config()` passou a aceitar `y_step` isolado como configuracao de ticks quando `fixed_y` nao esta definido.
 - A aba `Plots` da `config_incertezas_rev3.xlsx` foi atualizada com `y_step = 1` para esse plot.
+
+## Utilitario standalone para PCYL_1 e Q_1 por crank angle - 2026-03-08
+- Criado o script separado `standalone_kibox_cycle_plots.py`, sem integracao no `pipeline28`.
+- O utilitario le um unico CSV do KIBOX no formato convertido por aba, usando:
+  - separador `tab`;
+  - decimal com virgula;
+  - segunda linha de unidades ignorada.
+- `Cycle number` e preenchido com `ffill`, porque o arquivo so marca explicitamente a troca de ciclo no primeiro ponto de cada novo ciclo.
+- O processamento faz duas etapas:
+  - media por `CycleNumber + CrankAngle_deg` para consolidar pontos repetidos dentro do mesmo ciclo;
+  - media final por `CrankAngle_deg` entre todos os ciclos.
+- Saidas default:
+  - input: `TESTE_50KW_E100-2026-01-17--17-12-46-081.csv`;
+  - output: `F:\temporario`.
+- O script gera:
+  - `*_pcyl_mean_vs_crank_angle.png` com janela `-40 a 80 deg CA`;
+  - `*_q1_mean_vs_crank_angle.png` com janela `-30 a 90 deg CA`;
+  - `*_mean_curves.csv` com curvas medias e contagem de ciclos por angulo.
+
+## Ajuste do utilitario standalone para medias por bloco de 30 ciclos - 2026-03-08
+- O utilitario `standalone_kibox_cycle_plots.py` deixou de fazer uma unica media global entre todos os ciclos.
+- Agora ele organiza os dados em blocos de ciclos, com default `30 ciclos por bloco`.
+- Para cada bloco:
+  - faz a media de `PCYL_1` por `CycleNumber + CrankAngle_deg`;
+  - faz a media final por `CrankAngle_deg` dentro daquele bloco.
+- Os plots passam a mostrar uma curva por bloco, com legenda no formato `Cycles 1-30`, `Cycles 31-60`, etc.
+- O CSV de saida foi trocado para `*_cycle_block_mean_curves.csv`, contendo:
+  - `CycleBlockIndex`;
+  - `CycleBlockStart`;
+  - `CycleBlockEnd`;
+  - `CycleBlockLabel`;
+  - `CrankAngle_deg`;
+  - medias/desvios por bloco para `PCYL_1` e `Q_1`.
+- O tamanho do bloco pode ser alterado via `--cycle-block-size`, mas o default usado no pedido foi mantido em `30`.
