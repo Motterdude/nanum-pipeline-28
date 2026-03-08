@@ -176,6 +176,24 @@ Arquivos de referencia:
 - a linha correspondente na aba `Plots` foi confirmada apos a edicao;
 - as colunas `Motec_Exhaust Lambda_mean_of_windows` e `Motec_Exhaust Lambda_sd_of_windows` existem no output real do mestrado.
 
+## Plot MOTEC de fuel closed loop trim - 2026-03-08
+- Plot adicionado exclusivamente via aba `Plots` em `config/config_incertezas_rev3.xlsx`.
+- Arquivo:
+- `motec_fuel_closed_loop_trim_vs_power_all.png`
+- Configuracao:
+- `plot_type = all_fuels_yx`
+- `x_col = Load_kW`
+- `y_col = Motec_Fuel Closed Loop Control Bank 1 Trim_mean_of_windows`
+- `yerr_col = Motec_Fuel Closed Loop Control Bank 1 Trim_sd_of_windows`
+- eixo Y em autoscale
+- label Y: `Fuel closed loop trim bank 1 (%Trim)`
+- Criterio de incerteza:
+- a barra de erro usa somente o desvio padrao entre trechos, sem incerteza de equipamento.
+- Validacao:
+- a nova linha foi confirmada na aba `Plots`;
+- as colunas `Motec_Fuel Closed Loop Control Bank 1 Trim_mean_of_windows` e `Motec_Fuel Closed Loop Control Bank 1 Trim_sd_of_windows` existem no `lv_kpis_clean.xlsx` real do mestrado;
+- nenhuma pasta temporaria de debug foi criada nesta alteracao.
+
 ## Objetivo deste arquivo
 Registrar, para continuidade no Codex, o que ja existia no `pipeline27`, o que foi adicionado no `pipeline28`, e as regras de trabalho herdadas do historico no GPT online.
 
