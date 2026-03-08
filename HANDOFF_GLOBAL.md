@@ -56,6 +56,16 @@ Arquivos de referencia:
 - Os dois parametros aceitam caminho absoluto ou relativo ao diretorio do script.
 - O pipeline agora imprime no inicio os caminhos efetivos de `Config`, `Entrada LabVIEW/Kibox` e `Saida`.
 
+## Validacao mestrado - 2026-03-08
+- Execucao testada com `RAW_INPUT_DIR = D:\Drive\Faculdade\PUC\Mestrado\Dados_Ensaios\Processamento_Pyton\raw`
+- Estrutura observada no mestrado: arquivos `.xlsx` e `_i.csv` diretamente na pasta principal, sem subpastas.
+- Resultado do parsing:
+- nomes `E65H35`, `E75H25` e `E94H6` foram interpretados corretamente como `EtOH_pct/H2O_pct`;
+- `DIES_pct` e `BIOD_pct` permaneceram vazios, como esperado para o conjunto etanol/agua;
+- `Iteracao`, `Sentido_Carga` e `SourceFolder` ficam vazios quando nao ha subpastas de contexto.
+- A execucao gerou `lv_time_diagnostics.xlsx`, `lv_diagnostics_summay.xlsx` e `lv_kpis_clean.xlsx`, mas falhou no fim da etapa de plots por um bug de codigo: `NameError: table_rows is not defined` em `plot_all_fuels_xy`.
+- Correcao aplicada em 2026-03-08: inicializacao de `table_rows` em `plot_all_fuels_xy` para permitir concluir os plots finais em datasets sem subpastas.
+
 ## Objetivo deste arquivo
 Registrar, para continuidade no Codex, o que ja existia no `pipeline27`, o que foi adicionado no `pipeline28`, e as regras de trabalho herdadas do historico no GPT online.
 

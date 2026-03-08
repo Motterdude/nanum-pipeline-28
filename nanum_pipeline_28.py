@@ -2531,6 +2531,7 @@ def plot_all_fuels_xy(
     plt.figure()
     any_curve = False
     legend_entries = 0
+    table_rows: List[Tuple[str, object, object]] = []
 
     for label, d in _series_fuel_plot_groups(df, fuels_override=fuels_override, series_col=series_col):
         d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
