@@ -482,3 +482,12 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - `CrankAngle_deg`;
   - medias/desvios por bloco para `PCYL_1` e `Q_1`.
 - O tamanho do bloco pode ser alterado via `--cycle-block-size`, mas o default usado no pedido foi mantido em `30`.
+
+## Otimizacao do standalone para evitar travamento em drop_duplicates - 2026-03-08
+- A primeira versao por blocos ainda fazia `drop_duplicates()` em milhoes de linhas para reconstruir o mapa `CycleNumber -> bloco`.
+- Isso travava ao rodar o script diretamente no arquivo de `50 kW`.
+- A solucao foi mover o calculo de bloco para depois da media por `CycleNumber + CrankAngle_deg`.
+- Com isso:
+  - o bloco passa a ser calculado em cima da tabela `per_cycle`, muito menor;
+  - deixa de existir `drop_duplicates()` na massa bruta;
+  - o run standalone direto volta a terminar em tempo normal.

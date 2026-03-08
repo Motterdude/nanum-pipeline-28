@@ -47,37 +47,34 @@ def load_cycle_dataframe(csv_path: Path) -> pd.DataFrame:
     return df
 
 
-def build_cycle_blocks(df: pd.DataFrame, cycle_block_size: int) -> pd.DataFrame:
+def mean_curve_by_cycle_block(df: pd.DataFrame, value_col: str, cycle_block_size: int) -> pd.DataFrame:
     if cycle_block_size <= 0:
         raise ValueError("cycle_block_size must be > 0")
 
-    out = df.copy()
-    out["CycleBlockIndex"] = ((out["CycleNumber"] - 1) // cycle_block_size) + 1
-    out["CycleBlockStart"] = ((out["CycleBlockIndex"] - 1) * cycle_block_size) + 1
-    out["CycleBlockEnd"] = out["CycleBlockStart"] + cycle_block_size - 1
-    max_cycle = int(out["CycleNumber"].max())
-    out["CycleBlockEnd"] = out["CycleBlockEnd"].clip(upper=max_cycle)
-    out["CycleBlockLabel"] = (
-        out["CycleBlockStart"].astype(str) + "-" + out["CycleBlockEnd"].astype(str)
-    )
-    return out
-
-
-def mean_curve_by_cycle_block(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
     per_cycle = (
         df.dropna(subset=[value_col])
         .groupby(["CycleNumber", "CrankAngle_deg"], as_index=False)[value_col]
         .mean()
     )
-    block_meta = (
-        df[["CycleNumber", "CycleBlockIndex", "CycleBlockStart", "CycleBlockEnd", "CycleBlockLabel"]]
-        .drop_duplicates()
-    )
-    per_cycle = per_cycle.merge(block_meta, on="CycleNumber", how="left")
+    if per_cycle.empty:
+        return pd.DataFrame(
+            columns=[
+                "CycleBlockIndex",
+                "CycleBlockStart",
+                "CycleBlockEnd",
+                "CycleBlockLabel",
+                "CrankAngle_deg",
+                "mean_value",
+                "std_value",
+                "n_cycles",
+            ]
+        )
+
+    per_cycle["CycleBlockIndex"] = ((per_cycle["CycleNumber"] - 1) // cycle_block_size) + 1
 
     curve = (
         per_cycle.groupby(
-            ["CycleBlockIndex", "CycleBlockStart", "CycleBlockEnd", "CycleBlockLabel", "CrankAngle_deg"],
+            ["CycleBlockIndex", "CrankAngle_deg"],
             as_index=False,
         )
         .agg(
@@ -85,8 +82,23 @@ def mean_curve_by_cycle_block(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
             std_value=(value_col, "std"),
             n_cycles=("CycleNumber", "nunique"),
         )
-        .sort_values(["CycleBlockIndex", "CrankAngle_deg"])
     )
+    max_cycle = int(per_cycle["CycleNumber"].max())
+    curve["CycleBlockStart"] = ((curve["CycleBlockIndex"] - 1) * cycle_block_size) + 1
+    curve["CycleBlockEnd"] = (curve["CycleBlockStart"] + cycle_block_size - 1).clip(upper=max_cycle)
+    curve["CycleBlockLabel"] = curve["CycleBlockStart"].astype(str) + "-" + curve["CycleBlockEnd"].astype(str)
+    curve = curve[
+        [
+            "CycleBlockIndex",
+            "CycleBlockStart",
+            "CycleBlockEnd",
+            "CycleBlockLabel",
+            "CrankAngle_deg",
+            "mean_value",
+            "std_value",
+            "n_cycles",
+        ]
+    ].sort_values(["CycleBlockIndex", "CrankAngle_deg"])
     return curve
 
 
@@ -128,12 +140,11 @@ def main() -> None:
         raise SystemExit(f"Input file not found: {csv_path}")
 
     df = load_cycle_dataframe(csv_path)
-    df = build_cycle_blocks(df, args.cycle_block_size)
     cycle_count = int(df["CycleNumber"].nunique())
-    block_count = int(df["CycleBlockIndex"].nunique())
+    block_count = ((cycle_count - 1) // args.cycle_block_size) + 1
 
-    pcyl_curve = mean_curve_by_cycle_block(df, "PCYL_1")
-    q1_curve = mean_curve_by_cycle_block(df, "Q_1")
+    pcyl_curve = mean_curve_by_cycle_block(df, "PCYL_1", args.cycle_block_size)
+    q1_curve = mean_curve_by_cycle_block(df, "Q_1", args.cycle_block_size)
 
     pcyl_plot = output_dir / f"{csv_path.stem}_pcyl_mean_vs_crank_angle.png"
     q1_plot = output_dir / f"{csv_path.stem}_q1_mean_vs_crank_angle.png"
