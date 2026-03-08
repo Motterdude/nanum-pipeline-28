@@ -21,7 +21,6 @@ Arquivos de referencia:
 ### O que foi importado nesta rodada
 - `nanum_pipeline_28.py` atualizado a partir da copia do notebook.
 - `config/config_incertezas_rev3.xlsx` atualizado.
-- `config/config_incertezas_rev2_renamed.xlsx` atualizado.
 - Este handoff foi renomeado para `HANDOFF_GLOBAL.md` e promovido a documento mestre do projeto.
 - Dados de `raw/PROCESSAR/descendo_aditivado_1` foram alinhados com a copia do notebook para consolidar a nova rodada de ensaio.
 
@@ -41,10 +40,9 @@ Arquivos de referencia:
 
 ### Status correto dos arquivos de configuracao
 - `config/config_incertezas_rev3.xlsx` e a configuracao ativa e autoritativa do `pipeline28`.
-- O codigo escolhe a primeira planilha existente nesta ordem: `rev3`, `rev3_renamed`, `rev2_renamed`, `rev2`, `config_incertezas.xlsx`.
-- Portanto, enquanto `rev3` existir, `rev2_renamed` nao participa da execucao normal.
-- `config/config_incertezas_rev2_renamed.xlsx` existe apenas como fallback legado e compatibilidade retroativa.
-- A importacao de `rev2_renamed` na rodada de 2026-03-08 foi conservadora, para manter esse fallback alinhado com a copia do notebook, mas nao era necessaria para a execucao principal baseada em `rev3`.
+- A partir desta limpeza, o codigo carrega somente `config/config_incertezas_rev3.xlsx`.
+- Para reduzir ambiguidade operacional, `config/config_incertezas_rev2_renamed.xlsx` foi removido do repositorio em 2026-03-08.
+- A pasta `config` fica intencionalmente reduzida ao minimo operacional: `config_incertezas_rev3.xlsx`, `lhv.csv` e `rules_consumo.csv`.
 
 ## Objetivo deste arquivo
 Registrar, para continuidade no Codex, o que ja existia no `pipeline27`, o que foi adicionado no `pipeline28`, e as regras de trabalho herdadas do historico no GPT online.

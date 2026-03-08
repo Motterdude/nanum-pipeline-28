@@ -40,7 +40,7 @@ DEFAULT_MAX_ACT_CONTROL_ERROR_C = 5.0
 DEFAULT_MAX_ECT_CONTROL_ERROR_C = 2.0
 K_COVERAGE = 2.0
 
-FUEL_H2O_LEVELS = [6, 25, 35]  # “combustíveis” por hidratação
+FUEL_H2O_LEVELS = [6, 25, 35]  # â€œcombustÃ­veisâ€ por hidrataÃ§Ã£o
 COMPOSITION_COLS = ["DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct"]
 
 # =========================
@@ -133,7 +133,7 @@ def _normalize_repeated_stat_tokens_in_name(x: object) -> str:
 def resolve_col(df: pd.DataFrame, requested: str) -> str:
     requested = str(requested).replace("\ufeff", "").strip()
     if not requested:
-        raise KeyError("Nome de coluna solicitado está vazio (verifique Mappings no config).")
+        raise KeyError("Nome de coluna solicitado estÃ¡ vazio (verifique Mappings no config).")
 
     if requested in df.columns:
         return requested
@@ -171,8 +171,8 @@ def resolve_col(df: pd.DataFrame, requested: str) -> str:
         return stats_norm_canon_map[req_stats_canon]
 
     suggestion = difflib.get_close_matches(requested, list(df.columns), n=6)
-    sug_txt = f" Sugestões: {suggestion}" if suggestion else ""
-    raise KeyError(f"Coluna '{requested}' não encontrada no dataframe.{sug_txt}")
+    sug_txt = f" SugestÃµes: {suggestion}" if suggestion else ""
+    raise KeyError(f"Coluna '{requested}' nÃ£o encontrada no dataframe.{sug_txt}")
 
 
 def safe_to_excel(df: pd.DataFrame, path: Path) -> Path:
@@ -200,8 +200,8 @@ def clear_output_dir(path: Path) -> None:
             child.unlink()
         except PermissionError as e:
             raise SystemExit(
-                f"Não consegui limpar o output porque '{child}' está em uso. "
-                "Feche o arquivo ou o programa que o está usando e rode novamente."
+                f"NÃ£o consegui limpar o output porque '{child}' estÃ¡ em uso. "
+                "Feche o arquivo ou o programa que o estÃ¡ usando e rode novamente."
             ) from e
 
 
@@ -587,7 +587,7 @@ def add_airflow_channels_inplace(df: pd.DataFrame, lambda_col: str | None = None
         fuel_col = candidates[0] if candidates else None
 
     if fuel_col is None:
-        print("[WARN] Airflow: não achei coluna de consumo (kg/h). Pulando canais de ar.")
+        print("[WARN] Airflow: nÃ£o achei coluna de consumo (kg/h). Pulando canais de ar.")
         return out
 
     fuel_mix_kg_h = pd.to_numeric(out[fuel_col], errors="coerce")
@@ -798,7 +798,7 @@ def choose_labview_sheet(path: Path) -> str:
     if len(sheets) == 1:
         return sheets[0]
 
-    raise ValueError(f"Não encontrei aba '{PREFERRED_SHEET_NAME}' e existem múltiplas abas em {path.name}: {sheets}.")
+    raise ValueError(f"NÃ£o encontrei aba '{PREFERRED_SHEET_NAME}' e existem mÃºltiplas abas em {path.name}: {sheets}.")
 
 
 def find_b_etanol_col(df: pd.DataFrame) -> str:
@@ -806,7 +806,7 @@ def find_b_etanol_col(df: pd.DataFrame) -> str:
         if c in df.columns:
             return c
     raise KeyError(
-        f"Não encontrei coluna de balança. Procurei: {B_ETANOL_COL_CANDIDATES}. "
+        f"NÃ£o encontrei coluna de balanÃ§a. Procurei: {B_ETANOL_COL_CANDIDATES}. "
         f"Colunas (primeiras 40): {list(df.columns)[:40]}"
     )
 
@@ -859,7 +859,7 @@ def read_labview_xlsx(meta: FileMeta) -> pd.DataFrame:
             load_series = pd.to_numeric(inferred_load, errors="coerce")
             print(f"[INFO] Load_kW inferido pela coluna de carga para {meta.basename} ({meta.load_parse}).")
         elif meta.load_kw is None:
-            print(f"[WARN] Load_kW não identificado para {meta.basename}; a coluna ficará vazia no output.")
+            print(f"[WARN] Load_kW nÃ£o identificado para {meta.basename}; a coluna ficarÃ¡ vazia no output.")
     elif inferred_single is not None and abs(inferred_single - float(meta.load_kw)) > 0.75:
         load_series = pd.Series(inferred_single, index=df.index, dtype="float64")
         print(
@@ -982,14 +982,14 @@ def build_time_diagnostics(
         out["ACT_CTRL_ERROR_FLAG"] = act_err.abs() > max_act_error_c
 
     t_s_agua_col = None
-    for cand in ["T_S_AGUA", "T_S_ÁGUA", "T_S AGUA", "T_S ÁGUA"]:
+    for cand in ["T_S_AGUA", "T_S_ÃGUA", "T_S AGUA", "T_S ÃGUA"]:
         if cand in lv_raw.columns:
             t_s_agua_col = cand
             break
     if t_s_agua_col is None:
         t_s_agua_col = _find_first_col_by_substrings(lv_raw, ["t_s", "agua"])
     if t_s_agua_col is None:
-        t_s_agua_col = _find_first_col_by_substrings(lv_raw, ["t_s", "água"])
+        t_s_agua_col = _find_first_col_by_substrings(lv_raw, ["t_s", "Ã¡gua"])
 
     dem_th2o_col = None
     for cand in ["DEM_TH2O", "DEM TH2O"]:
@@ -1197,7 +1197,7 @@ def plot_time_delta_all_samples(
     y = pd.to_numeric(d["TIME_DELTA_TO_NEXT_s"], errors="coerce")
     valid = x.notna() & y.notna()
     if valid.sum() == 0:
-        print("[WARN] Sem delta T válido para plotar.")
+        print("[WARN] Sem delta T vÃ¡lido para plotar.")
         return
 
     fig, ax = plt.subplots(figsize=(14, 5))
@@ -1411,7 +1411,7 @@ def kibox_aggregate(kibox_files: List[FileMeta]) -> pd.DataFrame:
     rows: List[pd.DataFrame] = []
     for m in kibox_files:
         if m.load_kw is None or m.etoh_pct is None or m.h2o_pct is None:
-            print(f"[WARN] Kibox sem KW/E/H no nome (não vou agregar): {m.path.name}")
+            print(f"[WARN] Kibox sem KW/E/H no nome (nÃ£o vou agregar): {m.path.name}")
             continue
         try:
             rows.append(kibox_mean_row(m))
@@ -1431,20 +1431,13 @@ def kibox_aggregate(kibox_files: List[FileMeta]) -> pd.DataFrame:
 
 
 # =========================
-# Config / LHV / Instruments rev2 + Plots (rev3-ready)
+# Config / LHV / Instruments rev3
 # =========================
 def _choose_config_path() -> Path:
-    candidates = [
-        CFG_DIR / "config_incertezas_rev3.xlsx",
-        CFG_DIR / "config_incertezas_rev3_renamed.xlsx",
-        CFG_DIR / "config_incertezas_rev2_renamed.xlsx",
-        CFG_DIR / "config_incertezas_rev2.xlsx",
-        CFG_DIR / "config_incertezas.xlsx",
-    ]
-    for p in candidates:
-        if p.exists():
-            return p
-    raise FileNotFoundError(f"Não encontrei nenhum config_incertezas*.xlsx em {CFG_DIR.resolve()}")
+    p = CFG_DIR / "config_incertezas_rev3.xlsx"
+    if p.exists():
+        return p
+    raise FileNotFoundError(f"Nao encontrei {p.name} em {CFG_DIR.resolve()}")
 
 
 def _try_read_sheet(xlsx_path: Path, sheet: str) -> Optional[pd.DataFrame]:
@@ -1654,7 +1647,7 @@ def load_config_excel() -> Tuple[dict, pd.DataFrame, pd.DataFrame, pd.DataFrame,
 def load_lhv_lookup() -> pd.DataFrame:
     p = CFG_DIR / "lhv.csv"
     if not p.exists():
-        raise FileNotFoundError(f"Não encontrei {p}.")
+        raise FileNotFoundError(f"NÃ£o encontrei {p}.")
 
     df = pd.read_csv(p, sep=None, engine="python", encoding="utf-8-sig")
     df.columns = _normalize_cols(list(df.columns))
@@ -1801,7 +1794,7 @@ def compute_trechos_stats(lv_raw: pd.DataFrame, instruments_df: pd.DataFrame) ->
         res_kg = _get_resolution_for_key(instruments_df, bal_key)
         if res_kg is None or not np.isfinite(res_kg) or res_kg <= 0:
             out["uB_Consumo_kg_h"] = pd.NA
-            print("[WARN] balance_kg existe em Instruments, mas 'resolution' está vazio/ inválido. uB_Consumo_kg_h ficou NA.")
+            print("[WARN] balance_kg existe em Instruments, mas 'resolution' estÃ¡ vazio/ invÃ¡lido. uB_Consumo_kg_h ficou NA.")
         else:
             u_read = res_to_std(res_kg)  # kg
             u_delta = sqrt(2) * u_read   # kg
@@ -1885,7 +1878,7 @@ def add_uncertainties_from_mappings(
         try:
             col_mean = resolve_col(out, col_mean_req)
         except Exception as e:
-            print(f"[WARN] Uncertainty: key='{key_norm}' col_mean '{col_mean_req}' não encontrada no output. Pulando. ({e})")
+            print(f"[WARN] Uncertainty: key='{key_norm}' col_mean '{col_mean_req}' nÃ£o encontrada no output. Pulando. ({e})")
             continue
 
         col_sd_req = str(spec.get("sd", "")).strip()
@@ -2056,7 +2049,7 @@ def build_final_table(
     else:
         df["MFB_10_90"] = pd.NA
         if not ai90_col or not ai10_col:
-            print(f"[WARN] Não calculei MFB_10_90: ai90_col={ai90_col}, ai10_col={ai10_col}")
+            print(f"[WARN] NÃ£o calculei MFB_10_90: ai90_col={ai90_col}, ai10_col={ai10_col}")
 
     N = pd.to_numeric(df["N_trechos_validos"], errors="coerce")
 
@@ -2185,7 +2178,7 @@ def build_final_table(
     for cand in [
         "T_S_AGUA_mean_of_windows",
         "T_S_AGUA",
-        "T_S_ÁGUA",
+        "T_S_ÃGUA",
     ]:
         if cand in df.columns:
             t_s_agua_col = cand
@@ -2195,7 +2188,7 @@ def build_final_table(
     if t_s_agua_col is None:
         t_s_agua_col = _find_first_col_by_substrings(df, ["t_s", "agua"])
     if t_s_agua_col is None:
-        t_s_agua_col = _find_first_col_by_substrings(df, ["t_s", "água"])
+        t_s_agua_col = _find_first_col_by_substrings(df, ["t_s", "Ã¡gua"])
 
     dem_th2o_col = None
     for cand in [
@@ -2726,7 +2719,7 @@ def make_plots_from_config(
       - Missing required columns (y_col or x_col when required): ERROR and skip that plot.
     """
     if plots_df is None or plots_df.empty:
-        print("[WARN] Plots config vazio; não gerei plots via planilha.")
+        print("[WARN] Plots config vazio; nÃ£o gerei plots via planilha.")
         return
 
     n_ok = 0
@@ -2741,7 +2734,7 @@ def make_plots_from_config(
         title = _to_str_or_empty(r.get("title", ""))
 
         if not plot_type:
-            print("[ERROR] Plots row inválida: plot_type vazio. Pulei.")
+            print("[ERROR] Plots row invÃ¡lida: plot_type vazio. Pulei.")
             n_skip += 1
             continue
 
@@ -2770,7 +2763,7 @@ def make_plots_from_config(
         if pt in {"kibox_all", "all_kibox"}:
             kibox_cols = [c for c in out_df.columns if str(c).startswith("KIBOX_") and c != "KIBOX_N_files"]
             if not kibox_cols:
-                print("[WARN] kibox_all: não há colunas KIBOX_* no output. Pulei expansão.")
+                print("[WARN] kibox_all: nÃ£o hÃ¡ colunas KIBOX_* no output. Pulei expansÃ£o.")
                 n_skip += 1
                 continue
 
@@ -2779,7 +2772,7 @@ def make_plots_from_config(
             try:
                 x_col = resolve_col(out_df, x_col_base)
             except Exception as e:
-                print(f"[ERROR] kibox_all: x_col '{x_col_base}' não encontrado. Pulei expansão. ({e})")
+                print(f"[ERROR] kibox_all: x_col '{x_col_base}' nÃ£o encontrado. Pulei expansÃ£o. ({e})")
                 n_skip += 1
                 continue
 
@@ -2818,7 +2811,7 @@ def make_plots_from_config(
             try:
                 x_col = resolve_col(out_df, x_col_base)
             except Exception as e:
-                print(f"[ERROR] Plot '{filename or title}': x_col '{x_col_base}' não encontrado. Pulei. ({e})")
+                print(f"[ERROR] Plot '{filename or title}': x_col '{x_col_base}' nÃ£o encontrado. Pulei. ({e})")
                 n_skip += 1
                 continue
 
@@ -2829,7 +2822,7 @@ def make_plots_from_config(
             try:
                 y_col = resolve_col(out_df, y_col_req)
             except Exception as e:
-                print(f"[ERROR] Plot '{filename or title}': y_col '{y_col_req}' não encontrado. Pulei. ({e})")
+                print(f"[ERROR] Plot '{filename or title}': y_col '{y_col_req}' nÃ£o encontrado. Pulei. ({e})")
                 n_skip += 1
                 continue
 
@@ -2890,14 +2883,14 @@ def make_plots_from_config(
             try:
                 x_col = resolve_col(out_df, x_col_req)
             except Exception as e:
-                print(f"[ERROR] Plot '{filename or title}': x_col '{x_col_req}' não encontrado. Pulei. ({e})")
+                print(f"[ERROR] Plot '{filename or title}': x_col '{x_col_req}' nÃ£o encontrado. Pulei. ({e})")
                 n_skip += 1
                 continue
 
             try:
                 y_col = resolve_col(out_df, y_col_req)
             except Exception as e:
-                print(f"[ERROR] Plot '{filename or title}': y_col '{y_col_req}' não encontrado. Pulei. ({e})")
+                print(f"[ERROR] Plot '{filename or title}': y_col '{y_col_req}' nÃ£o encontrado. Pulei. ({e})")
                 n_skip += 1
                 continue
 
@@ -2950,7 +2943,7 @@ def make_plots_from_config(
             try:
                 x_col = resolve_col(out_df, x_col_base)
             except Exception as e:
-                print(f"[ERROR] Plot '{filename or title}': x_col '{x_col_base}' não encontrado. Pulei. ({e})")
+                print(f"[ERROR] Plot '{filename or title}': x_col '{x_col_base}' nÃ£o encontrado. Pulei. ({e})")
                 n_skip += 1
                 continue
 
@@ -2961,7 +2954,7 @@ def make_plots_from_config(
             try:
                 y_col = resolve_col(out_df, y_col_req)
             except Exception as e:
-                print(f"[ERROR] Plot '{filename or title}': y_col '{y_col_req}' não encontrado. Pulei. ({e})")
+                print(f"[ERROR] Plot '{filename or title}': y_col '{y_col_req}' nÃ£o encontrado. Pulei. ({e})")
                 n_skip += 1
                 continue
 
@@ -2994,7 +2987,7 @@ def make_plots_from_config(
             n_ok += 1
             continue
 
-        print(f"[ERROR] Plot '{filename or title}': plot_type '{plot_type}' não suportado. Pulei.")
+        print(f"[ERROR] Plot '{filename or title}': plot_type '{plot_type}' nÃ£o suportado. Pulei.")
         n_skip += 1
 
     print(f"[OK] Plots-config: {n_ok} gerados; {n_skip} pulados.")
@@ -3016,15 +3009,15 @@ def main() -> None:
     kibox_files = [m for m in metas if m.source_type == "KIBOX" and m.path.suffix.lower() == ".csv"]
 
     if not lv_files:
-        raise SystemExit(f"Não achei .xlsx do LabVIEW em {PROCESS_DIR}.")
+        raise SystemExit(f"NÃ£o achei .xlsx do LabVIEW em {PROCESS_DIR}.")
 
     missing_comp = [m.basename for m in lv_files if m.composition_parse == "missing_filename"]
     if missing_comp:
         preview = ", ".join(missing_comp[:5])
         suffix = " ..." if len(missing_comp) > 5 else ""
         print(
-            f"[INFO] {len(missing_comp)} arquivo(s) sem composição no nome; "
-            f"DIES_pct/BIOD_pct/EtOH_pct/H2O_pct ficarão em branco no output. Exemplos: {preview}{suffix}"
+            f"[INFO] {len(missing_comp)} arquivo(s) sem composiÃ§Ã£o no nome; "
+            f"DIES_pct/BIOD_pct/EtOH_pct/H2O_pct ficarÃ£o em branco no output. Exemplos: {preview}{suffix}"
         )
 
     ambiguous_load = [m.basename for m in lv_files if m.load_parse == "ambiguous_filename"]
@@ -3032,7 +3025,7 @@ def main() -> None:
         preview = ", ".join(ambiguous_load[:5])
         suffix = " ..." if len(ambiguous_load) > 5 else ""
         print(
-            f"[INFO] {len(ambiguous_load)} arquivo(s) com múltiplas cargas no nome; "
+            f"[INFO] {len(ambiguous_load)} arquivo(s) com mÃºltiplas cargas no nome; "
             f"vou inferir Load_kW pela coluna de carga. Exemplos: {preview}{suffix}"
         )
 
@@ -3041,7 +3034,7 @@ def main() -> None:
         preview = ", ".join(missing_load[:5])
         suffix = " ..." if len(missing_load) > 5 else ""
         print(
-            f"[INFO] {len(missing_load)} arquivo(s) sem carga explícita no nome; "
+            f"[INFO] {len(missing_load)} arquivo(s) sem carga explÃ­cita no nome; "
             f"vou tentar inferir Load_kW pela coluna de carga. Exemplos: {preview}{suffix}"
         )
 
@@ -3079,7 +3072,7 @@ def main() -> None:
             ).drop(columns=["_SENTIDO_rank"]).copy(),
             OUT_DIR / "lv_time_diagnostics.xlsx",
         )
-        print(f"[OK] Diagnóstico de qualidade por amostra gerado: {time_diag_xlsx}")
+        print(f"[OK] DiagnÃ³stico de qualidade por amostra gerado: {time_diag_xlsx}")
 
         lv_time_summary = summarize_time_diagnostics(lv_time_diag)
         if not lv_time_summary.empty:
@@ -3136,7 +3129,7 @@ def main() -> None:
             plot_time_delta_all_samples(time_group, plot_dir=plot_dir)
             plot_time_delta_by_file(time_group, plot_dir=plot_dir)
     else:
-        print("[WARN] Coluna TIME não encontrada ou inválida; pulei o diagnóstico de delta T.")
+        print("[WARN] Coluna TIME nÃ£o encontrada ou invÃ¡lida; pulei o diagnÃ³stico de delta T.")
 
     trechos = compute_trechos_stats(lv_raw, instruments_df=instruments_df)
     ponto = compute_ponto_stats(trechos)
