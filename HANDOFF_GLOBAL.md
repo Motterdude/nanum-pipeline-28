@@ -621,3 +621,28 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
 - Efeito:
   - o viewer voltou a abrir o arquivo grande `TESTE_50KW_E100-2026-01-17--17-12-46-081.csv` com estabilidade;
   - isso tambem deixa o caminho preparado para comparar ate `3` arquivos sem desperdiçar RAM logo na carga inicial.
+
+## Ajuste de selecao do Block mean e export 4:3 no viewer rapido - 2026-03-08
+- A aba `Compare` do `standalone_kibox_cycle_viewer_fast.py` foi corrigida no modo `Block mean`.
+- Causa do problema reportado:
+  - o controle numerico ainda operava como `Cycle ref`, entao mudar de `2` para `3`, por exemplo, continuava apontando para ciclos dentro do mesmo primeiro bloco, o que fazia parecer que o `Block mean` nao atualizava.
+- Correcao aplicada:
+  - no modo `Block mean`, o controle passa a operar como `Block idx`;
+  - o range passa a ser `1..N_blocos`;
+  - a curva carregada passa a vir diretamente do indice do bloco, e nao mais de um ciclo de referencia.
+- Efeito prático:
+  - ao trocar `Block idx`, a curva comparativa muda imediatamente;
+  - o resumo do slot passa a refletir a faixa correta, por exemplo `Mean 31-60`.
+- Exportacao:
+  - o `Export Compare` deixou de usar o `ImageExporter` do `pyqtgraph` para os plots comparativos;
+  - a exportacao agora renderiza cada plot em `QImage` com tamanho fixo `1600x1200`;
+  - isso garante aspect ratio `4:3` horizontal, mais previsivel para relatorios.
+
+## Ajuste local da planilha de plots - 2026-03-08
+- A planilha `config/config_incertezas_rev3.xlsx` tinha uma alteracao local pendente e agora ela deve ser tratada como mudanca consciente de configuracao.
+- Alteracao identificada:
+  - aba `Plots`;
+  - linha do grafico `t_s_agua_vs_power_all.png`;
+  - campo `y_max` alterado de `90` para `100`.
+- Impacto:
+  - o plot `Engine Coolant temperature vs Power (all fuels)` passa a usar teto visual de `100 °C` no eixo Y em vez de `90 °C`.

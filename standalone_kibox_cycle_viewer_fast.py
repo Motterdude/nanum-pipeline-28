@@ -8,8 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-import pyqtgraph.exporters as pg_exporters
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from standalone_kibox_cycle_plots import (
     DEFAULT_CYCLE_BLOCK_SIZE,
@@ -20,6 +19,7 @@ from standalone_kibox_cycle_plots import (
 
 PCYL_X_RANGE = (-40.0, 80.0)
 Q1_X_RANGE = (-30.0, 90.0)
+COMPARE_EXPORT_SIZE = (1600, 1200)
 
 
 @dataclass
@@ -56,6 +56,9 @@ class ViewerDataset:
     available_cycles: np.ndarray
     min_cycle: int
     max_cycle: int
+    available_block_indices: np.ndarray
+    min_block: int
+    max_block: int
 
 
 @dataclass
@@ -79,6 +82,7 @@ class CompareSlot:
     clear_button: QtWidgets.QPushButton
     file_label: QtWidgets.QLabel
     mode_combo: QtWidgets.QComboBox
+    selector_label: QtWidgets.QLabel
     cycle_spin: QtWidgets.QSpinBox
     summary_label: QtWidgets.QLabel
     dataset: ViewerDataset | None = None
@@ -276,6 +280,12 @@ def prepare_viewer_dataset(csv_path: Path, cycle_block_size: int) -> ViewerDatas
     pmax_cycles = pmax_series["CycleNumber"].to_numpy(dtype=np.int32, copy=True)
     pmax_values = pmax_series["PMAX_bar"].to_numpy(dtype=np.float32, copy=True)
     pmax_map = dict(zip(pmax_cycles.tolist(), pmax_values.tolist()))
+    available_block_indices = np.asarray(
+        sorted(set(pcyl_series.block_lookup) | set(q1_series.block_lookup)),
+        dtype=np.int32,
+    )
+    if available_block_indices.size == 0:
+        available_block_indices = np.asarray([1], dtype=np.int32)
     return ViewerDataset(
         csv_path=csv_path,
         pcyl_series=pcyl_series,
@@ -286,6 +296,9 @@ def prepare_viewer_dataset(csv_path: Path, cycle_block_size: int) -> ViewerDatas
         available_cycles=available_cycles,
         min_cycle=int(available_cycles[0]),
         max_cycle=int(available_cycles[-1]),
+        available_block_indices=available_block_indices,
+        min_block=int(available_block_indices[0]),
+        max_block=int(available_block_indices[-1]),
     )
 
 
@@ -420,6 +433,7 @@ class FastCycleViewer(QtWidgets.QWidget):
             mode_combo = QtWidgets.QComboBox()
             mode_combo.addItems(["Cycle", "Block mean"])
             mode_combo.setEnabled(False)
+            selector_label = QtWidgets.QLabel("Cycle ref")
             cycle_spin = QtWidgets.QSpinBox()
             cycle_spin.setEnabled(False)
             cycle_spin.setRange(1, 1)
@@ -432,7 +446,7 @@ class FastCycleViewer(QtWidgets.QWidget):
             slot_row.addWidget(file_label, stretch=1)
             slot_row.addWidget(QtWidgets.QLabel("Mode"))
             slot_row.addWidget(mode_combo)
-            slot_row.addWidget(QtWidgets.QLabel("Cycle ref"))
+            slot_row.addWidget(selector_label)
             slot_row.addWidget(cycle_spin)
             slot_row.addWidget(summary_label)
 
@@ -443,13 +457,16 @@ class FastCycleViewer(QtWidgets.QWidget):
                 clear_button=clear_button,
                 file_label=file_label,
                 mode_combo=mode_combo,
+                selector_label=selector_label,
                 cycle_spin=cycle_spin,
                 summary_label=summary_label,
             )
             clear_button.setEnabled(False)
             load_button.clicked.connect(lambda _checked=False, idx=slot_index - 1: self._open_compare_csv_dialog(idx))
             clear_button.clicked.connect(lambda _checked=False, idx=slot_index - 1: self._clear_compare_slot(idx))
-            mode_combo.currentIndexChanged.connect(lambda _value=0: self._update_compare_plots())
+            mode_combo.currentIndexChanged.connect(
+                lambda _value=0, idx=slot_index - 1: self._on_compare_mode_changed(idx)
+            )
             cycle_spin.valueChanged.connect(lambda _value=0: self._update_compare_plots())
             self.compare_slots.append(slot)
 
@@ -558,11 +575,49 @@ class FastCycleViewer(QtWidgets.QWidget):
 
         selected_cycle = default_cycle if default_cycle is not None else dataset.min_cycle
         selected_cycle = _nearest_available_cycle(int(selected_cycle), dataset.available_cycles)
-        blocker = QtCore.QSignalBlocker(slot.cycle_spin)
-        slot.cycle_spin.setRange(dataset.min_cycle, dataset.max_cycle)
-        slot.cycle_spin.setValue(selected_cycle)
-        del blocker
+        self._configure_compare_selector(slot, selected_cycle=selected_cycle)
         slot.summary_label.setText(f"Cycle {selected_cycle}")
+
+    def _configure_compare_selector(self, slot: CompareSlot, *, selected_cycle: int | None = None) -> None:
+        if slot.dataset is None:
+            return
+
+        mode = slot.mode_combo.currentText()
+        blocker = QtCore.QSignalBlocker(slot.cycle_spin)
+        if mode == "Block mean":
+            slot.selector_label.setText("Block idx")
+            slot.cycle_spin.setRange(slot.dataset.min_block, slot.dataset.max_block)
+            if selected_cycle is None:
+                selected_cycle = slot.dataset.min_cycle
+            selected_cycle = _nearest_available_cycle(int(selected_cycle), slot.dataset.available_cycles)
+            selected_block = ((selected_cycle - 1) // self.cycle_block_size) + 1
+            selected_block = min(max(selected_block, slot.dataset.min_block), slot.dataset.max_block)
+            slot.cycle_spin.setValue(selected_block)
+        else:
+            slot.selector_label.setText("Cycle ref")
+            slot.cycle_spin.setRange(slot.dataset.min_cycle, slot.dataset.max_cycle)
+            if selected_cycle is None:
+                current = int(slot.cycle_spin.value()) if slot.cycle_spin.value() else slot.dataset.min_cycle
+                selected_cycle = current
+            selected_cycle = _nearest_available_cycle(int(selected_cycle), slot.dataset.available_cycles)
+            slot.cycle_spin.setValue(selected_cycle)
+        del blocker
+
+    def _on_compare_mode_changed(self, slot_index: int) -> None:
+        slot = self.compare_slots[slot_index]
+        if slot.dataset is None:
+            return
+
+        current_value = int(slot.cycle_spin.value())
+        if slot.mode_combo.currentText() == "Block mean":
+            selected_cycle = _nearest_available_cycle(current_value, slot.dataset.available_cycles)
+        else:
+            block_index = min(max(current_value, slot.dataset.min_block), slot.dataset.max_block)
+            selected_cycle = ((block_index - 1) * self.cycle_block_size) + 1
+            selected_cycle = _nearest_available_cycle(selected_cycle, slot.dataset.available_cycles)
+
+        self._configure_compare_selector(slot, selected_cycle=selected_cycle)
+        self._update_compare_plots()
 
     def _clear_compare_slot(self, slot_index: int) -> None:
         slot = self.compare_slots[slot_index]
@@ -572,6 +627,7 @@ class FastCycleViewer(QtWidgets.QWidget):
         slot.mode_combo.setEnabled(False)
         slot.cycle_spin.setEnabled(False)
         slot.clear_button.setEnabled(False)
+        slot.selector_label.setText("Cycle ref")
         blocker = QtCore.QSignalBlocker(slot.cycle_spin)
         slot.cycle_spin.setRange(1, 1)
         slot.cycle_spin.setValue(1)
@@ -623,17 +679,16 @@ class FastCycleViewer(QtWidgets.QWidget):
         if slot.dataset is None:
             return None
 
-        cycle_reference = int(slot.cycle_spin.value())
-        selected_cycle = _nearest_available_cycle(cycle_reference, slot.dataset.available_cycles)
-        if selected_cycle != cycle_reference:
-            blocker = QtCore.QSignalBlocker(slot.cycle_spin)
-            slot.cycle_spin.setValue(selected_cycle)
-            del blocker
-
         mode = slot.mode_combo.currentText()
         stem = slot.dataset.csv_path.stem
 
         if mode == "Cycle":
+            cycle_reference = int(slot.cycle_spin.value())
+            selected_cycle = _nearest_available_cycle(cycle_reference, slot.dataset.available_cycles)
+            if selected_cycle != cycle_reference:
+                blocker = QtCore.QSignalBlocker(slot.cycle_spin)
+                slot.cycle_spin.setValue(selected_cycle)
+                del blocker
             curve = series.cycle_lookup.get(selected_cycle)
             if curve is None:
                 return None
@@ -649,17 +704,19 @@ class FastCycleViewer(QtWidgets.QWidget):
                 csv_path=slot.dataset.csv_path,
             )
 
-        block_index = ((selected_cycle - 1) // self.cycle_block_size) + 1
+        block_index = int(slot.cycle_spin.value())
         block_curve = series.block_lookup.get(block_index)
         if block_curve is None:
             return None
+        selected_cycle = ((block_index - 1) * self.cycle_block_size) + 1
+        selected_cycle = _nearest_available_cycle(selected_cycle, slot.dataset.available_cycles)
         return CompareSelection(
             x=block_curve.x,
             y=block_curve.y,
             label=f"{stem} | Mean {block_curve.label}",
             summary=f"Mean {block_curve.label}",
             mode=mode,
-            cycle_reference=cycle_reference,
+            cycle_reference=block_index,
             selected_cycle=selected_cycle,
             block_label=block_curve.label,
             csv_path=slot.dataset.csv_path,
@@ -779,12 +836,8 @@ class FastCycleViewer(QtWidgets.QWidget):
         q1_path = export_dir / f"{prefix}_q1.png"
         selection_path = export_dir / f"{prefix}_selection.csv"
 
-        pcyl_exporter = pg_exporters.ImageExporter(self.compare_pcyl_plot)
-        q1_exporter = pg_exporters.ImageExporter(self.compare_q1_plot)
-        pcyl_exporter.parameters()["width"] = 2200
-        q1_exporter.parameters()["width"] = 2200
-        pcyl_exporter.export(str(pcyl_path))
-        q1_exporter.export(str(q1_path))
+        self._export_plot_item_png(self.compare_pcyl_plot, pcyl_path, COMPARE_EXPORT_SIZE)
+        self._export_plot_item_png(self.compare_q1_plot, q1_path, COMPARE_EXPORT_SIZE)
 
         rows: list[dict[str, object]] = []
         for slot in active_slots:
@@ -798,7 +851,7 @@ class FastCycleViewer(QtWidgets.QWidget):
                     "slot": slot.slot_index,
                     "csv_path": str(slot.dataset.csv_path),
                     "mode": selection.mode,
-                    "cycle_reference": selection.cycle_reference,
+                    "selection_index": selection.cycle_reference,
                     "selected_cycle": selection.selected_cycle,
                     "block_label": selection.block_label,
                     "summary": selection.summary,
@@ -814,6 +867,25 @@ class FastCycleViewer(QtWidgets.QWidget):
             f"- {q1_path.name}\n"
             f"- {selection_path.name}",
         )
+
+    @staticmethod
+    def _export_plot_item_png(
+        plot_item: pg.PlotItem,
+        out_path: Path,
+        size: tuple[int, int],
+    ) -> None:
+        width, height = size
+        image = QtGui.QImage(width, height, QtGui.QImage.Format.Format_ARGB32)
+        image.fill(QtGui.QColor("white"))
+
+        painter = QtGui.QPainter(image)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+        target = QtCore.QRectF(0, 0, width, height)
+        source = plot_item.sceneBoundingRect()
+        plot_item.scene().render(painter, target, source)
+        painter.end()
+
+        image.save(str(out_path))
 
     def _apply_dataset(self, dataset: ViewerDataset, initial_cycle: int | None = None) -> None:
         self.dataset_cache[dataset.csv_path.resolve()] = dataset
