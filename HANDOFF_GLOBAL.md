@@ -586,3 +586,38 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - `py_compile`;
   - `--no-show`;
   - smoke test em `offscreen`, confirmando criacao do botao `Open CSV`, label do arquivo e inicializacao normal do widget.
+
+## Comparacao de ate 3 arquivos e exportacao no viewer rapido - 2026-03-08
+- O `standalone_kibox_cycle_viewer_fast.py` ganhou uma aba `Compare`, separada do viewer principal.
+- Estrutura nova da aba:
+  - dois graficos comparativos: `PCYL_1` e `Q_1`;
+  - ate `3` slots independentes de comparacao;
+  - cada slot permite:
+    - carregar um CSV proprio;
+    - limpar o slot;
+    - escolher `Cycle` ou `Block mean`;
+    - informar um `Cycle ref`, usado diretamente no modo `Cycle` e como referencia para localizar o bloco no modo `Block mean`.
+- Para agilizar o fluxo, foi adicionado um botao `Copy Current to Slot 1`, que copia o CSV aberto no viewer principal para o primeiro slot da comparacao.
+- Legendas e titulos:
+  - a legenda mostra `nome_do_arquivo | Cycle N` ou `nome_do_arquivo | Mean A-B`;
+  - curvas `Block mean` aparecem tracejadas;
+  - curvas `Cycle` permanecem solidas.
+- Exportacao:
+  - botao `Export Compare`;
+  - o usuario escolhe apenas o diretorio de destino;
+  - o export salva:
+    - `..._pcyl.png`;
+    - `..._q1.png`;
+    - `..._selection.csv` com `slot`, `csv_path`, `mode`, `cycle_reference`, `selected_cycle`, `block_label` e `summary`.
+
+## Reducao de uso de memoria no viewer rapido - 2026-03-08
+- A preparacao do dataset do viewer rapido foi ajustada para evitar o `groupby` global por `CycleNumber + CrankAngle_deg` sobre arquivos grandes de combustao.
+- Motivo:
+  - os CSVs KIBOX usados nesta rotina ja chegam com um unico ponto por combinacao `ciclo + angulo de manivela`;
+  - o `groupby` global nao reduzia os dados e ainda estourava memoria em arquivos grandes.
+- Ajuste aplicado:
+  - `build_per_cycle_means(...)` passou a apenas ordenar e normalizar os dados, sem agrupar globalmente;
+  - a media por bloco continua sendo calculada em cima do `CycleBlockIndex`, que e onde a agregacao realmente faz sentido.
+- Efeito:
+  - o viewer voltou a abrir o arquivo grande `TESTE_50KW_E100-2026-01-17--17-12-46-081.csv` com estabilidade;
+  - isso tambem deixa o caminho preparado para comparar ate `3` arquivos sem desperdiçar RAM logo na carga inicial.

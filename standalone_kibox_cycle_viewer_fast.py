@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
+import pyqtgraph.exporters as pg_exporters
 from PySide6 import QtCore, QtWidgets
 
 from standalone_kibox_cycle_plots import (
@@ -56,6 +58,34 @@ class ViewerDataset:
     max_cycle: int
 
 
+@dataclass
+class CompareSelection:
+    x: np.ndarray
+    y: np.ndarray
+    label: str
+    summary: str
+    mode: str
+    cycle_reference: int
+    selected_cycle: int
+    block_label: str | None
+    csv_path: Path
+
+
+@dataclass
+class CompareSlot:
+    slot_index: int
+    color: tuple[int, int, int]
+    load_button: QtWidgets.QPushButton
+    clear_button: QtWidgets.QPushButton
+    file_label: QtWidgets.QLabel
+    mode_combo: QtWidgets.QComboBox
+    cycle_spin: QtWidgets.QSpinBox
+    summary_label: QtWidgets.QLabel
+    dataset: ViewerDataset | None = None
+    pcyl_curve: pg.PlotDataItem | None = None
+    q1_curve: pg.PlotDataItem | None = None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Fast Qt/PyQtGraph cycle-by-cycle KIBOX viewer."
@@ -87,13 +117,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_per_cycle_means(df: pd.DataFrame) -> pd.DataFrame:
-    per_cycle = (
-        df.groupby(["CycleNumber", "CrankAngle_deg"], as_index=False, sort=False)
-        .agg(
-            PCYL_1=("PCYL_1", "mean"),
-            Q_1=("Q_1", "mean"),
-        )
-        .sort_values(["CycleNumber", "CrankAngle_deg"])
+    # KIBOX files used here already contain one row per cycle/crank-angle pair.
+    # A global groupby on both keys only burns memory on large files.
+    per_cycle = df[["CycleNumber", "CrankAngle_deg", "PCYL_1", "Q_1"]].sort_values(
+        ["CycleNumber", "CrankAngle_deg"]
     )
     per_cycle["CycleNumber"] = per_cycle["CycleNumber"].astype(np.int32)
     per_cycle["CrankAngle_deg"] = per_cycle["CrankAngle_deg"].astype(np.float32)
@@ -276,6 +303,7 @@ class FastCycleViewer(QtWidgets.QWidget):
         self.show_block_mean = show_block_mean
         self.current_cycle: int | None = None
         self._syncing = False
+        self.dataset_cache: dict[Path, ViewerDataset] = {dataset.csv_path.resolve(): dataset}
         self.dataset = dataset
         self.csv_path = dataset.csv_path
         self.pcyl_series = dataset.pcyl_series
@@ -288,25 +316,38 @@ class FastCycleViewer(QtWidgets.QWidget):
         self.max_cycle = dataset.max_cycle
         self.cycle_to_index = {int(c): i for i, c in enumerate(self.available_cycles.tolist())}
         self.initial_cycle = _nearest_available_cycle(initial_cycle, self.available_cycles)
+        self.compare_slots: list[CompareSlot] = []
 
         self._setup_ui()
         self._configure_plots()
+        self._configure_compare_plots()
         self.update_cycle(self.initial_cycle)
+        self._assign_compare_slot_dataset(0, self.dataset, default_cycle=self.current_cycle)
+        self._update_compare_plots()
 
     def _setup_ui(self) -> None:
         self.setWindowTitle(f"Fast KIBOX cycle viewer - {self.csv_path.name}")
         self.resize(1650, 1050)
 
         layout = QtWidgets.QVBoxLayout(self)
+        self.tabs = QtWidgets.QTabWidget()
+        layout.addWidget(self.tabs, stretch=1)
+
+        self.viewer_tab = QtWidgets.QWidget()
+        self.compare_tab = QtWidgets.QWidget()
+        self.tabs.addTab(self.viewer_tab, "Viewer")
+        self.tabs.addTab(self.compare_tab, "Compare")
+
+        viewer_layout = QtWidgets.QVBoxLayout(self.viewer_tab)
         self.graphics = pg.GraphicsLayoutWidget()
-        layout.addWidget(self.graphics, stretch=1)
+        viewer_layout.addWidget(self.graphics, stretch=1)
 
         self.pcyl_plot = self.graphics.addPlot(row=0, col=0)
         self.q1_plot = self.graphics.addPlot(row=1, col=0)
         self.pmax_plot = self.graphics.addPlot(row=2, col=0)
 
         control_layout = QtWidgets.QHBoxLayout()
-        layout.addLayout(control_layout)
+        viewer_layout.addLayout(control_layout)
 
         self.open_button = QtWidgets.QPushButton("Open CSV")
         self.open_button.clicked.connect(self._open_csv_dialog)
@@ -326,7 +367,7 @@ class FastCycleViewer(QtWidgets.QWidget):
         control_layout.addWidget(self.slider, stretch=1)
 
         control_layout.addWidget(QtWidgets.QLabel("Go to"))
-        self.cycle_edit = QtWidgets.QLineEdit(str(self.current_cycle))
+        self.cycle_edit = QtWidgets.QLineEdit(str(self.initial_cycle))
         self.cycle_edit.setMaximumWidth(100)
         control_layout.addWidget(self.cycle_edit)
 
@@ -336,6 +377,81 @@ class FastCycleViewer(QtWidgets.QWidget):
 
         self.slider.valueChanged.connect(self._on_slider_changed)
         self.cycle_edit.returnPressed.connect(self._on_cycle_edit_submitted)
+
+        compare_layout = QtWidgets.QVBoxLayout(self.compare_tab)
+        self.compare_graphics = pg.GraphicsLayoutWidget()
+        compare_layout.addWidget(self.compare_graphics, stretch=1)
+
+        self.compare_pcyl_plot = self.compare_graphics.addPlot(row=0, col=0)
+        self.compare_q1_plot = self.compare_graphics.addPlot(row=1, col=0)
+
+        compare_action_row = QtWidgets.QHBoxLayout()
+        compare_layout.addLayout(compare_action_row)
+
+        self.copy_current_button = QtWidgets.QPushButton("Copy Current to Slot 1")
+        self.copy_current_button.clicked.connect(self._copy_current_to_slot_one)
+        compare_action_row.addWidget(self.copy_current_button)
+
+        self.export_compare_button = QtWidgets.QPushButton("Export Compare")
+        self.export_compare_button.clicked.connect(self._export_compare_plots)
+        compare_action_row.addWidget(self.export_compare_button)
+
+        compare_hint = QtWidgets.QLabel(
+            "Each slot can show a single cycle or the block mean referenced by a cycle."
+        )
+        compare_action_row.addWidget(compare_hint)
+        compare_action_row.addStretch(1)
+
+        slot_colors = [
+            (31, 119, 180),
+            (255, 127, 14),
+            (44, 160, 44),
+        ]
+        for slot_index, color in enumerate(slot_colors, start=1):
+            slot_row = QtWidgets.QHBoxLayout()
+            compare_layout.addLayout(slot_row)
+
+            slot_row.addWidget(QtWidgets.QLabel(f"Trace {slot_index}"))
+
+            load_button = QtWidgets.QPushButton("Load CSV")
+            clear_button = QtWidgets.QPushButton("Clear")
+            file_label = QtWidgets.QLabel("No file loaded")
+            file_label.setMinimumWidth(320)
+            mode_combo = QtWidgets.QComboBox()
+            mode_combo.addItems(["Cycle", "Block mean"])
+            mode_combo.setEnabled(False)
+            cycle_spin = QtWidgets.QSpinBox()
+            cycle_spin.setEnabled(False)
+            cycle_spin.setRange(1, 1)
+            cycle_spin.setMaximumWidth(120)
+            summary_label = QtWidgets.QLabel("Empty")
+            summary_label.setMinimumWidth(220)
+
+            slot_row.addWidget(load_button)
+            slot_row.addWidget(clear_button)
+            slot_row.addWidget(file_label, stretch=1)
+            slot_row.addWidget(QtWidgets.QLabel("Mode"))
+            slot_row.addWidget(mode_combo)
+            slot_row.addWidget(QtWidgets.QLabel("Cycle ref"))
+            slot_row.addWidget(cycle_spin)
+            slot_row.addWidget(summary_label)
+
+            slot = CompareSlot(
+                slot_index=slot_index,
+                color=color,
+                load_button=load_button,
+                clear_button=clear_button,
+                file_label=file_label,
+                mode_combo=mode_combo,
+                cycle_spin=cycle_spin,
+                summary_label=summary_label,
+            )
+            clear_button.setEnabled(False)
+            load_button.clicked.connect(lambda _checked=False, idx=slot_index - 1: self._open_compare_csv_dialog(idx))
+            clear_button.clicked.connect(lambda _checked=False, idx=slot_index - 1: self._clear_compare_slot(idx))
+            mode_combo.currentIndexChanged.connect(lambda _value=0: self._update_compare_plots())
+            cycle_spin.valueChanged.connect(lambda _value=0: self._update_compare_plots())
+            self.compare_slots.append(slot)
 
     def _configure_plots(self) -> None:
         pg.setConfigOptions(antialias=True, useOpenGL=True)
@@ -393,7 +509,314 @@ class FastCycleViewer(QtWidgets.QWidget):
         legend3 = self.pmax_plot.addLegend(offset=(10, 10))
         legend3.addItem(self.pmax_curve, "PMAX per cycle")
 
+    def _configure_compare_plots(self) -> None:
+        self.compare_pcyl_plot.showGrid(x=True, y=True, alpha=0.25)
+        self.compare_q1_plot.showGrid(x=True, y=True, alpha=0.25)
+
+        self.compare_pcyl_plot.setLabel("bottom", "Crank angle", units="deg CA")
+        self.compare_pcyl_plot.setLabel("left", "P_CYL (bar)")
+        self.compare_q1_plot.setLabel("bottom", "Crank angle", units="deg CA")
+        self.compare_q1_plot.setLabel("left", "Q_1 (J/deg CA)")
+
+        self.compare_pcyl_plot.setXRange(PCYL_X_RANGE[0], PCYL_X_RANGE[1], padding=0.0)
+        self.compare_q1_plot.setXRange(Q1_X_RANGE[0], Q1_X_RANGE[1], padding=0.0)
+        self.compare_pcyl_plot.setYRange(*self.pcyl_series.y_limits, padding=0.0)
+        self.compare_q1_plot.setYRange(*self.q1_series.y_limits, padding=0.0)
+
+        self.compare_pcyl_legend = self.compare_pcyl_plot.addLegend(offset=(10, 10))
+        self.compare_q1_legend = self.compare_q1_plot.addLegend(offset=(10, 10))
+
+        for slot in self.compare_slots:
+            pen = pg.mkPen(color=slot.color, width=1)
+            slot.pcyl_curve = self.compare_pcyl_plot.plot(pen=pen)
+            slot.q1_curve = self.compare_q1_plot.plot(pen=pen)
+            slot.pcyl_curve.hide()
+            slot.q1_curve.hide()
+
+    def _load_dataset(self, csv_path: Path) -> ViewerDataset:
+        resolved = csv_path.resolve()
+        cached = self.dataset_cache.get(resolved)
+        if cached is not None:
+            return cached
+        dataset = prepare_viewer_dataset(resolved, self.cycle_block_size)
+        self.dataset_cache[resolved] = dataset
+        return dataset
+
+    def _assign_compare_slot_dataset(
+        self,
+        slot_index: int,
+        dataset: ViewerDataset,
+        *,
+        default_cycle: int | None = None,
+    ) -> None:
+        slot = self.compare_slots[slot_index]
+        slot.dataset = dataset
+        slot.file_label.setText(dataset.csv_path.name)
+        slot.mode_combo.setEnabled(True)
+        slot.cycle_spin.setEnabled(True)
+        slot.clear_button.setEnabled(True)
+
+        selected_cycle = default_cycle if default_cycle is not None else dataset.min_cycle
+        selected_cycle = _nearest_available_cycle(int(selected_cycle), dataset.available_cycles)
+        blocker = QtCore.QSignalBlocker(slot.cycle_spin)
+        slot.cycle_spin.setRange(dataset.min_cycle, dataset.max_cycle)
+        slot.cycle_spin.setValue(selected_cycle)
+        del blocker
+        slot.summary_label.setText(f"Cycle {selected_cycle}")
+
+    def _clear_compare_slot(self, slot_index: int) -> None:
+        slot = self.compare_slots[slot_index]
+        slot.dataset = None
+        slot.file_label.setText("No file loaded")
+        slot.summary_label.setText("Empty")
+        slot.mode_combo.setEnabled(False)
+        slot.cycle_spin.setEnabled(False)
+        slot.clear_button.setEnabled(False)
+        blocker = QtCore.QSignalBlocker(slot.cycle_spin)
+        slot.cycle_spin.setRange(1, 1)
+        slot.cycle_spin.setValue(1)
+        del blocker
+        if slot.pcyl_curve is not None:
+            slot.pcyl_curve.hide()
+            slot.pcyl_curve.setData([], [])
+        if slot.q1_curve is not None:
+            slot.q1_curve.hide()
+            slot.q1_curve.setData([], [])
+        self._update_compare_plots()
+
+    def _copy_current_to_slot_one(self) -> None:
+        self._assign_compare_slot_dataset(0, self.dataset, default_cycle=self.current_cycle or self.initial_cycle)
+        self._update_compare_plots()
+
+    def _open_compare_csv_dialog(self, slot_index: int) -> None:
+        slot = self.compare_slots[slot_index]
+        start_dir = self.csv_path.parent
+        if slot.dataset is not None:
+            start_dir = slot.dataset.csv_path.parent
+        selected, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            f"Open KIBOX CSV for trace {slot.slot_index}",
+            str(start_dir),
+            "CSV Files (*.csv);;All Files (*.*)",
+        )
+        if not selected:
+            return
+
+        csv_path = Path(selected)
+        self.setCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            dataset = self._load_dataset(csv_path)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "Open CSV", f"Failed to load file:\n{csv_path}\n\n{exc}")
+            return
+        finally:
+            self.unsetCursor()
+
+        self._assign_compare_slot_dataset(slot_index, dataset)
+        self._update_compare_plots()
+
+    def _resolve_compare_selection(
+        self,
+        slot: CompareSlot,
+        series: ViewerSeries,
+    ) -> CompareSelection | None:
+        if slot.dataset is None:
+            return None
+
+        cycle_reference = int(slot.cycle_spin.value())
+        selected_cycle = _nearest_available_cycle(cycle_reference, slot.dataset.available_cycles)
+        if selected_cycle != cycle_reference:
+            blocker = QtCore.QSignalBlocker(slot.cycle_spin)
+            slot.cycle_spin.setValue(selected_cycle)
+            del blocker
+
+        mode = slot.mode_combo.currentText()
+        stem = slot.dataset.csv_path.stem
+
+        if mode == "Cycle":
+            curve = series.cycle_lookup.get(selected_cycle)
+            if curve is None:
+                return None
+            return CompareSelection(
+                x=curve.x,
+                y=curve.y,
+                label=f"{stem} | Cycle {selected_cycle}",
+                summary=f"Cycle {selected_cycle}",
+                mode=mode,
+                cycle_reference=cycle_reference,
+                selected_cycle=selected_cycle,
+                block_label=None,
+                csv_path=slot.dataset.csv_path,
+            )
+
+        block_index = ((selected_cycle - 1) // self.cycle_block_size) + 1
+        block_curve = series.block_lookup.get(block_index)
+        if block_curve is None:
+            return None
+        return CompareSelection(
+            x=block_curve.x,
+            y=block_curve.y,
+            label=f"{stem} | Mean {block_curve.label}",
+            summary=f"Mean {block_curve.label}",
+            mode=mode,
+            cycle_reference=cycle_reference,
+            selected_cycle=selected_cycle,
+            block_label=block_curve.label,
+            csv_path=slot.dataset.csv_path,
+        )
+
+    @staticmethod
+    def _compute_selection_limits(
+        selections: list[CompareSelection],
+        fallback: tuple[float, float],
+    ) -> tuple[float, float]:
+        arrays = [selection.y.astype(float, copy=False) for selection in selections if selection.y.size]
+        if not arrays:
+            return fallback
+
+        all_values = np.concatenate(arrays)
+        ymin = float(np.nanmin(all_values))
+        ymax = float(np.nanmax(all_values))
+        if np.isclose(ymin, ymax):
+            pad = max(abs(ymin) * 0.05, 1.0)
+            return (ymin - pad, ymax + pad)
+        pad = (ymax - ymin) * 0.05
+        return (ymin - pad, ymax + pad)
+
+    def _update_compare_plot(
+        self,
+        *,
+        plot: pg.PlotItem,
+        legend: pg.LegendItem,
+        slots: list[CompareSlot],
+        selection_getter,
+        fallback_limits: tuple[float, float],
+        title: str,
+    ) -> None:
+        visible_selections: list[CompareSelection] = []
+        for slot in slots:
+            selection = selection_getter(slot)
+            curve = slot.pcyl_curve if plot is self.compare_pcyl_plot else slot.q1_curve
+            if curve is None:
+                continue
+            if selection is None:
+                curve.hide()
+                curve.setData([], [])
+                continue
+
+            pen_style = QtCore.Qt.PenStyle.SolidLine if selection.mode == "Cycle" else QtCore.Qt.PenStyle.DashLine
+            curve.setPen(pg.mkPen(color=slot.color, width=1, style=pen_style))
+            curve.setData(selection.x, selection.y)
+            curve.show()
+            visible_selections.append(selection)
+
+        legend.clear()
+        for slot in slots:
+            curve = slot.pcyl_curve if plot is self.compare_pcyl_plot else slot.q1_curve
+            selection = selection_getter(slot)
+            if curve is not None and selection is not None:
+                legend.addItem(curve, selection.label)
+
+        ymin, ymax = self._compute_selection_limits(visible_selections, fallback_limits)
+        plot.setYRange(ymin, ymax, padding=0.0)
+        plot.setTitle(title if visible_selections else f"{title} - no active traces")
+
+    def _update_compare_plots(self) -> None:
+        slot_summaries: dict[int, str] = {}
+        pcyl_cache: dict[int, CompareSelection | None] = {}
+        q1_cache: dict[int, CompareSelection | None] = {}
+
+        for slot in self.compare_slots:
+            pcyl_selection = self._resolve_compare_selection(slot, slot.dataset.pcyl_series) if slot.dataset else None
+            q1_selection = self._resolve_compare_selection(slot, slot.dataset.q1_series) if slot.dataset else None
+            pcyl_cache[slot.slot_index] = pcyl_selection
+            q1_cache[slot.slot_index] = q1_selection
+            selection = pcyl_selection or q1_selection
+            if selection is None:
+                slot_summaries[slot.slot_index] = "Empty" if slot.dataset is None else "No data for selection"
+            else:
+                slot_summaries[slot.slot_index] = selection.summary
+
+        for slot in self.compare_slots:
+            slot.summary_label.setText(slot_summaries[slot.slot_index])
+
+        self._update_compare_plot(
+            plot=self.compare_pcyl_plot,
+            legend=self.compare_pcyl_legend,
+            slots=self.compare_slots,
+            selection_getter=lambda slot: pcyl_cache[slot.slot_index],
+            fallback_limits=self.pcyl_series.y_limits,
+            title="PCYL_1 comparison",
+        )
+        self._update_compare_plot(
+            plot=self.compare_q1_plot,
+            legend=self.compare_q1_legend,
+            slots=self.compare_slots,
+            selection_getter=lambda slot: q1_cache[slot.slot_index],
+            fallback_limits=self.q1_series.y_limits,
+            title="Q_1 comparison",
+        )
+
+    def _export_compare_plots(self) -> None:
+        active_slots = [slot for slot in self.compare_slots if slot.dataset is not None]
+        if not active_slots:
+            QtWidgets.QMessageBox.warning(self, "Export Compare", "Load at least one compare trace before exporting.")
+            return
+
+        selected_dir = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Choose export directory",
+            str(self.csv_path.parent),
+        )
+        if not selected_dir:
+            return
+
+        export_dir = Path(selected_dir)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        prefix = f"kibox_compare_{timestamp}"
+
+        pcyl_path = export_dir / f"{prefix}_pcyl.png"
+        q1_path = export_dir / f"{prefix}_q1.png"
+        selection_path = export_dir / f"{prefix}_selection.csv"
+
+        pcyl_exporter = pg_exporters.ImageExporter(self.compare_pcyl_plot)
+        q1_exporter = pg_exporters.ImageExporter(self.compare_q1_plot)
+        pcyl_exporter.parameters()["width"] = 2200
+        q1_exporter.parameters()["width"] = 2200
+        pcyl_exporter.export(str(pcyl_path))
+        q1_exporter.export(str(q1_path))
+
+        rows: list[dict[str, object]] = []
+        for slot in active_slots:
+            selection = self._resolve_compare_selection(slot, slot.dataset.pcyl_series) or self._resolve_compare_selection(
+                slot, slot.dataset.q1_series
+            )
+            if selection is None:
+                continue
+            rows.append(
+                {
+                    "slot": slot.slot_index,
+                    "csv_path": str(slot.dataset.csv_path),
+                    "mode": selection.mode,
+                    "cycle_reference": selection.cycle_reference,
+                    "selected_cycle": selection.selected_cycle,
+                    "block_label": selection.block_label,
+                    "summary": selection.summary,
+                }
+            )
+        pd.DataFrame(rows).to_csv(selection_path, index=False)
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Export Compare",
+            "Export complete:\n"
+            f"- {pcyl_path.name}\n"
+            f"- {q1_path.name}\n"
+            f"- {selection_path.name}",
+        )
+
     def _apply_dataset(self, dataset: ViewerDataset, initial_cycle: int | None = None) -> None:
+        self.dataset_cache[dataset.csv_path.resolve()] = dataset
         self.dataset = dataset
         self.csv_path = dataset.csv_path
         self.pcyl_series = dataset.pcyl_series
@@ -446,7 +869,7 @@ class FastCycleViewer(QtWidgets.QWidget):
         csv_path = Path(selected)
         self.setCursor(QtCore.Qt.CursorShape.WaitCursor)
         try:
-            dataset = prepare_viewer_dataset(csv_path, self.cycle_block_size)
+            dataset = self._load_dataset(csv_path)
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Open CSV", f"Failed to load file:\n{csv_path}\n\n{exc}")
             return
