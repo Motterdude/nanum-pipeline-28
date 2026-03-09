@@ -748,3 +748,15 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - cores de `PMAX` tambem reforcadas para manter consistencia visual no tema escuro.
 - Resultado esperado:
   - melhor separacao visual das curvas sobre fundo preto, tanto na aba `Viewer` quanto na aba `Compare`.
+
+## Export claro com linhas/texto/grid escuros no viewer rapido - 2026-03-09
+- Pedido: manter o visual em tempo real no tema escuro, mas exportar os graficos com estilo de relatorio (fundo claro + elementos escuros) e sem sobras laterais em branco.
+- Correcao aplicada em `standalone_kibox_cycle_viewer_fast.py`:
+  - `_export_plot_item_png()` agora aplica um tema temporario de export:
+    - fundo branco;
+    - curvas em paleta escura;
+    - eixos, labels, titulos, legenda e grid em tons escuros.
+  - apos salvar o PNG, o estilo original do viewer e restaurado automaticamente (sem alterar o tema ao vivo).
+  - render de export alterado para `IgnoreAspectRatio` para preencher completamente o canvas fixo de export e remover barras/espacos laterais.
+- Resultado esperado:
+  - PNGs exportados mais legiveis para documento/apresentacao, mantendo a experiencia interativa escura no app.

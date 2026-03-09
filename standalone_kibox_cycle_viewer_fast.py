@@ -30,6 +30,16 @@ COMPARE_SLOT_COLORS = [
     (255, 110, 0),
     (180, 255, 0),
 ]
+EXPORT_LINE_COLORS_DARK = [
+    (20, 20, 20),
+    (0, 78, 138),
+    (128, 34, 0),
+    (0, 88, 45),
+    (93, 49, 126),
+]
+EXPORT_FOREGROUND_DARK = (25, 25, 25)
+EXPORT_GRID_ALPHA = 110
+EXPORT_BG_WHITE = (255, 255, 255, 255)
 
 
 @dataclass
@@ -918,18 +928,134 @@ class FastCycleViewer(QtWidgets.QWidget):
         out_path: Path,
         size: tuple[int, int],
     ) -> None:
+        def _apply_export_style() -> dict[str, object]:
+            state: dict[str, object] = {}
+
+            data_items = plot_item.listDataItems()
+            state["data_pens"] = [(item, item.opts.get("pen")) for item in data_items]
+            for idx, item in enumerate(data_items):
+                old_pen = item.opts.get("pen")
+                line_style = QtCore.Qt.PenStyle.SolidLine
+                old_width = 1.2
+                if isinstance(old_pen, QtGui.QPen):
+                    line_style = old_pen.style()
+                    old_width = max(float(old_pen.widthF()), 1.2)
+                color = EXPORT_LINE_COLORS_DARK[idx % len(EXPORT_LINE_COLORS_DARK)]
+                item.setPen(pg.mkPen(color=color, width=old_width, style=line_style))
+
+            axis_state: list[dict[str, object]] = []
+            for axis_name in ("left", "bottom", "right", "top"):
+                axis = plot_item.getAxis(axis_name)
+                if axis is None:
+                    continue
+                old_label_style = dict(getattr(axis, "labelStyle", {}) or {})
+                axis_state.append(
+                    {
+                        "axis": axis,
+                        "pen": axis.pen(),
+                        "text_pen": axis.textPen(),
+                        "label_text": getattr(axis, "labelText", ""),
+                        "label_units": getattr(axis, "labelUnits", ""),
+                        "label_style": old_label_style,
+                        "grid": getattr(axis, "grid", False),
+                    }
+                )
+                dark_pen = pg.mkPen(color=EXPORT_FOREGROUND_DARK, width=1.0)
+                axis.setPen(dark_pen)
+                axis.setTextPen(dark_pen)
+                export_label_style = dict(old_label_style)
+                export_label_style["color"] = "#111111"
+                axis.setLabel(
+                    getattr(axis, "labelText", "") or "",
+                    units=getattr(axis, "labelUnits", "") or "",
+                    **export_label_style,
+                )
+                axis.setGrid(EXPORT_GRID_ALPHA)
+            state["axis_state"] = axis_state
+
+            title_opts = dict(plot_item.titleLabel.opts)
+            title_text = str(plot_item.titleLabel.text or "")
+            state["title"] = {"text": title_text, "opts": title_opts}
+            export_title_opts = dict(title_opts)
+            export_title_opts["color"] = "#111111"
+            plot_item.setTitle(title_text, **export_title_opts)
+
+            legend_state: dict[str, object] = {"present": False}
+            legend = plot_item.legend
+            if legend is not None:
+                legend_state["present"] = True
+                legend_state["pen"] = legend.pen()
+                legend_state["brush"] = legend.brush()
+                label_state: list[dict[str, object]] = []
+                for _, label in legend.items:
+                    label_state.append({"label": label, "text": label.text, "opts": dict(label.opts)})
+                    export_opts = dict(label.opts)
+                    export_opts["color"] = "#111111"
+                    label.setText(label.text, **export_opts)
+                legend_state["labels"] = label_state
+                legend.setPen(pg.mkPen(color=(85, 85, 85), width=1.0))
+                legend.setBrush(pg.mkBrush(255, 255, 255, 232))
+            state["legend"] = legend_state
+
+            view_box = plot_item.getViewBox()
+            old_bg = view_box.state.get("background")
+            state["viewbox_bg"] = old_bg
+            view_box.setBackgroundColor(QtGui.QColor(*EXPORT_BG_WHITE))
+
+            return state
+
+        def _restore_export_style(state: dict[str, object]) -> None:
+            for item, pen in state.get("data_pens", []):
+                item.setPen(pen)
+
+            for axis_info in state.get("axis_state", []):
+                axis = axis_info["axis"]
+                axis.setPen(axis_info["pen"])
+                axis.setTextPen(axis_info["text_pen"])
+                axis.setLabel(
+                    axis_info["label_text"] or "",
+                    units=axis_info["label_units"] or "",
+                    **(axis_info["label_style"] or {}),
+                )
+                axis.setGrid(axis_info["grid"])
+
+            title_info = state.get("title", {})
+            plot_item.setTitle(title_info.get("text", ""), **title_info.get("opts", {}))
+
+            legend_info = state.get("legend", {})
+            if legend_info.get("present", False):
+                legend = plot_item.legend
+                if legend is not None:
+                    legend.setPen(legend_info["pen"])
+                    legend.setBrush(legend_info["brush"])
+                    for label_info in legend_info.get("labels", []):
+                        label = label_info["label"]
+                        label.setText(label_info["text"], **label_info["opts"])
+
+            plot_item.getViewBox().setBackgroundColor(state.get("viewbox_bg"))
+
+        export_state = _apply_export_style()
         width, height = size
-        image = QtGui.QImage(width, height, QtGui.QImage.Format.Format_ARGB32)
-        image.fill(QtGui.QColor("white"))
+        try:
+            QtWidgets.QApplication.processEvents()
+            image = QtGui.QImage(width, height, QtGui.QImage.Format.Format_ARGB32)
+            image.fill(QtGui.QColor(*EXPORT_BG_WHITE))
 
-        painter = QtGui.QPainter(image)
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
-        target = QtCore.QRectF(0, 0, width, height)
-        source = plot_item.sceneBoundingRect()
-        plot_item.scene().render(painter, target, source)
-        painter.end()
+            painter = QtGui.QPainter(image)
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+            target = QtCore.QRectF(0, 0, width, height)
+            source = plot_item.sceneBoundingRect()
+            plot_item.scene().render(
+                painter,
+                target,
+                source,
+                QtCore.Qt.AspectRatioMode.IgnoreAspectRatio,
+            )
+            painter.end()
 
-        image.save(str(out_path))
+            image.save(str(out_path))
+        finally:
+            _restore_export_style(export_state)
 
     def _apply_dataset(self, dataset: ViewerDataset, initial_cycle: int | None = None) -> None:
         self.dataset_cache[dataset.csv_path.resolve()] = dataset
