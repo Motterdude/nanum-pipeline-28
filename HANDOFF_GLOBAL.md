@@ -770,3 +770,12 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - o preenchimento do canvas usa o mesmo fundo do `ViewBox` ativo para nao surgir laterais brancas.
 - Resultado esperado:
   - export fiel ao que esta na tela, sem distorcao geometrica e sem faixas brancas laterais.
+
+## Sincronizacao de eixo X na aba Viewer - 2026-03-09
+- Pedido: quando houver mudanca de eixo X via GUI na aba `Viewer`, manter os plots alinhados.
+- Correcao aplicada em `standalone_kibox_cycle_viewer_fast.py`:
+  - adicionado sincronizador de `sigXRangeChanged` entre os dois plots de crank-angle (`PCYL_1` e `Q_1`);
+  - ao dar pan/zoom em qualquer um deles, o mesmo range X e aplicado no outro automaticamente;
+  - incluido lock interno para evitar loop de eventos durante a sincronizacao.
+- Resultado esperado:
+  - `PCYL_1` e `Q_1` permanecem alinhados no eixo X durante ajustes interativos no viewer.

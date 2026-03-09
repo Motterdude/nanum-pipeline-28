@@ -365,6 +365,7 @@ class FastCycleViewer(QtWidgets.QWidget):
         self.show_block_mean = show_block_mean
         self.current_cycle: int | None = None
         self._syncing = False
+        self._syncing_viewer_x = False
         self.dataset_cache: dict[Path, ViewerDataset] = {dataset.csv_path.resolve(): dataset}
         self.dataset = dataset
         self.csv_path = dataset.csv_path
@@ -569,6 +570,30 @@ class FastCycleViewer(QtWidgets.QWidget):
 
         legend3 = self.pmax_plot.addLegend(offset=(10, 10))
         legend3.addItem(self.pmax_curve, "PMAX per cycle")
+
+        # Keep crank-angle plots aligned during interactive pan/zoom.
+        self.pcyl_plot.getViewBox().sigXRangeChanged.connect(
+            lambda _vb, xr: self._sync_viewer_crank_x("pcyl", xr)
+        )
+        self.q1_plot.getViewBox().sigXRangeChanged.connect(
+            lambda _vb, xr: self._sync_viewer_crank_x("q1", xr)
+        )
+
+    def _sync_viewer_crank_x(self, source: str, x_range: tuple[float, float]) -> None:
+        if self._syncing_viewer_x:
+            return
+        if x_range is None or len(x_range) != 2:
+            return
+
+        x_min, x_max = float(x_range[0]), float(x_range[1])
+        self._syncing_viewer_x = True
+        try:
+            if source != "pcyl":
+                self.pcyl_plot.setXRange(x_min, x_max, padding=0.0)
+            if source != "q1":
+                self.q1_plot.setXRange(x_min, x_max, padding=0.0)
+        finally:
+            self._syncing_viewer_x = False
 
     def _configure_compare_plots(self) -> None:
         self.compare_pcyl_plot.showGrid(x=True, y=True, alpha=0.25)
