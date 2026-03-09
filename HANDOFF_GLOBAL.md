@@ -802,3 +802,29 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - run completo do `nanum_pipeline_28.py` concluido com sucesso;
   - log confirmou uso exato dos caminhos acima;
   - saidas geradas em `C:\Users\SC61730\Downloads\out_mestrado` (`lv_time_diagnostics.xlsx`, `lv_diagnostics_summay.xlsx`, `lv_kpis_clean.xlsx` e plots).
+
+## Nova conta de ignition delay (MoTeC x KIBOX AI05) - 2026-03-09
+- Pedido:
+  - calcular ignition delay como delta absoluto entre `Motec Ignition advance` e `KIBOX_AI05`, considerando convencao de sinal:
+    - MoTeC positivo = `BTDC`;
+    - KIBOX positivo = `ATDC`.
+- Regra implementada:
+  - converter para mesmo referencial (`ATDC`) e calcular:
+    - `Ignition_Delay_abs_degCA = abs(KIBOX_AI05_1 + Motec_Ignition Timing_mean_of_windows)`.
+- Implementacao:
+  - coluna derivada criada no `build_final_table()` de `nanum_pipeline_28.py`;
+  - nome final da coluna no output: `Ignition_Delay_abs_degCA`.
+- Plot novo na aba `Plots` de `config/config_incertezas_rev3.xlsx`:
+  - `filename = ignition_delay_vs_upd_power_all.png`;
+  - `plot_type = all_fuels_yx`;
+  - `x_col = UPD_Power_Bin_kW` (potencia UPD medida);
+  - `y_col = Ignition_Delay_abs_degCA`;
+  - `yerr_col = off`.
+- Comportamento para dados faltantes (confirmado):
+  - o workflow de `all_fuels_*` ja remove `NaN` por serie (`dropna`) e pula apenas a curva/combustivel sem dados;
+  - o plot inteiro so e pulado quando nenhuma serie tem dados validos.
+- Validacao executada:
+  - run completo do pipeline concluido em `C:\Users\SC61730\Downloads\raw_mestrado`;
+  - `lv_kpis_clean.xlsx` contem `Ignition_Delay_abs_degCA` com `20` linhas validas (de `30`);
+  - plot gerado com sucesso em:
+    - `C:\Users\SC61730\Downloads\out_mestrado\plots\raw\ignition_delay_vs_upd_power_all.png`.

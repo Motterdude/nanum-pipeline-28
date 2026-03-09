@@ -2478,6 +2478,18 @@ def build_final_table(
         df["ECT_CTRL_ERROR_C"] = pd.NA
         df["ECT_CTRL_ERROR_ABS_C"] = pd.NA
 
+    # Ignition delay (absolute delta in crank angle):
+    # - MoTeC ignition timing is positive for BTDC.
+    # - KIBOX AI05 is positive for ATDC.
+    # Convert both to a common ATDC-oriented axis by flipping MoTeC sign.
+    # Therefore: delay_abs = abs(AI05_ATDC - (-Ignition_BTDC)) = abs(AI05 + Ignition).
+    motec_ign_col = "Motec_Ignition Timing_mean_of_windows"
+    kibox_ai05_col = "KIBOX_AI05_1"
+    motec_ign = pd.to_numeric(df.get(motec_ign_col, pd.NA), errors="coerce")
+    kibox_ai05 = pd.to_numeric(df.get(kibox_ai05_col, pd.NA), errors="coerce")
+    delay_abs = (kibox_ai05 + motec_ign).abs()
+    df["Ignition_Delay_abs_degCA"] = delay_abs.where(motec_ign.notna() & kibox_ai05.notna(), pd.NA)
+
     df = add_run_context_columns(df)
     df = _apply_reporting_rounding(df, mappings=mappings, reporting_df=reporting_df)
 
