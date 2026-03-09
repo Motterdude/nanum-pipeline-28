@@ -719,3 +719,19 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - `apply_runtime_path_overrides()` agora faz fallback automatico para `BASE_DIR/raw/PROCESSAR` quando `RAW_INPUT_DIR` configurado nao existe no PC, emitindo `[WARN]`.
   - para `OUT_DIR`, quando o caminho configurado nao pode ser preparado, o pipeline faz fallback para `BASE_DIR/out`, tambem com `[WARN]`.
   - objetivo: evitar quebra imediata ao alternar entre PCs com caminhos absolutos diferentes.
+
+## Workflow unico do executavel KIBOX - 2026-03-09
+- Problema reportado:
+  - o `standalone_kibox_cycle_viewer_fast.py` podia falhar na abertura quando o `--input` default apontava para um caminho antigo de outro PC.
+- Correcao aplicada no viewer rapido:
+  - o viewer agora e auto-contido e nao depende mais de `standalone_kibox_cycle_plots.py` para constantes/parse;
+  - quando o `--input` default nao existe (ou nao e arquivo), ao abrir normalmente ele mostra `QFileDialog` para selecionar o CSV na hora;
+  - se o usuario cancelar a selecao, a execucao e encerrada com mensagem clara.
+- Limpeza do workflow:
+  - removidos do repositorio os utilitarios antigos:
+    - `standalone_kibox_cycle_plots.py`;
+    - `standalone_kibox_cycle_viewer.py`.
+  - o utilitario oficial unico para KIBOX passa a ser:
+    - `standalone_kibox_cycle_viewer_fast.py`.
+- Documentacao atualizada:
+  - `README_EXECUCAO.md` agora lista apenas o viewer rapido no fluxo operacional.

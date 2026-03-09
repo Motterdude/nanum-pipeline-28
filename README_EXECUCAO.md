@@ -3,8 +3,6 @@
 ## O que precisa estar no Git
 - Codigo principal:
   - `nanum_pipeline_28.py`
-  - `standalone_kibox_cycle_plots.py`
-  - `standalone_kibox_cycle_viewer.py`
   - `standalone_kibox_cycle_viewer_fast.py`
 - Config obrigatoria:
   - `config/config_incertezas_rev3.xlsx`
@@ -39,8 +37,6 @@ Processamentos/
 |-- out/
 |-- out_validation/
 |-- nanum_pipeline_28.py
-|-- standalone_kibox_cycle_plots.py
-|-- standalone_kibox_cycle_viewer.py
 |-- standalone_kibox_cycle_viewer_fast.py
 |-- requirements_pipeline.txt
 |-- requirements_gui_viewer.txt
@@ -80,20 +76,12 @@ Rodar:
 ```
 
 ## Como rodar os utilitarios KIBOX
-Plot estatico por blocos:
-```powershell
-& ".\.venv\Scripts\python.exe" .\standalone_kibox_cycle_plots.py
-```
-
-Viewer matplotlib:
-```powershell
-& ".\.venv\Scripts\python.exe" .\standalone_kibox_cycle_viewer.py
-```
-
 Viewer rapido Qt:
 ```powershell
 & ".\.venv\Scripts\python.exe" .\standalone_kibox_cycle_viewer_fast.py
 ```
+
+Se o `--input` padrao nao existir neste PC, o viewer abre um seletor de arquivo para voce escolher o CSV na hora.
 
 ## Regras para evitar problema entre PCs
 1. Antes de comecar, rodar:

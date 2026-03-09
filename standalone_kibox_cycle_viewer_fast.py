@@ -10,11 +10,9 @@ import pandas as pd
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from standalone_kibox_cycle_plots import (
-    DEFAULT_CYCLE_BLOCK_SIZE,
-    DEFAULT_INPUT,
-    load_cycle_dataframe,
-)
+BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_CYCLE_BLOCK_SIZE = 30
+DEFAULT_INPUT = BASE_DIR / "raw" / "PROCESSAR" / "kibox_input.csv"
 
 
 PCYL_X_RANGE = (-40.0, 80.0)
@@ -118,6 +116,45 @@ def parse_args() -> argparse.Namespace:
         help="Prepare all data structures and exit without opening the GUI.",
     )
     return parser.parse_args()
+
+
+def load_cycle_dataframe(csv_path: Path) -> pd.DataFrame:
+    df = pd.read_csv(
+        csv_path,
+        sep="\t",
+        decimal=",",
+        skiprows=[1],
+        usecols=["Cycle number", "Crank angle", "PCYL_1", "Q_1"],
+    )
+    df = df.rename(columns={"Cycle number": "CycleNumber", "Crank angle": "CrankAngle_deg"})
+    df["CycleNumber"] = pd.to_numeric(df["CycleNumber"], errors="coerce").ffill()
+    df["CrankAngle_deg"] = pd.to_numeric(df["CrankAngle_deg"], errors="coerce").round(1)
+    df["PCYL_1"] = pd.to_numeric(df["PCYL_1"], errors="coerce")
+    df["Q_1"] = pd.to_numeric(df["Q_1"], errors="coerce")
+    df = df.dropna(subset=["CycleNumber", "CrankAngle_deg"])
+    df["CycleNumber"] = df["CycleNumber"].astype("int64")
+    return df
+
+
+def _prompt_input_csv(initial_target: Path) -> Path | None:
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    if initial_target.exists() and initial_target.is_dir():
+        start_dir = initial_target
+    elif initial_target.parent.exists():
+        start_dir = initial_target.parent
+    else:
+        start_dir = BASE_DIR
+
+    selected, _ = QtWidgets.QFileDialog.getOpenFileName(
+        None,
+        "Selecione o CSV do KIBOX",
+        str(start_dir),
+        "CSV Files (*.csv);;All Files (*.*)",
+    )
+    if not selected:
+        return None
+    return Path(selected).resolve()
 
 
 def build_per_cycle_means(df: pd.DataFrame) -> pd.DataFrame:
@@ -1036,9 +1073,17 @@ class FastCycleViewer(QtWidgets.QWidget):
 
 def main() -> None:
     args = parse_args()
-    csv_path = args.input.resolve()
-    if not csv_path.exists():
-        raise SystemExit(f"Input file not found: {csv_path}")
+    csv_path = args.input.expanduser().resolve()
+    if not csv_path.exists() or not csv_path.is_file():
+        if args.no_show:
+            raise SystemExit(f"Input file not found: {csv_path}")
+
+        print(f"[WARN] Input padrao indisponivel: {csv_path}")
+        selected_path = _prompt_input_csv(csv_path)
+        if selected_path is None:
+            raise SystemExit("Nenhum CSV selecionado. Execucao cancelada.")
+        csv_path = selected_path
+
     dataset = prepare_viewer_dataset(csv_path, args.cycle_block_size)
     if args.no_show:
         print(f"[OK] Fast viewer prepared for {csv_path}")
