@@ -706,3 +706,16 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
 - `setup_env.ps1` cria `.venv` local e instala:
   - `requirements_pipeline.txt` por padrao;
   - `requirements_full.txt` quando usado com `-WithGui`.
+
+## Correcao de RAW_INPUT_DIR/OUT_DIR no PC de trabalho - 2026-03-09
+- Erro reportado no PC de trabalho:
+  - `FileNotFoundError: Nao encontrei o diretorio configurado em RAW_INPUT_DIR: D:\Drive\Faculdade\PUC\Mestrado\Dados_Ensaios\Processamento_Pyton\raw`.
+- Causa:
+  - a aba `Defaults` em `config/config_incertezas_rev3.xlsx` ainda estava com caminhos absolutos do notebook de casa (`D:\Drive\...`), que nao existem no PC atual.
+- Correcao de configuracao aplicada (aba `Defaults`):
+  - `RAW_INPUT_DIR = C:\Users\SC61730\Downloads\_tmp_nanum_pipeline_28_remote_20260309\raw\PROCESSAR`
+  - `OUT_DIR = C:\Users\SC61730\Downloads\_tmp_nanum_pipeline_28_remote_20260309\out`
+- Hardening de codigo aplicado em `nanum_pipeline_28.py`:
+  - `apply_runtime_path_overrides()` agora faz fallback automatico para `BASE_DIR/raw/PROCESSAR` quando `RAW_INPUT_DIR` configurado nao existe no PC, emitindo `[WARN]`.
+  - para `OUT_DIR`, quando o caminho configurado nao pode ser preparado, o pipeline faz fallback para `BASE_DIR/out`, tambem com `[WARN]`.
+  - objetivo: evitar quebra imediata ao alternar entre PCs com caminhos absolutos diferentes.
