@@ -1880,6 +1880,30 @@ def load_lhv_lookup() -> pd.DataFrame:
     return df
 
 
+def _lookup_lhv_for_blend(
+    lhv_df: pd.DataFrame,
+    *,
+    etoh_pct: float,
+    h2o_pct: float,
+    tol: float = 0.6,
+) -> float:
+    if lhv_df is None or lhv_df.empty:
+        return float("nan")
+    if "LHV_kJ_kg" not in lhv_df.columns:
+        return float("nan")
+
+    etoh = pd.to_numeric(lhv_df.get("EtOH_pct", pd.Series(pd.NA, index=lhv_df.index)), errors="coerce")
+    h2o = pd.to_numeric(lhv_df.get("H2O_pct", pd.Series(pd.NA, index=lhv_df.index)), errors="coerce")
+    m = (etoh.sub(etoh_pct).abs() <= tol) & (h2o.sub(h2o_pct).abs() <= tol)
+    if not bool(m.any()):
+        return float("nan")
+
+    vals = pd.to_numeric(lhv_df.loc[m, "LHV_kJ_kg"], errors="coerce").dropna()
+    if vals.empty:
+        return float("nan")
+    return float(vals.iloc[0])
+
+
 # =========================
 # Instruments rev2: uB computation
 # =========================
@@ -2333,10 +2357,14 @@ def build_final_table(
     Fkgh = pd.to_numeric(df[F_mean], errors="coerce")
     mdot = Fkgh / 3600.0
     LHVv = pd.to_numeric(df[L_col], errors="coerce")
+    lhv_e94h6_kj_kg = _lookup_lhv_for_blend(lhv, etoh_pct=94.0, h2o_pct=6.0)
 
     # Generic alias for the measured UPD power used by runtime-specific plots.
     df["UPD_Power_kW"] = PkW
     df["UPD_Power_Bin_kW"] = PkW.round(1).where(PkW.notna(), pd.NA)
+    df["LHV_E94H6_kJ_kg"] = lhv_e94h6_kj_kg if np.isfinite(lhv_e94h6_kj_kg) else pd.NA
+    if not np.isfinite(lhv_e94h6_kj_kg):
+        print("[WARN] LHV E94H6 (94/6) nao encontrado no lhv.csv; n_th_E94H6_eq_flow ficara vazio.")
 
     df["n_th"] = PkW / (mdot * LHVv)
     df.loc[(PkW <= 0) | (mdot <= 0) | (LHVv <= 0), "n_th"] = pd.NA
@@ -2380,6 +2408,20 @@ def build_final_table(
         except Exception:
             lambda_col = None
     df = add_airflow_channels_inplace(df, lambda_col=lambda_col)
+
+    # Thermal efficiency based on E94H6 equivalent flow:
+    # n_th_E94H6_eq_flow = P / (m_dot_eq_E94H6 * LHV_E94H6)
+    F_eq_kgh = pd.to_numeric(df.get("Fuel_E94H6_eq_kg_h", pd.NA), errors="coerce")
+    mdot_eq = F_eq_kgh / 3600.0
+    lhv_e94_series = pd.to_numeric(df.get("LHV_E94H6_kJ_kg", pd.NA), errors="coerce")
+    qdot_mix_lhv = mdot * LHVv
+    qdot_eq_e94 = mdot_eq * lhv_e94_series
+
+    df["Qdot_fuel_LHV_mix_kW"] = qdot_mix_lhv
+    df["Qdot_fuel_E94H6_eq_kW"] = qdot_eq_e94
+    df["n_th_E94H6_eq_flow"] = PkW / qdot_eq_e94
+    df.loc[(PkW <= 0) | (mdot_eq <= 0) | (lhv_e94_series <= 0), "n_th_E94H6_eq_flow"] = pd.NA
+    df["n_th_E94H6_eq_flow_pct"] = df["n_th_E94H6_eq_flow"] * 100.0
 
     t_cil_cols = [
         "T_S_CIL_1_mean_of_windows",
@@ -2752,6 +2794,138 @@ def _plot_ethanol_equivalent_ratio(df: pd.DataFrame, *, plot_dir: Optional[Path]
     plt.grid(True, which="both", linestyle="--", linewidth=0.5)
     plt.legend()
     outpath = target_dir / "consumo_equiv_etanol_ratio_pct_vs_upd_power.png"
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=200)
+    plt.close()
+    print(f"[OK] Salvei {outpath}")
+
+
+def _plot_nth_e94h6_eq_flow(df: pd.DataFrame, *, plot_dir: Optional[Path] = None) -> None:
+    target_dir = PLOTS_DIR if plot_dir is None else plot_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    x_col = "UPD_Power_Bin_kW" if "UPD_Power_Bin_kW" in df.columns else ("UPD_Power_kW" if "UPD_Power_kW" in df.columns else None)
+    y_col = "n_th_E94H6_eq_flow_pct"
+    if x_col is None or y_col not in df.columns:
+        print(
+            "[WARN] Plot n_th_E94H6_eq_flow: faltam colunas requeridas "
+            f"(x={x_col}, y={y_col if y_col in df.columns else None}). Pulei."
+        )
+        return
+
+    blend_specs = [
+        ("E94H6", 94.0, 6.0, "#1f77b4"),
+        ("E75H25", 75.0, 25.0, "#ff7f0e"),
+        ("E65H35", 65.0, 35.0, "#2ca02c"),
+    ]
+
+    plt.figure()
+    any_curve = False
+    for label, etoh_pct, h2o_pct, color in blend_specs:
+        m = _blend_mask(df, etoh_pct=etoh_pct, h2o_pct=h2o_pct)
+        d = df[m].copy()
+        d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
+        d[y_col] = pd.to_numeric(d[y_col], errors="coerce")
+        d = d.dropna(subset=[x_col, y_col]).sort_values(x_col)
+        if d.empty:
+            print(f"[WARN] Plot n_th_E94H6_eq_flow: sem dados para {label}.")
+            continue
+        any_curve = True
+        plt.plot(d[x_col], d[y_col], "o-", label=label, color=color, linewidth=1.8, markersize=5)
+
+    if not any_curve:
+        plt.close()
+        print("[WARN] Plot n_th_E94H6_eq_flow: nenhum blend alvo com dados. Pulei.")
+        return
+
+    plt.xlim(0.0, 55.0)
+    plt.xticks(np.arange(0.0, 55.0 + 1e-12, 5.0).tolist())
+    plt.xlabel("Potencia UPD medida (kW, bin 0.1)")
+    plt.ylabel("Thermal efficiency (%)")
+    plt.title("n_th_E94H6_eq_flow vs potencia UPD (all fuels)")
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+    _apply_y_tick_step(plt.gca(), 2.0)
+    plt.legend()
+    outpath = target_dir / "nth_e94h6_eq_flow_vs_upd_power_all.png"
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=200)
+    plt.close()
+    print(f"[OK] Salvei {outpath}")
+
+
+def _plot_nth_lhv_vs_eq6(df: pd.DataFrame, *, plot_dir: Optional[Path] = None) -> None:
+    target_dir = PLOTS_DIR if plot_dir is None else plot_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    x_col = "UPD_Power_Bin_kW" if "UPD_Power_Bin_kW" in df.columns else ("UPD_Power_kW" if "UPD_Power_kW" in df.columns else None)
+    y_lhv = "n_th_pct"
+    y_eq = "n_th_E94H6_eq_flow_pct"
+    if x_col is None or y_lhv not in df.columns or y_eq not in df.columns:
+        print(
+            "[WARN] Plot comparacao 6 n_th: faltam colunas requeridas "
+            f"(x={x_col}, y_lhv={y_lhv in df.columns}, y_eq={y_eq in df.columns}). Pulei."
+        )
+        return
+
+    blend_specs = [
+        ("E94H6", 94.0, 6.0, "#1f77b4"),
+        ("E75H25", 75.0, 25.0, "#ff7f0e"),
+        ("E65H35", 65.0, 35.0, "#2ca02c"),
+    ]
+
+    plt.figure()
+    any_curve = False
+    for label, etoh_pct, h2o_pct, color in blend_specs:
+        m = _blend_mask(df, etoh_pct=etoh_pct, h2o_pct=h2o_pct)
+        d = df[m].copy()
+        d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
+        d[y_lhv] = pd.to_numeric(d[y_lhv], errors="coerce")
+        d[y_eq] = pd.to_numeric(d[y_eq], errors="coerce")
+        d = d.dropna(subset=[x_col]).sort_values(x_col)
+        if d.empty:
+            print(f"[WARN] Plot comparacao 6 n_th: sem dados para {label}.")
+            continue
+
+        d_lhv = d.dropna(subset=[y_lhv])
+        if not d_lhv.empty:
+            any_curve = True
+            plt.plot(
+                d_lhv[x_col],
+                d_lhv[y_lhv],
+                "o-",
+                label=f"{label} | n_th_lhv",
+                color=color,
+                linewidth=1.8,
+                markersize=5,
+            )
+
+        d_eq = d.dropna(subset=[y_eq])
+        if not d_eq.empty:
+            any_curve = True
+            plt.plot(
+                d_eq[x_col],
+                d_eq[y_eq],
+                "s--",
+                label=f"{label} | n_th_E94H6_eq_flow",
+                color=color,
+                linewidth=1.8,
+                markersize=4.5,
+            )
+
+    if not any_curve:
+        plt.close()
+        print("[WARN] Plot comparacao 6 n_th: nenhuma curva valida. Pulei.")
+        return
+
+    plt.xlim(0.0, 55.0)
+    plt.xticks(np.arange(0.0, 55.0 + 1e-12, 5.0).tolist())
+    plt.xlabel("Potencia UPD medida (kW, bin 0.1)")
+    plt.ylabel("Thermal efficiency (%)")
+    plt.title("Comparacao n_th: LHV da mistura vs E94H6 equivalente (6 curvas)")
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+    _apply_y_tick_step(plt.gca(), 2.0)
+    plt.legend()
+    outpath = target_dir / "nth_lhv_vs_e94h6_eq_flow_6curves.png"
     plt.tight_layout()
     plt.savefig(outpath, dpi=200)
     plt.close()
@@ -3631,6 +3805,8 @@ def main() -> None:
         make_plots_from_config(out_group, plots_df, mappings=mappings, plot_dir=plot_dir)
         _plot_ethanol_equivalent_consumption_overlay(out_group, plot_dir=plot_dir)
         _plot_ethanol_equivalent_ratio(out_group, plot_dir=plot_dir)
+        _plot_nth_e94h6_eq_flow(out_group, plot_dir=plot_dir)
+        _plot_nth_lhv_vs_eq6(out_group, plot_dir=plot_dir)
 
     compare_groups = iter_compare_plot_groups(out, root=PLOTS_DIR)
     if compare_groups:

@@ -872,3 +872,41 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
     - `OUT_DIR = C:\Users\SC61730\Downloads\out_mestrado`;
   - os dois PNGs novos foram gerados em:
     - `C:\Users\SC61730\Downloads\out_mestrado\plots\raw\`.
+
+## n_th por fluxo equivalente E94H6 + comparacao 6 curvas - 2026-03-09
+- Pedido:
+  - manter `n_th` original (com LHV da mistura);
+  - adicionar `n_th` com base em energia disponivel por vazao equivalente E94H6;
+  - gerar:
+    - grafico dedicado de `n_th_E94H6_eq_flow`;
+    - grafico de comparacao com 6 curvas (3 misturas com LHV original + 3 misturas com equivalente E94H6).
+- Implementacao em `nanum_pipeline_28.py`:
+  - novo lookup robusto de LHV para blend de referencia:
+    - `_lookup_lhv_for_blend(...)`;
+    - busca `EtOH_pct/H2O_pct` com tolerancia de `0.6`.
+  - no `build_final_table()`:
+    - nova coluna de referencia: `LHV_E94H6_kJ_kg`;
+    - nova energia quimica por LHV original: `Qdot_fuel_LHV_mix_kW`;
+    - nova energia quimica por equivalente E94H6: `Qdot_fuel_E94H6_eq_kW`;
+    - nova eficiencia: `n_th_E94H6_eq_flow`;
+    - nova eficiencia em percentual: `n_th_E94H6_eq_flow_pct`.
+  - regra aplicada:
+    - `n_th_E94H6_eq_flow = PkW / ((Fuel_E94H6_eq_kg_h/3600) * LHV_E94H6_kJ_kg)`;
+    - invalida quando potencia, vazao equivalente ou LHV de referencia forem nao positivos.
+- Novos plots automaticos no fluxo final:
+  - `nth_e94h6_eq_flow_vs_upd_power_all.png`:
+    - apenas `E94H6`, `E75H25`, `E65H35` para `n_th_E94H6_eq_flow_pct`;
+  - `nth_lhv_vs_e94h6_eq_flow_6curves.png`:
+    - 6 curvas:
+      - `E94H6 | n_th_lhv` e `E94H6 | n_th_E94H6_eq_flow`;
+      - `E75H25 | n_th_lhv` e `E75H25 | n_th_E94H6_eq_flow`;
+      - `E65H35 | n_th_lhv` e `E65H35 | n_th_E94H6_eq_flow`.
+- Validacao:
+  - run completo concluido com:
+    - `RAW_INPUT_DIR = C:\Users\SC61730\Downloads\raw_mestrado`;
+    - `OUT_DIR = C:\Users\SC61730\Downloads\out_mestrado`;
+  - os dois PNGs novos foram gerados em:
+    - `C:\Users\SC61730\Downloads\out_mestrado\plots\raw\`;
+  - checagem em `lv_kpis_clean.xlsx` confirmou:
+    - `n_th_E94H6_eq_flow_pct` presente;
+    - para `E94H6`, `n_th_pct == n_th_E94H6_eq_flow_pct` (como esperado).
