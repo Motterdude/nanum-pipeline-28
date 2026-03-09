@@ -1669,32 +1669,25 @@ def apply_runtime_path_overrides(defaults_cfg: Dict[str, str]) -> None:
     input_dir = _resolve_runtime_dir(raw_input_cfg, DEFAULT_PROCESS_DIR)
     out_dir = _resolve_runtime_dir(out_dir_cfg, DEFAULT_OUT_DIR)
 
-    if raw_input_cfg and (not input_dir.exists() or not input_dir.is_dir()):
-        fallback_input_dir = DEFAULT_PROCESS_DIR
-        if fallback_input_dir.exists() and fallback_input_dir.is_dir():
-            print(
-                f"[WARN] RAW_INPUT_DIR configurado nao esta disponivel neste PC: {input_dir}. "
-                f"Usando fallback local: {fallback_input_dir}"
-            )
-            input_dir = fallback_input_dir
+    if raw_input_cfg:
+        print(f"[INFO] RAW_INPUT_DIR (Excel): {input_dir}")
+    else:
+        print(f"[INFO] RAW_INPUT_DIR vazio no Excel; usando default: {input_dir}")
+
+    if out_dir_cfg:
+        print(f"[INFO] OUT_DIR (Excel): {out_dir}")
+    else:
+        print(f"[INFO] OUT_DIR vazio no Excel; usando default: {out_dir}")
 
     if not input_dir.exists():
         raise FileNotFoundError(f"Nao encontrei o diretorio configurado em RAW_INPUT_DIR: {input_dir}")
     if not input_dir.is_dir():
         raise NotADirectoryError(f"RAW_INPUT_DIR nao aponta para um diretorio: {input_dir}")
 
-    if out_dir_cfg and not _prepare_output_dir(out_dir):
-        fallback_out_dir = DEFAULT_OUT_DIR
-        if _prepare_output_dir(fallback_out_dir):
-            print(
-                f"[WARN] OUT_DIR configurado nao esta disponivel neste PC: {out_dir}. "
-                f"Usando fallback local: {fallback_out_dir}"
-            )
-            out_dir = fallback_out_dir
-        else:
-            raise FileNotFoundError(
-                f"Nao consegui preparar OUT_DIR configurado ({out_dir}) nem fallback local ({fallback_out_dir})."
-            )
+    if not _prepare_output_dir(out_dir):
+        raise FileNotFoundError(
+            f"Nao consegui preparar o diretorio de saida configurado em OUT_DIR: {out_dir}"
+        )
 
     RAW_DIR = input_dir.parent
     PROCESS_DIR = input_dir

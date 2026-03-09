@@ -779,3 +779,26 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - incluido lock interno para evitar loop de eventos durante a sincronizacao.
 - Resultado esperado:
   - `PCYL_1` e `Q_1` permanecem alinhados no eixo X durante ajustes interativos no viewer.
+
+## Caminhos de runtime estritos via Excel (pipeline28) - 2026-03-09
+- Problema reportado:
+  - o pipeline nao estava respeitando o caminho de input configurado no Excel e acabava buscando em diretorio diferente.
+- Causa raiz:
+  - a aba `Defaults` ainda estava salva com caminhos antigos (`..._tmp_nanum_pipeline_28_remote...`);
+  - o codigo tinha fallback automatico para diretorios default locais quando `RAW_INPUT_DIR/OUT_DIR` falhavam, o que mascarava configuracao incorreta.
+- Correcao aplicada em `nanum_pipeline_28.py`:
+  - `apply_runtime_path_overrides()` passou a operar em modo estrito:
+    - usa exatamente `RAW_INPUT_DIR` e `OUT_DIR` vindos do Excel quando preenchidos;
+    - remove fallback silencioso para defaults;
+    - se `RAW_INPUT_DIR` nao existir, falha com erro explicito;
+    - se `OUT_DIR` nao puder ser criado/acessado, falha com erro explicito.
+  - adicionados logs de diagnostico com os caminhos efetivos lidos do Excel:
+    - `[INFO] RAW_INPUT_DIR (Excel): ...`
+    - `[INFO] OUT_DIR (Excel): ...`
+- Correcao aplicada no `config/config_incertezas_rev3.xlsx` (aba `Defaults`):
+  - `RAW_INPUT_DIR = C:\Users\SC61730\Downloads\raw_mestrado`
+  - `OUT_DIR = C:\Users\SC61730\Downloads\out_mestrado`
+- Validacao executada:
+  - run completo do `nanum_pipeline_28.py` concluido com sucesso;
+  - log confirmou uso exato dos caminhos acima;
+  - saidas geradas em `C:\Users\SC61730\Downloads\out_mestrado` (`lv_time_diagnostics.xlsx`, `lv_diagnostics_summay.xlsx`, `lv_kpis_clean.xlsx` e plots).
