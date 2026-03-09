@@ -677,3 +677,32 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - `requirements_gui_viewer.txt`
   - `config/config_incertezas_rev3.xlsx`
   - `HANDOFF_GLOBAL.md`
+
+## Ambiente e execucao versionados - 2026-03-08
+- Para reduzir dependencia de ambiente solto e configuracao manual fora do repo, foram adicionados artefatos de execucao versionados:
+  - `requirements_pipeline.txt`;
+  - `requirements_full.txt`;
+  - `setup_env.ps1`;
+  - `README_EXECUCAO.md`.
+- Objetivo:
+  - permitir criar uma `.venv` local do repo em qualquer PC;
+  - registrar no Git quais pacotes sao necessarios para o `pipeline28` e para o viewer Qt rapido;
+  - manter no proprio repo a instrucao operacional de setup e execucao.
+- Dependencias de referencia do pipeline:
+  - `pandas 3.0.1`;
+  - `numpy 2.4.2`;
+  - `matplotlib 3.10.8`;
+  - `openpyxl 3.1.5`;
+  - `python-calamine 0.6.2`.
+- Dependencias adicionais do viewer rapido:
+  - `PySide6 6.10.2`;
+  - `pyqtgraph 0.14.0`.
+- `README_EXECUCAO.md` centraliza:
+  - quais arquivos precisam existir para rodar;
+  - o que fica fora do Git;
+  - como criar o ambiente;
+  - como rodar pipeline e viewers;
+  - regras para evitar conflito entre PCs.
+- `setup_env.ps1` cria `.venv` local e instala:
+  - `requirements_pipeline.txt` por padrao;
+  - `requirements_full.txt` quando usado com `-WithGui`.
