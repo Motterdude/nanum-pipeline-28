@@ -828,3 +828,19 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - `lv_kpis_clean.xlsx` contem `Ignition_Delay_abs_degCA` com `20` linhas validas (de `30`);
   - plot gerado com sucesso em:
     - `C:\Users\SC61730\Downloads\out_mestrado\plots\raw\ignition_delay_vs_upd_power_all.png`.
+
+## Ajuste de escala do plot ignition delay - 2026-03-09
+- Pedido:
+  - eixo Y com marcacao de `0.5 em 0.5 deg`;
+  - eixo X no mesmo padrao visual dos plots KIBOX.
+- Ajuste aplicado na aba `Plots` de `config/config_incertezas_rev3.xlsx` para `ignition_delay_vs_upd_power_all.png`:
+  - `x_min = 0`;
+  - `x_max = 55`;
+  - `x_step = 5`;
+  - `y_step = 0.5`.
+- Mantido:
+  - `x_col = UPD_Power_Bin_kW` (potencia UPD medida, conforme pedido anterior).
+- Validacao:
+  - run completo do pipeline concluido;
+  - plot regenerado em `C:\Users\SC61730\Downloads\out_mestrado\plots\raw\ignition_delay_vs_upd_power_all.png`;
+  - configuracao confirmada no Excel com `x=0..55 step 5` e `y_step=0.5`.
