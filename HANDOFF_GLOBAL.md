@@ -646,3 +646,34 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - campo `y_max` alterado de `90` para `100`.
 - Impacto:
   - o plot `Engine Coolant temperature vs Power (all fuels)` passa a usar teto visual de `100 °C` no eixo Y em vez de `90 °C`.
+
+## Como puxar tudo no PC do trabalho - 2026-03-08
+- Repositorio remoto oficial:
+  - `https://github.com/Motterdude/nanum-pipeline-28`
+- Fluxo recomendado daqui para frente:
+  - usar Git como fonte principal do codigo;
+  - deixar o Drive apenas para dados pesados, backups ou transferencia de arquivos nao versionados.
+- Se o PC do trabalho ainda nao tiver o repo clonado:
+  - abrir um terminal na pasta onde o projeto deve ficar;
+  - rodar:
+    - `git clone https://github.com/Motterdude/nanum-pipeline-28`
+    - `cd nanum-pipeline-28`
+- Se o PC do trabalho ja tiver a pasta clonada:
+  - abrir um terminal dentro da pasta do repo;
+  - conferir se ha mudancas locais com `git status`;
+  - se estiver limpo, rodar:
+    - `git checkout main`
+    - `git pull --ff-only origin main`
+- Se `git status` no PC do trabalho mostrar mudancas locais:
+  - nao dar `pull` por cima sem revisar;
+  - primeiro salvar essas mudancas com commit local ou `git stash`;
+  - depois rodar `git pull --ff-only origin main`.
+- Commits relevantes desta rodada:
+  - `bcf5840` `add multi-file comparison to fast viewer`
+  - `7e4dd5f` `raise coolant plot y max to 100`
+  - `9177a19` `fix block mean selection and 4x3 compare export`
+- Arquivos principais adicionados/ajustados nesta rodada:
+  - `standalone_kibox_cycle_viewer_fast.py`
+  - `requirements_gui_viewer.txt`
+  - `config/config_incertezas_rev3.xlsx`
+  - `HANDOFF_GLOBAL.md`
