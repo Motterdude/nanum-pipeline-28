@@ -760,3 +760,13 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - render de export alterado para `IgnoreAspectRatio` para preencher completamente o canvas fixo de export e remover barras/espacos laterais.
 - Resultado esperado:
   - PNGs exportados mais legiveis para documento/apresentacao, mantendo a experiencia interativa escura no app.
+
+## Reversao de estilo de export para fidelidade com o real-time - 2026-03-09
+- Problema reportado apos o ajuste anterior:
+  - export ficou visualmente deformado e diferente do que aparece no viewer.
+- Correcao aplicada:
+  - `_export_plot_item_png()` voltou a exportar o plot sem trocar tema, mantendo exatamente o estilo do real-time (cores, textos, grid e fundo).
+  - o tamanho final de export agora preserva a proporcao nativa do plot antes de renderizar, evitando estiramento/deformacao.
+  - o preenchimento do canvas usa o mesmo fundo do `ViewBox` ativo para nao surgir laterais brancas.
+- Resultado esperado:
+  - export fiel ao que esta na tela, sem distorcao geometrica e sem faixas brancas laterais.
