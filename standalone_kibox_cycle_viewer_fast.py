@@ -19,6 +19,18 @@ PCYL_X_RANGE = (-40.0, 80.0)
 Q1_X_RANGE = (-30.0, 90.0)
 COMPARE_EXPORT_SIZE = (1600, 1200)
 
+PEN_PCYL_SELECTED = (0, 245, 255)
+PEN_Q1_SELECTED = (255, 110, 0)
+PEN_BLOCK_MEAN = (255, 235, 59)
+PEN_PMAX_CURVE = (100, 255, 0)
+PEN_PMAX_CURSOR = (255, 0, 140)
+PEN_PMAX_POINT = (255, 0, 140)
+COMPARE_SLOT_COLORS = [
+    (0, 245, 255),
+    (255, 110, 0),
+    (180, 255, 0),
+]
+
 
 @dataclass
 class CurveData:
@@ -452,12 +464,7 @@ class FastCycleViewer(QtWidgets.QWidget):
         compare_action_row.addWidget(compare_hint)
         compare_action_row.addStretch(1)
 
-        slot_colors = [
-            (31, 119, 180),
-            (255, 127, 14),
-            (44, 160, 44),
-        ]
-        for slot_index, color in enumerate(slot_colors, start=1):
+        for slot_index, color in enumerate(COMPARE_SLOT_COLORS, start=1):
             slot_row = QtWidgets.QHBoxLayout()
             compare_layout.addLayout(slot_row)
 
@@ -532,20 +539,20 @@ class FastCycleViewer(QtWidgets.QWidget):
         self.pmax_plot.setXRange(float(self.min_cycle), float(self.max_cycle), padding=0.0)
         self.pmax_plot.setYRange(pmax_min - pmax_pad, pmax_max + pmax_pad, padding=0.0)
 
-        blue = pg.mkPen(color=(31, 119, 180), width=1)
-        orange = pg.mkPen(color=(255, 127, 14), width=1)
-        black = pg.mkPen(color=(40, 40, 40), width=0.9, style=QtCore.Qt.PenStyle.DashLine)
-        green = pg.mkPen(color=(44, 160, 44), width=1)
-        crimson = pg.mkPen(color=(220, 20, 60), width=1)
+        pcyl_pen = pg.mkPen(color=PEN_PCYL_SELECTED, width=1.6)
+        q1_pen = pg.mkPen(color=PEN_Q1_SELECTED, width=1.6)
+        block_pen = pg.mkPen(color=PEN_BLOCK_MEAN, width=1.2, style=QtCore.Qt.PenStyle.DashLine)
+        pmax_pen = pg.mkPen(color=PEN_PMAX_CURVE, width=1.3)
+        cursor_pen = pg.mkPen(color=PEN_PMAX_CURSOR, width=1.2)
 
-        self.pcyl_curve = self.pcyl_plot.plot(pen=blue, name="Selected cycle")
-        self.pcyl_block_curve = self.pcyl_plot.plot(pen=black, name="Block mean")
-        self.q1_curve = self.q1_plot.plot(pen=orange, name="Selected cycle")
-        self.q1_block_curve = self.q1_plot.plot(pen=black, name="Block mean")
-        self.pmax_curve = self.pmax_plot.plot(self.pmax_cycles, self.pmax_values, pen=green, name="PMAX per cycle")
-        self.pmax_cursor = pg.InfiniteLine(pos=float(self.initial_cycle), angle=90, pen=crimson)
+        self.pcyl_curve = self.pcyl_plot.plot(pen=pcyl_pen, name="Selected cycle")
+        self.pcyl_block_curve = self.pcyl_plot.plot(pen=block_pen, name="Block mean")
+        self.q1_curve = self.q1_plot.plot(pen=q1_pen, name="Selected cycle")
+        self.q1_block_curve = self.q1_plot.plot(pen=block_pen, name="Block mean")
+        self.pmax_curve = self.pmax_plot.plot(self.pmax_cycles, self.pmax_values, pen=pmax_pen, name="PMAX per cycle")
+        self.pmax_cursor = pg.InfiniteLine(pos=float(self.initial_cycle), angle=90, pen=cursor_pen)
         self.pmax_plot.addItem(self.pmax_cursor)
-        self.pmax_point = pg.ScatterPlotItem(size=6, brush=pg.mkBrush(220, 20, 60), pen=pg.mkPen(None))
+        self.pmax_point = pg.ScatterPlotItem(size=6, brush=pg.mkBrush(*PEN_PMAX_POINT), pen=pg.mkPen(None))
         self.pmax_plot.addItem(self.pmax_point)
 
         if not self.show_block_mean:
@@ -581,7 +588,7 @@ class FastCycleViewer(QtWidgets.QWidget):
         self.compare_q1_legend = self.compare_q1_plot.addLegend(offset=(10, 10))
 
         for slot in self.compare_slots:
-            pen = pg.mkPen(color=slot.color, width=1)
+            pen = pg.mkPen(color=slot.color, width=1.5)
             slot.pcyl_curve = self.compare_pcyl_plot.plot(pen=pen)
             slot.q1_curve = self.compare_q1_plot.plot(pen=pen)
             slot.pcyl_curve.hide()
@@ -799,7 +806,7 @@ class FastCycleViewer(QtWidgets.QWidget):
                 continue
 
             pen_style = QtCore.Qt.PenStyle.SolidLine if selection.mode == "Cycle" else QtCore.Qt.PenStyle.DashLine
-            curve.setPen(pg.mkPen(color=slot.color, width=1, style=pen_style))
+            curve.setPen(pg.mkPen(color=slot.color, width=1.5, style=pen_style))
             curve.setData(selection.x, selection.y)
             curve.show()
             visible_selections.append(selection)

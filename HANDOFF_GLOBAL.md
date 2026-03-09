@@ -735,3 +735,16 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
     - `standalone_kibox_cycle_viewer_fast.py`.
 - Documentacao atualizada:
   - `README_EXECUCAO.md` agora lista apenas o viewer rapido no fluxo operacional.
+
+## Ajuste visual no viewer rapido KIBOX (fundo preto) - 2026-03-09
+- Pedido: melhorar contraste de `pressure trace` (`PCYL_1`) e `heat release` (`Q_1`) no tema com fundo preto.
+- Correcao aplicada em `standalone_kibox_cycle_viewer_fast.py`:
+  - paleta principal trocada para cores vividas/neon:
+    - `PCYL_1` selecionado: ciano neon;
+    - `Q_1` selecionado: laranja vivo;
+    - `Block mean`: amarelo vivo tracejado.
+  - espessura das curvas aumentada para facilitar leitura:
+    - viewer principal (`PCYL_1`/`Q_1`) e compare (`slots`) com linhas mais espessas.
+  - cores de `PMAX` tambem reforcadas para manter consistencia visual no tema escuro.
+- Resultado esperado:
+  - melhor separacao visual das curvas sobre fundo preto, tanto na aba `Viewer` quanto na aba `Compare`.
