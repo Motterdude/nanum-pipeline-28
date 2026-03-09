@@ -2618,6 +2618,146 @@ def _apply_y_tick_step(ax: plt.Axes, y_tick_step: Optional[float]) -> None:
     ax.set_ylim(ymin, ymax)
 
 
+def _blend_mask(df: pd.DataFrame, *, etoh_pct: float, h2o_pct: float, tol: float = 0.6) -> pd.Series:
+    etoh = pd.to_numeric(df.get("EtOH_pct", pd.Series(pd.NA, index=df.index)), errors="coerce")
+    h2o = pd.to_numeric(df.get("H2O_pct", pd.Series(pd.NA, index=df.index)), errors="coerce")
+    return (etoh.sub(etoh_pct).abs() <= tol) & (h2o.sub(h2o_pct).abs() <= tol)
+
+
+def _plot_ethanol_equivalent_consumption_overlay(df: pd.DataFrame, *, plot_dir: Optional[Path] = None) -> None:
+    target_dir = PLOTS_DIR if plot_dir is None else plot_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    x_col = "UPD_Power_Bin_kW" if "UPD_Power_Bin_kW" in df.columns else ("UPD_Power_kW" if "UPD_Power_kW" in df.columns else None)
+    y_col = "Fuel_E94H6_eq_kg_h"
+    if x_col is None or y_col not in df.columns:
+        print(
+            "[WARN] Plot consumo equivalente EtOH: faltam colunas requeridas "
+            f"(x={x_col}, y={y_col if y_col in df.columns else None}). Pulei."
+        )
+        return
+
+    # E94H6 remains the measured consumption in this equivalent basis:
+    # Fuel_E94H6_eq_kg_h = Fuel_mix_kg_h * (EtOH_pct/100) / 0.94.
+    # For E94H6, EtOH_pct=94 -> equivalent equals measured.
+    blend_specs = [
+        ("E94H6", 94.0, 6.0),
+        ("E75H25", 75.0, 25.0),
+        ("E65H35", 65.0, 35.0),
+    ]
+
+    plt.figure()
+    any_curve = False
+    for label, etoh_pct, h2o_pct in blend_specs:
+        m = _blend_mask(df, etoh_pct=etoh_pct, h2o_pct=h2o_pct)
+        d = df[m].copy()
+        d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
+        d[y_col] = pd.to_numeric(d[y_col], errors="coerce")
+        d = d.dropna(subset=[x_col, y_col]).sort_values(x_col)
+        if d.empty:
+            print(f"[WARN] Plot consumo equivalente EtOH: sem dados para {label}.")
+            continue
+        any_curve = True
+        plt.plot(d[x_col], d[y_col], "o-", label=label)
+
+    if not any_curve:
+        plt.close()
+        print("[WARN] Plot consumo equivalente EtOH: nenhum blend alvo com dados. Pulei.")
+        return
+
+    plt.xlabel("Potencia UPD medida (kW, bin 0.1)")
+    plt.ylabel("Consumo equivalente E94H6 (kg/h)")
+    plt.title("Consumo equivalente de etanol vs potencia UPD (E94H6/E75H25/E65H35)")
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+    plt.legend()
+    outpath = target_dir / "consumo_equiv_etanol_vs_upd_power_overlay.png"
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=200)
+    plt.close()
+    print(f"[OK] Salvei {outpath}")
+
+
+def _plot_ethanol_equivalent_ratio(df: pd.DataFrame, *, plot_dir: Optional[Path] = None) -> None:
+    target_dir = PLOTS_DIR if plot_dir is None else plot_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    y_col = "Fuel_E94H6_eq_kg_h"
+    if y_col not in df.columns or "Load_kW" not in df.columns:
+        print(
+            "[WARN] Plot razao consumo equivalente EtOH: faltam colunas requeridas "
+            f"(Load_kW={ 'Load_kW' in df.columns }, y={ y_col in df.columns }). Pulei."
+        )
+        return
+
+    base = df[_blend_mask(df, etoh_pct=94.0, h2o_pct=6.0)].copy()
+    base["Load_kW"] = pd.to_numeric(base["Load_kW"], errors="coerce")
+    base["UPD_Power_Bin_kW"] = pd.to_numeric(base.get("UPD_Power_Bin_kW", pd.NA), errors="coerce")
+    base[y_col] = pd.to_numeric(base[y_col], errors="coerce")
+    base = base.dropna(subset=["Load_kW", y_col]).copy()
+    if base.empty:
+        print("[WARN] Plot razao consumo equivalente EtOH: sem dados base para E94H6. Pulei.")
+        return
+
+    plt.figure()
+    any_curve = False
+    ratio_specs = [
+        ("E94H6 / E75H25", 75.0, 25.0, "ratio_pct_e94_over_e75"),
+        ("E94H6 / E65H35", 65.0, 35.0, "ratio_pct_e94_over_e65"),
+    ]
+
+    for label, etoh_pct, h2o_pct, _ in ratio_specs:
+        oth = df[_blend_mask(df, etoh_pct=etoh_pct, h2o_pct=h2o_pct)].copy()
+        oth["Load_kW"] = pd.to_numeric(oth["Load_kW"], errors="coerce")
+        oth[y_col] = pd.to_numeric(oth[y_col], errors="coerce")
+        oth = oth.dropna(subset=["Load_kW", y_col]).copy()
+        if oth.empty:
+            print(f"[WARN] Plot razao consumo equivalente EtOH: sem dados para {label}.")
+            continue
+
+        merged = (
+            base[["Load_kW", "UPD_Power_Bin_kW", y_col]]
+            .rename(columns={y_col: "cons_eq_e94"})
+            .merge(
+                oth[["Load_kW", y_col]].rename(columns={y_col: "cons_eq_other"}),
+                on="Load_kW",
+                how="inner",
+            )
+        )
+        merged["ratio_pct"] = 100.0 * merged["cons_eq_e94"] / merged["cons_eq_other"]
+        merged = merged.dropna(subset=["ratio_pct"]).copy()
+        if merged.empty:
+            print(f"[WARN] Plot razao consumo equivalente EtOH: sem pares validos para {label}.")
+            continue
+
+        x = pd.to_numeric(merged["UPD_Power_Bin_kW"], errors="coerce")
+        if x.notna().sum() == 0:
+            x = pd.to_numeric(merged["Load_kW"], errors="coerce")
+        merged = merged.assign(_x=x).dropna(subset=["_x"]).sort_values("_x")
+        if merged.empty:
+            print(f"[WARN] Plot razao consumo equivalente EtOH: sem eixo X valido para {label}.")
+            continue
+
+        any_curve = True
+        plt.plot(merged["_x"], merged["ratio_pct"], "o-", label=label)
+
+    if not any_curve:
+        plt.close()
+        print("[WARN] Plot razao consumo equivalente EtOH: nenhum ratio valido. Pulei.")
+        return
+
+    plt.axhline(100.0, color="gray", linestyle="--", linewidth=1.0, label="100%")
+    plt.xlabel("Potencia UPD medida (kW, bin 0.1)")
+    plt.ylabel("Razao percentual de consumo equivalente (%)")
+    plt.title("Razao percentual de consumo equivalente (E94H6 vs E75H25 / E65H35)")
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+    plt.legend()
+    outpath = target_dir / "consumo_equiv_etanol_ratio_pct_vs_upd_power.png"
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=200)
+    plt.close()
+    print(f"[OK] Salvei {outpath}")
+
+
 def plot_all_fuels(
     df: pd.DataFrame,
     y_col: str,
@@ -3489,6 +3629,8 @@ def main() -> None:
         source_label = source_folder if source_folder else "(raiz PROCESSAR)"
         print(f"[INFO] Gerando plots finais em {plot_dir} para {source_label}.")
         make_plots_from_config(out_group, plots_df, mappings=mappings, plot_dir=plot_dir)
+        _plot_ethanol_equivalent_consumption_overlay(out_group, plot_dir=plot_dir)
+        _plot_ethanol_equivalent_ratio(out_group, plot_dir=plot_dir)
 
     compare_groups = iter_compare_plot_groups(out, root=PLOTS_DIR)
     if compare_groups:

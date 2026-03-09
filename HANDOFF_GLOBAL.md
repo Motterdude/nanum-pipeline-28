@@ -844,3 +844,31 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - run completo do pipeline concluido;
   - plot regenerado em `C:\Users\SC61730\Downloads\out_mestrado\plots\raw\ignition_delay_vs_upd_power_all.png`;
   - configuracao confirmada no Excel com `x=0..55 step 5` e `y_step=0.5`.
+
+## Consumo equivalente de etanol (E94H6 x E75H25 x E65H35) - 2026-03-09
+- Pedido:
+  - usar a conta de consumo equivalente de etanol para compensar o efeito da agua nas misturas hidratadas;
+  - sobrepor `E94H6` (consumo lido na base equivalente), `E75H25` e `E65H35`;
+  - criar grafico adicional de razao percentual para validar a coerencia da conta.
+- Base de calculo adotada (ja existente no pipeline):
+  - `Fuel_E94H6_eq_kg_h = Fuel_EtOH_pure_kg_h / 0.94`;
+  - para `E94H6` isso preserva o consumo lido (equivalente ao valor medido).
+- Implementacao em `nanum_pipeline_28.py`:
+  - nova rotina `_plot_ethanol_equivalent_consumption_overlay(...)`;
+  - nova rotina `_plot_ethanol_equivalent_ratio(...)`;
+  - selecao de blends por `EtOH_pct/H2O_pct` com tolerancia de `0.6` ponto percentual;
+  - integracao no fluxo final de plots por `source_folder`.
+- Graficos gerados:
+  - `consumo_equiv_etanol_vs_upd_power_overlay.png`:
+    - sobreposicao de `Fuel_E94H6_eq_kg_h` vs `UPD_Power_Bin_kW` para `E94H6`, `E75H25`, `E65H35`;
+  - `consumo_equiv_etanol_ratio_pct_vs_upd_power.png`:
+    - `100 * (E94H6 / E75H25)` e `100 * (E94H6 / E65H35)` com linha de referencia em `100%`.
+- Regra para dados faltantes (confirmada):
+  - se faltar dado de um blend especifico, apenas aquela curva e pulada;
+  - o grafico so e pulado quando nenhuma curva valida existe.
+- Validacao:
+  - run completo executado com sucesso em:
+    - `RAW_INPUT_DIR = C:\Users\SC61730\Downloads\raw_mestrado`;
+    - `OUT_DIR = C:\Users\SC61730\Downloads\out_mestrado`;
+  - os dois PNGs novos foram gerados em:
+    - `C:\Users\SC61730\Downloads\out_mestrado\plots\raw\`.
