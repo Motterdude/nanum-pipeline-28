@@ -910,3 +910,22 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - checagem em `lv_kpis_clean.xlsx` confirmou:
     - `n_th_E94H6_eq_flow_pct` presente;
     - para `E94H6`, `n_th_pct == n_th_E94H6_eq_flow_pct` (como esperado).
+
+## Delta percentual no ratio de consumo equivalente - 2026-03-09
+- Pedido:
+  - no grafico `consumo_equiv_etanol_ratio_pct_vs_upd_power`, exibir delta percentual relativo a `100%`;
+  - exemplo de regra: `102%` deve aparecer como `+2%`.
+- Ajuste aplicado em `nanum_pipeline_28.py`:
+  - dentro de `_plot_ethanol_equivalent_ratio(...)`:
+    - mantem conta base `ratio_pct = 100 * (E94H6 / blend)` apenas como intermediaria;
+    - novo valor plotado: `delta_pct = ratio_pct - 100`.
+  - linha de referencia alterada:
+    - de `100%` para `0% (ref = 100%)`.
+  - textos do grafico atualizados para refletir `delta percentual`.
+- Resultado visual:
+  - `+2` no eixo Y significa `E94H6` consome `2%` a mais (equivalente) que a mistura comparada naquele ponto;
+  - `-2` significa `2%` a menos.
+- Validacao:
+  - run completo do pipeline concluido com sucesso;
+  - plot atualizado em:
+    - `C:\Users\SC61730\Downloads\out_mestrado\plots\raw\consumo_equiv_etanol_ratio_pct_vs_upd_power.png`.

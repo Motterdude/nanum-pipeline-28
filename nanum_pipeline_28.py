@@ -2766,7 +2766,8 @@ def _plot_ethanol_equivalent_ratio(df: pd.DataFrame, *, plot_dir: Optional[Path]
             )
         )
         merged["ratio_pct"] = 100.0 * merged["cons_eq_e94"] / merged["cons_eq_other"]
-        merged = merged.dropna(subset=["ratio_pct"]).copy()
+        merged["delta_pct"] = merged["ratio_pct"] - 100.0
+        merged = merged.dropna(subset=["delta_pct"]).copy()
         if merged.empty:
             print(f"[WARN] Plot razao consumo equivalente EtOH: sem pares validos para {label}.")
             continue
@@ -2780,17 +2781,17 @@ def _plot_ethanol_equivalent_ratio(df: pd.DataFrame, *, plot_dir: Optional[Path]
             continue
 
         any_curve = True
-        plt.plot(merged["_x"], merged["ratio_pct"], "o-", label=label)
+        plt.plot(merged["_x"], merged["delta_pct"], "o-", label=label)
 
     if not any_curve:
         plt.close()
         print("[WARN] Plot razao consumo equivalente EtOH: nenhum ratio valido. Pulei.")
         return
 
-    plt.axhline(100.0, color="gray", linestyle="--", linewidth=1.0, label="100%")
+    plt.axhline(0.0, color="gray", linestyle="--", linewidth=1.0, label="0% (ref = 100%)")
     plt.xlabel("Potencia UPD medida (kW, bin 0.1)")
-    plt.ylabel("Razao percentual de consumo equivalente (%)")
-    plt.title("Razao percentual de consumo equivalente (E94H6 vs E75H25 / E65H35)")
+    plt.ylabel("Delta percentual de consumo equivalente (%)")
+    plt.title("Delta percentual de consumo equivalente (ref=100%)")
     plt.grid(True, which="both", linestyle="--", linewidth=0.5)
     plt.legend()
     outpath = target_dir / "consumo_equiv_etanol_ratio_pct_vs_upd_power.png"
