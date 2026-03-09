@@ -94,6 +94,28 @@ git pull --ff-only origin main
 4. Nao usar o Drive como fonte principal do codigo. O codigo deve vir do Git. O Drive fica para dados pesados e backup.
 5. Nao apontar o VS Code para Python aleatorio do Windows. Use a `.venv` local do repo.
 
+## Retomar em casa sem atrito
+1. Sincronize o repo:
+```powershell
+git fetch --all --tags
+git checkout main
+git pull --ff-only origin main
+```
+2. Se quiser exatamente o mesmo estado do laboratorio em 2026-03-09:
+```powershell
+git checkout checkpoint-2026-03-09-lab-sync
+# opcional para continuar trabalhando
+git switch -c continue-from-lab
+```
+3. Recrie/atualize a `.venv` deste repo:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup_env.ps1 -WithGui
+```
+4. Ajuste `RAW_INPUT_DIR` e `OUT_DIR` na aba `Defaults` de `config/config_incertezas_rev3.xlsx` para caminhos existentes no PC de casa.
+5. Rode o pipeline e valide no log as linhas:
+   - `[INFO] RAW_INPUT_DIR (Excel): ...`
+   - `[INFO] OUT_DIR (Excel): ...`
+
 ## Pacotes usados
 Pipeline:
 - `pandas==3.0.1`

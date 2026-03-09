@@ -929,3 +929,51 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - run completo do pipeline concluido com sucesso;
   - plot atualizado em:
     - `C:\Users\SC61730\Downloads\out_mestrado\plots\raw\consumo_equiv_etanol_ratio_pct_vs_upd_power.png`.
+
+## Transicao sem esforco (trabalho -> casa) - 2026-03-09
+- Objetivo:
+  - retomar o desenvolvimento em casa exatamente do estado atual do laboratorio, sem perder configuracao, codigo ou contexto.
+- Estado de referencia publicado:
+  - branch: `main`;
+  - commit de checkpoint de transicao: `8113457`;
+  - tag de checkpoint: `checkpoint-2026-03-09-lab-sync`;
+  - remoto: `https://github.com/Motterdude/nanum-pipeline-28`.
+- Passo a passo no PC de casa (primeira vez):
+  - `git clone https://github.com/Motterdude/nanum-pipeline-28`
+  - `cd nanum-pipeline-28\Processamentos`
+  - `git fetch --all --tags`
+  - `git checkout main`
+  - `git pull --ff-only origin main`
+- Passo a passo no PC de casa (repo ja existente):
+  - `cd <repo>\Processamentos`
+  - `git status` (garantir limpo ou salvar mudancas locais)
+  - `git fetch --all --tags`
+  - `git checkout main`
+  - `git pull --ff-only origin main`
+- Opcional para reproduzir exatamente o estado do laboratorio:
+  - `git checkout checkpoint-2026-03-09-lab-sync`
+  - opcional: `git switch -c continue-from-lab`
+- Ambiente Python (no repo):
+  - pipeline + viewer:
+    - `powershell -ExecutionPolicy Bypass -File .\setup_env.ps1 -WithGui`
+  - pipeline apenas:
+    - `powershell -ExecutionPolicy Bypass -File .\setup_env.ps1`
+- Configuracao obrigatoria antes de rodar:
+  - abrir `config/config_incertezas_rev3.xlsx` (aba `Defaults`);
+  - ajustar para caminhos locais do PC de casa:
+    - `RAW_INPUT_DIR`
+    - `OUT_DIR`
+  - observacao: se `RAW_INPUT_DIR` estiver preenchido e nao existir, o pipeline para com erro explicito (sem fallback silencioso).
+- Execucao:
+  - `& ".\.venv\Scripts\python.exe" .\nanum_pipeline_28.py`
+- Confirmacao rapida no log:
+  - validar estas linhas no inicio:
+    - `[INFO] RAW_INPUT_DIR (Excel): ...`
+    - `[INFO] OUT_DIR (Excel): ...`
+  - isso garante que a execucao esta lendo exatamente os caminhos esperados no PC de casa.
+- Regra de retorno para o laboratorio (mesmo fluxo):
+  - antes de sair de casa:
+    - `git add ...`
+    - `git commit -m "..."`
+    - `git push origin main`
+  - registrar no `HANDOFF_GLOBAL.md` o que mudou (codigo, planilha e validacao).
