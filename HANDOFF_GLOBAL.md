@@ -977,3 +977,26 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
     - `git commit -m "..."`
     - `git push origin main`
   - registrar no `HANDOFF_GLOBAL.md` o que mudou (codigo, planilha e validacao).
+
+## Execucao com RAW_NANUM + robustez de ignition delay sem Motec/KIBOX - 2026-03-10
+- Pedido operacional:
+  - rodar usando `RAW_INPUT_DIR = C:\Users\SC61730\Downloads\raw_NANUM`.
+- Ajuste aplicado na configuracao:
+  - `config/config_incertezas_rev3.xlsx` (aba `Defaults`):
+    - `RAW_INPUT_DIR` atualizado para `C:\Users\SC61730\Downloads\raw_NANUM`;
+    - `OUT_DIR` mantido em `C:\Users\SC61730\Downloads\out_mestrado`.
+- Problema identificado durante a primeira execucao:
+  - dataset `raw_NANUM` nao possui colunas Motec/KIBOX necessarias para ignition delay;
+  - o trecho de calculo usava fallback escalar e falhava com:
+    - `AttributeError: 'numpy.float64' object has no attribute 'abs'`.
+- Correcao aplicada em `nanum_pipeline_28.py`:
+  - no calculo de `Ignition_Delay_abs_degCA`, fallback passou a ser `pd.Series(..., index=df.index)` para ambas colunas:
+    - `Motec_Ignition Timing_mean_of_windows`;
+    - `KIBOX_AI05_1`.
+  - com isso, quando a coluna nao existe, o resultado fica `NaN` (comportamento esperado) e o pipeline segue.
+- Validacao:
+  - run completo concluido com sucesso;
+  - log confirmou:
+    - `[INFO] RAW_INPUT_DIR (Excel): C:\Users\SC61730\Downloads\raw_NANUM`
+    - `[INFO] Entrada LabVIEW/Kibox: C:\Users\SC61730\Downloads\raw_NANUM`
+  - saidas geradas em `C:\Users\SC61730\Downloads\out_mestrado`.
