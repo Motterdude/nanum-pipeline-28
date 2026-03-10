@@ -2845,6 +2845,8 @@ def _plot_bl_adtv_consumo_absolute(
     title: str,
     filename: str,
     target_dir: Path,
+    label_bl: str = "BL (baseline_1)",
+    label_adtv: str = "ADTV (aditivado_1)",
 ) -> None:
     if (baseline is None or baseline.empty) and (aditivado is None or aditivado.empty):
         print(f"[WARN] compare iteracoes BL vs ADTV: sem dados para {filename}.")
@@ -2853,12 +2855,12 @@ def _plot_bl_adtv_consumo_absolute(
     plt.figure()
     any_curve = False
     specs = [
-        ("baseline", baseline, "#1f77b4"),
-        ("aditivado", aditivado, "#d62728"),
+        (label_bl, baseline, "#1f77b4"),
+        (label_adtv, aditivado, "#d62728"),
     ]
-    for key, d, color in specs:
+    for label, d, color in specs:
         if d is None or d.empty:
-            print(f"[WARN] compare iteracoes BL vs ADTV: sem dados de consumo para {_campaign_label(key)} em {filename}.")
+            print(f"[WARN] compare iteracoes BL vs ADTV: sem dados de consumo para {label} em {filename}.")
             continue
 
         x = pd.to_numeric(d["Load_kW"], errors="coerce")
@@ -2870,9 +2872,9 @@ def _plot_bl_adtv_consumo_absolute(
 
         any_curve = True
         if p["yerr"].notna().any():
-            plt.errorbar(p["x"], p["y"], yerr=p["yerr"], fmt="o-", capsize=3, linewidth=1.8, markersize=4.5, color=color, label=_campaign_label(key))
+            plt.errorbar(p["x"], p["y"], yerr=p["yerr"], fmt="o-", capsize=3, linewidth=1.8, markersize=4.5, color=color, label=label)
         else:
-            plt.plot(p["x"], p["y"], "o-", linewidth=1.8, markersize=4.5, color=color, label=_campaign_label(key))
+            plt.plot(p["x"], p["y"], "o-", linewidth=1.8, markersize=4.5, color=color, label=label)
 
     if not any_curve:
         plt.close()
@@ -2898,7 +2900,15 @@ def _plot_bl_adtv_consumo_absolute(
     print(f"[OK] Salvei {outpath}")
 
 
-def _build_bl_adtv_delta_table(baseline: pd.DataFrame, aditivado: pd.DataFrame) -> pd.DataFrame:
+def _build_bl_adtv_delta_table(
+    baseline: pd.DataFrame,
+    aditivado: pd.DataFrame,
+    *,
+    label_bl: str = "baseline",
+    label_adtv: str = "aditivado",
+    interpret_neg: str = "economia_aditivado",
+    interpret_pos: str = "piora_aditivado",
+) -> pd.DataFrame:
     if baseline is None or baseline.empty or aditivado is None or aditivado.empty:
         return pd.DataFrame()
 
@@ -2984,10 +2994,12 @@ def _build_bl_adtv_delta_table(baseline: pd.DataFrame, aditivado: pd.DataFrame) 
     m["U_delta_pct_from_uc_direct"] = K_COVERAGE * m["uc_delta_pct_from_uc_direct"]
 
     m["delta_over_U"] = m["delta_pct"] / m["U_delta_pct"]
+    m["label_bl"] = label_bl
+    m["label_adtv"] = label_adtv
     m["interpretacao"] = np.where(
         m["delta_pct"] < 0,
-        "economia_aditivado",
-        "piora_aditivado",
+        interpret_neg,
+        interpret_pos,
     )
     m["significancia_95pct"] = np.where(
         m["delta_pct"].abs() > m["U_delta_pct"],
@@ -3005,8 +3017,21 @@ def _plot_bl_adtv_delta_pct(
     title: str,
     filename: str,
     target_dir: Path,
+    label_line: str = "ADTV vs BL",
+    note_text: str = "Negativo = economia no aditivado; Positivo = piora",
+    label_bl: str = "baseline",
+    label_adtv: str = "aditivado",
+    interpret_neg: str = "economia_aditivado",
+    interpret_pos: str = "piora_aditivado",
 ) -> None:
-    m = _build_bl_adtv_delta_table(baseline, aditivado)
+    m = _build_bl_adtv_delta_table(
+        baseline,
+        aditivado,
+        label_bl=label_bl,
+        label_adtv=label_adtv,
+        interpret_neg=interpret_neg,
+        interpret_pos=interpret_pos,
+    )
     if m.empty:
         print(f"[WARN] compare iteracoes BL vs ADTV: sem pares validos para {filename}.")
         return
@@ -3022,10 +3047,10 @@ def _plot_bl_adtv_delta_pct(
             linewidth=1.8,
             markersize=4.5,
             color="#2ca02c",
-            label="ADTV vs BL",
+            label=label_line,
         )
     else:
-        plt.plot(m["Load_kW"], m["delta_pct"], "o-", linewidth=1.8, markersize=4.5, color="#2ca02c", label="ADTV vs BL")
+        plt.plot(m["Load_kW"], m["delta_pct"], "o-", linewidth=1.8, markersize=4.5, color="#2ca02c", label=label_line)
 
     plt.axhline(0.0, color="gray", linestyle="--", linewidth=1.0, label="0%")
     plt.xlabel("Carga nominal (kW)")
@@ -3036,7 +3061,7 @@ def _plot_bl_adtv_delta_pct(
     plt.gcf().text(
         0.01,
         0.01,
-        "Negativo = economia no aditivado; Positivo = piora",
+        note_text,
         fontsize=8,
         alpha=0.85,
     )
@@ -3059,12 +3084,28 @@ def _export_compare_iteracoes_bl_adtv_excel(
 ) -> None:
     chunks: List[pd.DataFrame] = []
     specs = [
-        ("media_subida_descida", b_med, a_med),
-        ("subida", b_sub, a_sub),
-        ("descida", b_des, a_des),
+        ("media_subida_descida", b_med, a_med, "baseline", "aditivado", "economia_aditivado", "piora_aditivado"),
+        ("subida", b_sub, a_sub, "baseline", "aditivado", "economia_aditivado", "piora_aditivado"),
+        ("descida", b_des, a_des, "baseline", "aditivado", "economia_aditivado", "piora_aditivado"),
+        (
+            "baseline_subida_vs_descida",
+            b_sub,
+            b_des,
+            "baseline_subida",
+            "baseline_descida",
+            "descida_menor_que_subida",
+            "descida_maior_que_subida",
+        ),
     ]
-    for comp_name, b_df, a_df in specs:
-        t = _build_bl_adtv_delta_table(b_df, a_df)
+    for comp_name, b_df, a_df, lbl_bl, lbl_adtv, interp_neg, interp_pos in specs:
+        t = _build_bl_adtv_delta_table(
+            b_df,
+            a_df,
+            label_bl=lbl_bl,
+            label_adtv=lbl_adtv,
+            interpret_neg=interp_neg,
+            interpret_pos=interp_pos,
+        )
         if t.empty:
             print(f"[WARN] compare iteracoes BL vs ADTV: sem dados para export Excel em '{comp_name}'.")
             continue
@@ -3163,6 +3204,29 @@ def _plot_compare_iteracoes_bl_vs_adtv(df: pd.DataFrame, *, root_plot_dir: Optio
         title="Compare iteracoes BL vs ADTV - Delta percentual (descida)",
         filename="compare_iteracoes_bl_vs_adtv_razao_delta_pct_descida.png",
         target_dir=target_dir,
+    )
+
+    _plot_bl_adtv_consumo_absolute(
+        b_sub,
+        b_des,
+        title="Compare baseline subida vs descida - Consumo absoluto",
+        filename="compare_iteracoes_bl_vs_adtv_baseline_subida_vs_descida_consumo_abs.png",
+        target_dir=target_dir,
+        label_bl="Baseline subida",
+        label_adtv="Baseline descida",
+    )
+    _plot_bl_adtv_delta_pct(
+        b_sub,
+        b_des,
+        title="Compare baseline subida vs descida - Delta percentual (descida/subida)",
+        filename="compare_iteracoes_bl_vs_adtv_baseline_subida_vs_descida_razao_delta_pct.png",
+        target_dir=target_dir,
+        label_line="Descida vs Subida (baseline)",
+        note_text="Negativo = descida com menor consumo; Positivo = descida com maior consumo",
+        label_bl="baseline_subida",
+        label_adtv="baseline_descida",
+        interpret_neg="descida_menor_que_subida",
+        interpret_pos="descida_maior_que_subida",
     )
 
 

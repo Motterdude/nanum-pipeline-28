@@ -1072,3 +1072,26 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
 - Regra de sinal mantida:
   - `delta_pct < 0`: economia no aditivado;
   - `delta_pct > 0`: piora no aditivado.
+
+## Dispersao baseline subida vs descida (consumo relativo com incerteza) - 2026-03-10
+- Pedido:
+  - adicionar comparacao dedicada entre `baseline subida` e `baseline descida` para avaliar dispersao;
+  - plotar consumo relativo com incerteza.
+- Implementacao:
+  - reaproveitada a mesma propagacao de incerteza de delta percentual;
+  - nova comparacao adicionada ao workflow BL vs ADTV:
+    - referencia: `baseline_subida`;
+    - comparado: `baseline_descida`;
+    - formula: `delta_pct = 100 * (cons_descida / cons_subida - 1)`.
+- Novos outputs em `compare_iteracoes_bl_vs_adtv`:
+  - `compare_iteracoes_bl_vs_adtv_baseline_subida_vs_descida_consumo_abs.png`
+  - `compare_iteracoes_bl_vs_adtv_baseline_subida_vs_descida_razao_delta_pct.png`
+- Excel detalhado atualizado:
+  - `compare_iteracoes_bl_vs_adtv_consumo_incertezas.xlsx` agora inclui:
+    - `Comparacao = baseline_subida_vs_descida`;
+    - `interpretacao` especifica:
+      - `descida_menor_que_subida`
+      - `descida_maior_que_subida`.
+- Leitura do novo delta:
+  - `delta_pct < 0`: descida consumiu menos que subida;
+  - `delta_pct > 0`: descida consumiu mais que subida.
