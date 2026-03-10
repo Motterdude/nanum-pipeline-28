@@ -2898,6 +2898,106 @@ def _plot_bl_adtv_consumo_absolute(
     print(f"[OK] Salvei {outpath}")
 
 
+def _build_bl_adtv_delta_table(baseline: pd.DataFrame, aditivado: pd.DataFrame) -> pd.DataFrame:
+    if baseline is None or baseline.empty or aditivado is None or aditivado.empty:
+        return pd.DataFrame()
+
+    base_cols = ["Load_kW", "consumo_kg_h", "uA_kg_h", "uB_kg_h", "uc_kg_h", "U_kg_h", "n_points"]
+
+    b = baseline.copy()
+    a = aditivado.copy()
+    for c in base_cols:
+        if c not in b.columns:
+            b[c] = pd.NA
+        if c not in a.columns:
+            a[c] = pd.NA
+
+    b = b[base_cols].rename(
+        columns={
+            "consumo_kg_h": "cons_bl_kg_h",
+            "uA_kg_h": "uA_bl_kg_h",
+            "uB_kg_h": "uB_bl_kg_h",
+            "uc_kg_h": "uc_bl_kg_h",
+            "U_kg_h": "U_bl_kg_h",
+            "n_points": "n_points_bl",
+        }
+    )
+    a = a[base_cols].rename(
+        columns={
+            "consumo_kg_h": "cons_adtv_kg_h",
+            "uA_kg_h": "uA_adtv_kg_h",
+            "uB_kg_h": "uB_adtv_kg_h",
+            "uc_kg_h": "uc_adtv_kg_h",
+            "U_kg_h": "U_adtv_kg_h",
+            "n_points": "n_points_adtv",
+        }
+    )
+
+    m = b.merge(a, on="Load_kW", how="inner")
+    if m.empty:
+        return pd.DataFrame()
+
+    numeric_cols = [
+        "Load_kW",
+        "cons_bl_kg_h",
+        "uA_bl_kg_h",
+        "uB_bl_kg_h",
+        "uc_bl_kg_h",
+        "U_bl_kg_h",
+        "n_points_bl",
+        "cons_adtv_kg_h",
+        "uA_adtv_kg_h",
+        "uB_adtv_kg_h",
+        "uc_adtv_kg_h",
+        "U_adtv_kg_h",
+        "n_points_adtv",
+    ]
+    for c in numeric_cols:
+        m[c] = pd.to_numeric(m[c], errors="coerce")
+
+    m = m.dropna(subset=["Load_kW", "cons_bl_kg_h", "cons_adtv_kg_h"]).copy()
+    m = m[(m["cons_bl_kg_h"] > 0) & (m["cons_adtv_kg_h"] > 0)].copy()
+    if m.empty:
+        return pd.DataFrame()
+
+    m["delta_abs_kg_h"] = m["cons_adtv_kg_h"] - m["cons_bl_kg_h"]
+    m["ratio_adtv_over_bl"] = m["cons_adtv_kg_h"] / m["cons_bl_kg_h"]
+    m["delta_pct"] = 100.0 * (m["ratio_adtv_over_bl"] - 1.0)
+
+    # delta_pct = 100 * (cons_adtv / cons_bl - 1)
+    m["d_delta_d_cons_adtv_pct_per_kgh"] = 100.0 / m["cons_bl_kg_h"]
+    m["d_delta_d_cons_bl_pct_per_kgh"] = -100.0 * m["cons_adtv_kg_h"] / (m["cons_bl_kg_h"] ** 2)
+
+    m["uA_contrib_from_adtv_pct"] = m["d_delta_d_cons_adtv_pct_per_kgh"].abs() * m["uA_adtv_kg_h"]
+    m["uA_contrib_from_bl_pct"] = m["d_delta_d_cons_bl_pct_per_kgh"].abs() * m["uA_bl_kg_h"]
+    m["uA_delta_pct"] = (m["uA_contrib_from_adtv_pct"] ** 2 + m["uA_contrib_from_bl_pct"] ** 2) ** 0.5
+
+    m["uB_contrib_from_adtv_pct"] = m["d_delta_d_cons_adtv_pct_per_kgh"].abs() * m["uB_adtv_kg_h"]
+    m["uB_contrib_from_bl_pct"] = m["d_delta_d_cons_bl_pct_per_kgh"].abs() * m["uB_bl_kg_h"]
+    m["uB_delta_pct"] = (m["uB_contrib_from_adtv_pct"] ** 2 + m["uB_contrib_from_bl_pct"] ** 2) ** 0.5
+
+    m["uc_delta_pct"] = (m["uA_delta_pct"] ** 2 + m["uB_delta_pct"] ** 2) ** 0.5
+    m["U_delta_pct"] = K_COVERAGE * m["uc_delta_pct"]
+
+    rel_uc_ratio = ((m["uc_adtv_kg_h"] / m["cons_adtv_kg_h"]) ** 2 + (m["uc_bl_kg_h"] / m["cons_bl_kg_h"]) ** 2) ** 0.5
+    m["uc_delta_pct_from_uc_direct"] = 100.0 * m["ratio_adtv_over_bl"].abs() * rel_uc_ratio
+    m["U_delta_pct_from_uc_direct"] = K_COVERAGE * m["uc_delta_pct_from_uc_direct"]
+
+    m["delta_over_U"] = m["delta_pct"] / m["U_delta_pct"]
+    m["interpretacao"] = np.where(
+        m["delta_pct"] < 0,
+        "economia_aditivado",
+        "piora_aditivado",
+    )
+    m["significancia_95pct"] = np.where(
+        m["delta_pct"].abs() > m["U_delta_pct"],
+        "diferenca_maior_que_U",
+        "diferenca_dentro_de_U",
+    )
+
+    return m.sort_values("Load_kW").copy()
+
+
 def _plot_bl_adtv_delta_pct(
     baseline: pd.DataFrame,
     aditivado: pd.DataFrame,
@@ -2906,33 +3006,10 @@ def _plot_bl_adtv_delta_pct(
     filename: str,
     target_dir: Path,
 ) -> None:
-    if baseline is None or baseline.empty or aditivado is None or aditivado.empty:
-        print(f"[WARN] compare iteracoes BL vs ADTV: sem pares baseline/aditivado para {filename}.")
-        return
-
-    b = baseline[["Load_kW", "consumo_kg_h", "uc_kg_h"]].rename(
-        columns={"consumo_kg_h": "cons_bl", "uc_kg_h": "uc_bl"}
-    )
-    a = aditivado[["Load_kW", "consumo_kg_h", "uc_kg_h"]].rename(
-        columns={"consumo_kg_h": "cons_adtv", "uc_kg_h": "uc_adtv"}
-    )
-    m = b.merge(a, on="Load_kW", how="inner")
-    m["cons_bl"] = pd.to_numeric(m["cons_bl"], errors="coerce")
-    m["cons_adtv"] = pd.to_numeric(m["cons_adtv"], errors="coerce")
-    m["uc_bl"] = pd.to_numeric(m["uc_bl"], errors="coerce")
-    m["uc_adtv"] = pd.to_numeric(m["uc_adtv"], errors="coerce")
-    m = m.dropna(subset=["Load_kW", "cons_bl", "cons_adtv"]).copy()
-    m = m[(m["cons_bl"] > 0) & (m["cons_adtv"] > 0)].copy()
+    m = _build_bl_adtv_delta_table(baseline, aditivado)
     if m.empty:
         print(f"[WARN] compare iteracoes BL vs ADTV: sem pares validos para {filename}.")
         return
-
-    ratio = m["cons_adtv"] / m["cons_bl"]
-    m["delta_pct"] = 100.0 * (ratio - 1.0)
-    rel_uc = ((m["uc_adtv"] / m["cons_adtv"]) ** 2 + (m["uc_bl"] / m["cons_bl"]) ** 2) ** 0.5
-    m["uc_delta_pct"] = 100.0 * ratio.abs() * rel_uc
-    m["U_delta_pct"] = K_COVERAGE * m["uc_delta_pct"]
-    m = m.sort_values("Load_kW")
 
     plt.figure()
     if m["U_delta_pct"].notna().any():
@@ -2970,6 +3047,43 @@ def _plot_bl_adtv_delta_pct(
     print(f"[OK] Salvei {outpath}")
 
 
+def _export_compare_iteracoes_bl_adtv_excel(
+    *,
+    b_med: pd.DataFrame,
+    a_med: pd.DataFrame,
+    b_sub: pd.DataFrame,
+    a_sub: pd.DataFrame,
+    b_des: pd.DataFrame,
+    a_des: pd.DataFrame,
+    target_dir: Path,
+) -> None:
+    chunks: List[pd.DataFrame] = []
+    specs = [
+        ("media_subida_descida", b_med, a_med),
+        ("subida", b_sub, a_sub),
+        ("descida", b_des, a_des),
+    ]
+    for comp_name, b_df, a_df in specs:
+        t = _build_bl_adtv_delta_table(b_df, a_df)
+        if t.empty:
+            print(f"[WARN] compare iteracoes BL vs ADTV: sem dados para export Excel em '{comp_name}'.")
+            continue
+        t = t.copy()
+        t.insert(0, "Comparacao", comp_name)
+        chunks.append(t)
+
+    if not chunks:
+        print("[WARN] compare iteracoes BL vs ADTV: sem dados para exportar Excel.")
+        return
+
+    out_df = pd.concat(chunks, ignore_index=True)
+    out_df["Load_kW"] = pd.to_numeric(out_df["Load_kW"], errors="coerce")
+    out_df = out_df.sort_values(["Comparacao", "Load_kW"]).copy()
+
+    outpath = safe_to_excel(out_df, target_dir / "compare_iteracoes_bl_vs_adtv_consumo_incertezas.xlsx")
+    print(f"[OK] Salvei {outpath}")
+
+
 def _plot_compare_iteracoes_bl_vs_adtv(df: pd.DataFrame, *, root_plot_dir: Optional[Path] = None) -> None:
     base_root = PLOTS_DIR if root_plot_dir is None else root_plot_dir
     target_dir = base_root / "compare_iteracoes_bl_vs_adtv"
@@ -2995,6 +3109,16 @@ def _plot_compare_iteracoes_bl_vs_adtv(df: pd.DataFrame, *, root_plot_dir: Optio
     a_des = descida[descida["_campaign_bl_adtv"].eq("aditivado")].copy()
     b_med = media_sd[media_sd["_campaign_bl_adtv"].eq("baseline")].copy()
     a_med = media_sd[media_sd["_campaign_bl_adtv"].eq("aditivado")].copy()
+
+    _export_compare_iteracoes_bl_adtv_excel(
+        b_med=b_med,
+        a_med=a_med,
+        b_sub=b_sub,
+        a_sub=a_sub,
+        b_des=b_des,
+        a_des=a_des,
+        target_dir=target_dir,
+    )
 
     _plot_bl_adtv_consumo_absolute(
         b_med,

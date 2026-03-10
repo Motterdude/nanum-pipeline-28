@@ -1039,3 +1039,36 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
     - `C:\Users\SC61730\Downloads\out_mestrado_tmp_bl_adtv_20260310_135920`;
   - ao final, os 6 PNGs novos foram copiados para:
     - `C:\Users\SC61730\Downloads\out_mestrado\plots\compare_iteracoes_bl_vs_adtv`.
+
+## Excel detalhado da propagacao da incerteza no delta BL vs ADTV - 2026-03-10
+- Pedido:
+  - exportar planilha detalhada dos consumos BL/ADTV;
+  - quebrar passo a passo a incerteza da razao para inspecionar por que os deltas parecem pouco conclusivos.
+- Implementacao:
+  - adicionado builder de tabela detalhada:
+    - `_build_bl_adtv_delta_table(...)`;
+  - adicionado export:
+    - `_export_compare_iteracoes_bl_adtv_excel(...)`;
+  - integracao na rotina principal dos compares BL/ADTV.
+- Arquivo gerado:
+  - `compare_iteracoes_bl_vs_adtv_consumo_incertezas.xlsx`
+  - pasta: `C:\Users\SC61730\Downloads\out_mestrado\plots\compare_iteracoes_bl_vs_adtv`
+- Conteudo principal da planilha (por carga e comparacao `subida`, `descida`, `media_subida_descida`):
+  - consumos e incertezas de cada lado:
+    - `cons_bl_kg_h`, `uA_bl_kg_h`, `uB_bl_kg_h`, `uc_bl_kg_h`, `U_bl_kg_h`;
+    - `cons_adtv_kg_h`, `uA_adtv_kg_h`, `uB_adtv_kg_h`, `uc_adtv_kg_h`, `U_adtv_kg_h`.
+  - razao e delta:
+    - `ratio_adtv_over_bl`, `delta_pct`, `delta_abs_kg_h`.
+  - derivadas da propagacao:
+    - `d_delta_d_cons_adtv_pct_per_kgh`;
+    - `d_delta_d_cons_bl_pct_per_kgh`.
+  - contribuicoes por componente:
+    - `uA_contrib_from_adtv_pct`, `uA_contrib_from_bl_pct`, `uA_delta_pct`;
+    - `uB_contrib_from_adtv_pct`, `uB_contrib_from_bl_pct`, `uB_delta_pct`.
+  - combinado final:
+    - `uc_delta_pct`, `U_delta_pct`;
+    - checagem equivalente: `uc_delta_pct_from_uc_direct`, `U_delta_pct_from_uc_direct`;
+    - leitura de impacto: `delta_over_U`, `significancia_95pct`, `interpretacao`.
+- Regra de sinal mantida:
+  - `delta_pct < 0`: economia no aditivado;
+  - `delta_pct > 0`: piora no aditivado.
