@@ -1000,3 +1000,42 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
     - `[INFO] RAW_INPUT_DIR (Excel): C:\Users\SC61730\Downloads\raw_NANUM`
     - `[INFO] Entrada LabVIEW/Kibox: C:\Users\SC61730\Downloads\raw_NANUM`
   - saidas geradas em `C:\Users\SC61730\Downloads\out_mestrado`.
+
+## Compare iteracoes BL vs ADTV (diesel) com incertezas - 2026-03-10
+- Pedido:
+  - comparar consumo diesel entre `baseline_1` e `aditivado_1`;
+  - gerar comparacao para:
+    - media de `subida + descida`;
+    - apenas `subida` (`subindo_baseline_1` vs `subindo_aditivado_1`);
+    - apenas `descida` (`descendo_baseline_1` vs `descendo_aditivado_1`);
+  - entregar consumo absoluto e razao percentual com sinal:
+    - negativo = economia no aditivado;
+    - positivo = piora no aditivado.
+- Implementacao em `nanum_pipeline_28.py`:
+  - nova cadeia de funcoes dedicada:
+    - identificacao de campanha BL/ADTV por `BaseName`;
+    - filtro diesel (`DIES_pct/BIOD_pct > 0`);
+    - agregacao por carga com incertezas;
+    - media entre `subida` e `descida` por campanha;
+    - plot absoluto com barras de erro;
+    - plot de delta percentual com barras de erro propagadas.
+  - incertezas expressas nos graficos:
+    - absoluto: `U = 2*sqrt(uA^2 + uB^2)` (`uA` desvio padrao, `uB` balanca);
+    - delta percentual:
+      - `delta_pct = 100 * (cons_adtv/cons_bl - 1)`;
+      - propagacao por incerteza relativa de BL e ADTV.
+  - integracao no fluxo:
+    - chamada automatica em `main()` via `_plot_compare_iteracoes_bl_vs_adtv(out, root_plot_dir=PLOTS_DIR)`.
+- Arquivos gerados (pasta `plots/compare_iteracoes_bl_vs_adtv`):
+  - `compare_iteracoes_bl_vs_adtv_consumo_medio_subida_descida.png`
+  - `compare_iteracoes_bl_vs_adtv_razao_delta_pct_medio_subida_descida.png`
+  - `compare_iteracoes_bl_vs_adtv_consumo_subida.png`
+  - `compare_iteracoes_bl_vs_adtv_razao_delta_pct_subida.png`
+  - `compare_iteracoes_bl_vs_adtv_consumo_descida.png`
+  - `compare_iteracoes_bl_vs_adtv_razao_delta_pct_descida.png`
+- Observacao operacional:
+  - durante a execucao, `out_mestrado` estava com arquivo Excel aberto e bloqueando limpeza inicial;
+  - para validar sem interromper, o run foi feito em `OUT_DIR` temporario:
+    - `C:\Users\SC61730\Downloads\out_mestrado_tmp_bl_adtv_20260310_135920`;
+  - ao final, os 6 PNGs novos foram copiados para:
+    - `C:\Users\SC61730\Downloads\out_mestrado\plots\compare_iteracoes_bl_vs_adtv`.

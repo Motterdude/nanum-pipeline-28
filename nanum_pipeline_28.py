@@ -2672,6 +2672,376 @@ def _blend_mask(df: pd.DataFrame, *, etoh_pct: float, h2o_pct: float, tol: float
     return (etoh.sub(etoh_pct).abs() <= tol) & (h2o.sub(h2o_pct).abs() <= tol)
 
 
+def _diesel_campaign_from_basename(basename: object) -> str:
+    s = _canon_name(basename).replace(" ", "_").replace("-", "_")
+    if not s:
+        return ""
+    if ("baseline_1" in s) or ("bl_1" in s) or ("baseline" in s):
+        return "baseline"
+    if ("aditivado_1" in s) or ("adtv_1" in s) or ("aditivado" in s) or ("adtv" in s):
+        return "aditivado"
+    return ""
+
+
+def _diesel_sentido_from_row(row: pd.Series) -> str:
+    sent = _canon_name(row.get("Sentido_Carga", ""))
+    if "subida" in sent or "subindo" in sent or re.search(r"\bup\b", sent):
+        return "subida"
+    if "descida" in sent or "descendo" in sent or re.search(r"\bdown\b", sent):
+        return "descida"
+
+    base = _canon_name(row.get("BaseName", ""))
+    if "subindo" in base or "subida" in base:
+        return "subida"
+    if "descendo" in base or "descida" in base:
+        return "descida"
+    return ""
+
+
+def _rss_or_na(values: pd.Series) -> float:
+    v = pd.to_numeric(values, errors="coerce").dropna()
+    if v.empty:
+        return float("nan")
+    return float(np.sqrt(np.sum(np.square(v.to_numpy(dtype=float)))))
+
+
+def _find_consumo_plot_col(df: pd.DataFrame) -> Optional[str]:
+    for c in ["Consumo_kg_h_mean_of_windows", "Consumo_kg_h", "Fuel_kg_h", "fuel_kgh_mean_of_windows"]:
+        if c in df.columns:
+            return c
+    for c in df.columns:
+        cl = str(c).lower()
+        if ("consumo" in cl) and ("mean_of_windows" in cl):
+            return c
+    return None
+
+
+def _prepare_diesel_bl_adtv_points(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    if "BaseName" not in df.columns:
+        print("[WARN] compare iteracoes BL vs ADTV: coluna BaseName ausente. Pulei.")
+        return pd.DataFrame()
+
+    consumo_col = _find_consumo_plot_col(df)
+    if not consumo_col:
+        print("[WARN] compare iteracoes BL vs ADTV: coluna de consumo nao encontrada. Pulei.")
+        return pd.DataFrame()
+
+    out = df.copy()
+    out["_campaign_bl_adtv"] = out["BaseName"].map(_diesel_campaign_from_basename)
+    out["_sentido_plot"] = out.apply(_diesel_sentido_from_row, axis=1)
+
+    if ("DIES_pct" in out.columns) or ("BIOD_pct" in out.columns):
+        dies = pd.to_numeric(out.get("DIES_pct", pd.Series(pd.NA, index=out.index)), errors="coerce")
+        biod = pd.to_numeric(out.get("BIOD_pct", pd.Series(pd.NA, index=out.index)), errors="coerce")
+        diesel_mask = dies.gt(0) | biod.gt(0)
+        if bool(diesel_mask.any()):
+            out = out[diesel_mask].copy()
+
+    out["Load_kW"] = pd.to_numeric(out.get("Load_kW", pd.NA), errors="coerce")
+    out["_consumo"] = pd.to_numeric(out[consumo_col], errors="coerce")
+    out["_uA"] = pd.to_numeric(out.get("uA_Consumo_kg_h", pd.NA), errors="coerce")
+    out["_uB"] = pd.to_numeric(out.get("uB_Consumo_kg_h", pd.NA), errors="coerce")
+    out["_uc"] = pd.to_numeric(out.get("uc_Consumo_kg_h", pd.NA), errors="coerce")
+    out["_U"] = pd.to_numeric(out.get("U_Consumo_kg_h", pd.NA), errors="coerce")
+
+    out = out[
+        out["_campaign_bl_adtv"].isin(["baseline", "aditivado"])
+        & out["_sentido_plot"].isin(["subida", "descida"])
+    ].copy()
+    out = out.dropna(subset=["Load_kW", "_consumo"]).copy()
+    return out
+
+
+def _aggregate_consumo_with_uncertainty(d: pd.DataFrame, group_cols: List[str]) -> pd.DataFrame:
+    if d is None or d.empty:
+        return pd.DataFrame(columns=group_cols + ["consumo_kg_h", "uA_kg_h", "uB_kg_h", "uc_kg_h", "U_kg_h", "n_points"])
+
+    g = (
+        d.groupby(group_cols, dropna=False, sort=True)
+        .agg(
+            consumo_kg_h=("_consumo", "mean"),
+            n_points=("_consumo", "count"),
+            uA_rss=("_uA", _rss_or_na),
+            uB_rss=("_uB", _rss_or_na),
+            uc_rss=("_uc", _rss_or_na),
+            U_rss=("_U", _rss_or_na),
+        )
+        .reset_index()
+    )
+
+    n = pd.to_numeric(g["n_points"], errors="coerce")
+    g["uA_kg_h"] = g["uA_rss"] / n
+    g["uB_kg_h"] = g["uB_rss"] / n
+
+    g["uc_kg_h"] = (pd.to_numeric(g["uA_kg_h"], errors="coerce") ** 2 + pd.to_numeric(g["uB_kg_h"], errors="coerce") ** 2) ** 0.5
+    g["uc_kg_h"] = g["uc_kg_h"].where(g["uc_kg_h"].notna(), g["uc_rss"] / n)
+
+    g["U_kg_h"] = K_COVERAGE * pd.to_numeric(g["uc_kg_h"], errors="coerce")
+    g["U_kg_h"] = g["U_kg_h"].where(g["U_kg_h"].notna(), g["U_rss"] / n)
+
+    return g[group_cols + ["consumo_kg_h", "uA_kg_h", "uB_kg_h", "uc_kg_h", "U_kg_h", "n_points"]].copy()
+
+
+def _mean_subida_descida_per_campaign(d: pd.DataFrame) -> pd.DataFrame:
+    if d is None or d.empty:
+        return pd.DataFrame(columns=["_campaign_bl_adtv", "Load_kW", "consumo_kg_h", "uA_kg_h", "uB_kg_h", "uc_kg_h", "U_kg_h", "n_points"])
+
+    sub = d[d["_sentido_plot"].eq("subida")].copy()
+    des = d[d["_sentido_plot"].eq("descida")].copy()
+    if sub.empty or des.empty:
+        return pd.DataFrame(columns=["_campaign_bl_adtv", "Load_kW", "consumo_kg_h", "uA_kg_h", "uB_kg_h", "uc_kg_h", "U_kg_h", "n_points"])
+
+    m = sub.merge(
+        des,
+        on=["_campaign_bl_adtv", "Load_kW"],
+        how="inner",
+        suffixes=("_sub", "_des"),
+    )
+    if m.empty:
+        return pd.DataFrame(columns=["_campaign_bl_adtv", "Load_kW", "consumo_kg_h", "uA_kg_h", "uB_kg_h", "uc_kg_h", "U_kg_h", "n_points"])
+
+    out = pd.DataFrame()
+    out["_campaign_bl_adtv"] = m["_campaign_bl_adtv"]
+    out["Load_kW"] = pd.to_numeric(m["Load_kW"], errors="coerce")
+    out["consumo_kg_h"] = (
+        pd.to_numeric(m["consumo_kg_h_sub"], errors="coerce") + pd.to_numeric(m["consumo_kg_h_des"], errors="coerce")
+    ) / 2.0
+
+    ua_sub = pd.to_numeric(m["uA_kg_h_sub"], errors="coerce")
+    ua_des = pd.to_numeric(m["uA_kg_h_des"], errors="coerce")
+    ub_sub = pd.to_numeric(m["uB_kg_h_sub"], errors="coerce")
+    ub_des = pd.to_numeric(m["uB_kg_h_des"], errors="coerce")
+    uc_sub = pd.to_numeric(m["uc_kg_h_sub"], errors="coerce")
+    uc_des = pd.to_numeric(m["uc_kg_h_des"], errors="coerce")
+    U_sub = pd.to_numeric(m["U_kg_h_sub"], errors="coerce")
+    U_des = pd.to_numeric(m["U_kg_h_des"], errors="coerce")
+
+    out["uA_kg_h"] = (ua_sub**2 + ua_des**2) ** 0.5 / 2.0
+    out["uB_kg_h"] = (ub_sub**2 + ub_des**2) ** 0.5 / 2.0
+    out["uc_kg_h"] = (out["uA_kg_h"] ** 2 + out["uB_kg_h"] ** 2) ** 0.5
+    out["uc_kg_h"] = out["uc_kg_h"].where(out["uc_kg_h"].notna(), (uc_sub**2 + uc_des**2) ** 0.5 / 2.0)
+    out["U_kg_h"] = K_COVERAGE * out["uc_kg_h"]
+    out["U_kg_h"] = out["U_kg_h"].where(out["U_kg_h"].notna(), (U_sub**2 + U_des**2) ** 0.5 / 2.0)
+    out["n_points"] = pd.to_numeric(m["n_points_sub"], errors="coerce").fillna(0) + pd.to_numeric(m["n_points_des"], errors="coerce").fillna(0)
+
+    return out.sort_values("Load_kW").copy()
+
+
+def _campaign_label(campaign: str) -> str:
+    if campaign == "baseline":
+        return "BL (baseline_1)"
+    if campaign == "aditivado":
+        return "ADTV (aditivado_1)"
+    return campaign
+
+
+def _plot_bl_adtv_consumo_absolute(
+    baseline: pd.DataFrame,
+    aditivado: pd.DataFrame,
+    *,
+    title: str,
+    filename: str,
+    target_dir: Path,
+) -> None:
+    if (baseline is None or baseline.empty) and (aditivado is None or aditivado.empty):
+        print(f"[WARN] compare iteracoes BL vs ADTV: sem dados para {filename}.")
+        return
+
+    plt.figure()
+    any_curve = False
+    specs = [
+        ("baseline", baseline, "#1f77b4"),
+        ("aditivado", aditivado, "#d62728"),
+    ]
+    for key, d, color in specs:
+        if d is None or d.empty:
+            print(f"[WARN] compare iteracoes BL vs ADTV: sem dados de consumo para {_campaign_label(key)} em {filename}.")
+            continue
+
+        x = pd.to_numeric(d["Load_kW"], errors="coerce")
+        y = pd.to_numeric(d["consumo_kg_h"], errors="coerce")
+        yerr = pd.to_numeric(d.get("U_kg_h", pd.NA), errors="coerce")
+        p = pd.DataFrame({"x": x, "y": y, "yerr": yerr}).dropna(subset=["x", "y"]).sort_values("x")
+        if p.empty:
+            continue
+
+        any_curve = True
+        if p["yerr"].notna().any():
+            plt.errorbar(p["x"], p["y"], yerr=p["yerr"], fmt="o-", capsize=3, linewidth=1.8, markersize=4.5, color=color, label=_campaign_label(key))
+        else:
+            plt.plot(p["x"], p["y"], "o-", linewidth=1.8, markersize=4.5, color=color, label=_campaign_label(key))
+
+    if not any_curve:
+        plt.close()
+        print(f"[WARN] compare iteracoes BL vs ADTV: curvas vazias para {filename}.")
+        return
+
+    plt.xlabel("Carga nominal (kW)")
+    plt.ylabel("Consumo absoluto (kg/h)")
+    plt.title(title)
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+    plt.legend()
+    plt.gcf().text(
+        0.01,
+        0.01,
+        "Barras: U = 2*sqrt(uA^2 + uB^2), uA=desvio padrao, uB=balanca",
+        fontsize=8,
+        alpha=0.8,
+    )
+    outpath = target_dir / filename
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=200)
+    plt.close()
+    print(f"[OK] Salvei {outpath}")
+
+
+def _plot_bl_adtv_delta_pct(
+    baseline: pd.DataFrame,
+    aditivado: pd.DataFrame,
+    *,
+    title: str,
+    filename: str,
+    target_dir: Path,
+) -> None:
+    if baseline is None or baseline.empty or aditivado is None or aditivado.empty:
+        print(f"[WARN] compare iteracoes BL vs ADTV: sem pares baseline/aditivado para {filename}.")
+        return
+
+    b = baseline[["Load_kW", "consumo_kg_h", "uc_kg_h"]].rename(
+        columns={"consumo_kg_h": "cons_bl", "uc_kg_h": "uc_bl"}
+    )
+    a = aditivado[["Load_kW", "consumo_kg_h", "uc_kg_h"]].rename(
+        columns={"consumo_kg_h": "cons_adtv", "uc_kg_h": "uc_adtv"}
+    )
+    m = b.merge(a, on="Load_kW", how="inner")
+    m["cons_bl"] = pd.to_numeric(m["cons_bl"], errors="coerce")
+    m["cons_adtv"] = pd.to_numeric(m["cons_adtv"], errors="coerce")
+    m["uc_bl"] = pd.to_numeric(m["uc_bl"], errors="coerce")
+    m["uc_adtv"] = pd.to_numeric(m["uc_adtv"], errors="coerce")
+    m = m.dropna(subset=["Load_kW", "cons_bl", "cons_adtv"]).copy()
+    m = m[(m["cons_bl"] > 0) & (m["cons_adtv"] > 0)].copy()
+    if m.empty:
+        print(f"[WARN] compare iteracoes BL vs ADTV: sem pares validos para {filename}.")
+        return
+
+    ratio = m["cons_adtv"] / m["cons_bl"]
+    m["delta_pct"] = 100.0 * (ratio - 1.0)
+    rel_uc = ((m["uc_adtv"] / m["cons_adtv"]) ** 2 + (m["uc_bl"] / m["cons_bl"]) ** 2) ** 0.5
+    m["uc_delta_pct"] = 100.0 * ratio.abs() * rel_uc
+    m["U_delta_pct"] = K_COVERAGE * m["uc_delta_pct"]
+    m = m.sort_values("Load_kW")
+
+    plt.figure()
+    if m["U_delta_pct"].notna().any():
+        plt.errorbar(
+            m["Load_kW"],
+            m["delta_pct"],
+            yerr=m["U_delta_pct"],
+            fmt="o-",
+            capsize=3,
+            linewidth=1.8,
+            markersize=4.5,
+            color="#2ca02c",
+            label="ADTV vs BL",
+        )
+    else:
+        plt.plot(m["Load_kW"], m["delta_pct"], "o-", linewidth=1.8, markersize=4.5, color="#2ca02c", label="ADTV vs BL")
+
+    plt.axhline(0.0, color="gray", linestyle="--", linewidth=1.0, label="0%")
+    plt.xlabel("Carga nominal (kW)")
+    plt.ylabel("Delta percentual de consumo (%)")
+    plt.title(title)
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+    plt.legend()
+    plt.gcf().text(
+        0.01,
+        0.01,
+        "Negativo = economia no aditivado; Positivo = piora",
+        fontsize=8,
+        alpha=0.85,
+    )
+    outpath = target_dir / filename
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=200)
+    plt.close()
+    print(f"[OK] Salvei {outpath}")
+
+
+def _plot_compare_iteracoes_bl_vs_adtv(df: pd.DataFrame, *, root_plot_dir: Optional[Path] = None) -> None:
+    base_root = PLOTS_DIR if root_plot_dir is None else root_plot_dir
+    target_dir = base_root / "compare_iteracoes_bl_vs_adtv"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    pts = _prepare_diesel_bl_adtv_points(df)
+    if pts.empty:
+        print("[WARN] compare iteracoes BL vs ADTV: nao encontrei dados diesel baseline/aditivado no output.")
+        return
+
+    agg = _aggregate_consumo_with_uncertainty(pts, ["_campaign_bl_adtv", "_sentido_plot", "Load_kW"])
+    if agg.empty:
+        print("[WARN] compare iteracoes BL vs ADTV: agregacao vazia.")
+        return
+
+    subida = agg[agg["_sentido_plot"].eq("subida")].copy()
+    descida = agg[agg["_sentido_plot"].eq("descida")].copy()
+    media_sd = _mean_subida_descida_per_campaign(agg)
+
+    b_sub = subida[subida["_campaign_bl_adtv"].eq("baseline")].copy()
+    a_sub = subida[subida["_campaign_bl_adtv"].eq("aditivado")].copy()
+    b_des = descida[descida["_campaign_bl_adtv"].eq("baseline")].copy()
+    a_des = descida[descida["_campaign_bl_adtv"].eq("aditivado")].copy()
+    b_med = media_sd[media_sd["_campaign_bl_adtv"].eq("baseline")].copy()
+    a_med = media_sd[media_sd["_campaign_bl_adtv"].eq("aditivado")].copy()
+
+    _plot_bl_adtv_consumo_absolute(
+        b_med,
+        a_med,
+        title="Compare iteracoes BL vs ADTV - Consumo absoluto (media subida+descida)",
+        filename="compare_iteracoes_bl_vs_adtv_consumo_medio_subida_descida.png",
+        target_dir=target_dir,
+    )
+    _plot_bl_adtv_delta_pct(
+        b_med,
+        a_med,
+        title="Compare iteracoes BL vs ADTV - Delta percentual (media subida+descida)",
+        filename="compare_iteracoes_bl_vs_adtv_razao_delta_pct_medio_subida_descida.png",
+        target_dir=target_dir,
+    )
+
+    _plot_bl_adtv_consumo_absolute(
+        b_sub,
+        a_sub,
+        title="Compare iteracoes BL vs ADTV - Consumo absoluto (subida)",
+        filename="compare_iteracoes_bl_vs_adtv_consumo_subida.png",
+        target_dir=target_dir,
+    )
+    _plot_bl_adtv_delta_pct(
+        b_sub,
+        a_sub,
+        title="Compare iteracoes BL vs ADTV - Delta percentual (subida)",
+        filename="compare_iteracoes_bl_vs_adtv_razao_delta_pct_subida.png",
+        target_dir=target_dir,
+    )
+
+    _plot_bl_adtv_consumo_absolute(
+        b_des,
+        a_des,
+        title="Compare iteracoes BL vs ADTV - Consumo absoluto (descida)",
+        filename="compare_iteracoes_bl_vs_adtv_consumo_descida.png",
+        target_dir=target_dir,
+    )
+    _plot_bl_adtv_delta_pct(
+        b_des,
+        a_des,
+        title="Compare iteracoes BL vs ADTV - Delta percentual (descida)",
+        filename="compare_iteracoes_bl_vs_adtv_razao_delta_pct_descida.png",
+        target_dir=target_dir,
+    )
+
+
 def _plot_ethanol_equivalent_consumption_overlay(df: pd.DataFrame, *, plot_dir: Optional[Path] = None) -> None:
     target_dir = PLOTS_DIR if plot_dir is None else plot_dir
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -3834,6 +4204,8 @@ def main() -> None:
             )
     else:
         print("[INFO] Nenhum par subida/descida detectado para gerar plots em compare/.")
+
+    _plot_compare_iteracoes_bl_vs_adtv(out, root_plot_dir=PLOTS_DIR)
 
     if kibox_files:
         print("[INFO] Kibox csv em raw/ detectado. (Histogramas KPEAK continuam fora do workflow por enquanto.)")
