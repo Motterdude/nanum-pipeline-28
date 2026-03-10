@@ -1095,3 +1095,114 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
 - Leitura do novo delta:
   - `delta_pct < 0`: descida consumiu menos que subida;
   - `delta_pct > 0`: descida consumiu mais que subida.
+
+## Wrapper OpenToCSV para KiBox `.open -> .csv` - 2026-03-10
+- Contexto:
+  - o notebook do laboratorio tem `KiBoxCockpit 3.2.5` instalado;
+  - junto com ele existe o conversor:
+    - `C:\Program Files (x86)\Kistler\CSVExportSeriell\OpenToCSV.exe`.
+- Implementacao:
+  - criado o utilitario novo:
+    - `kibox_open_to_csv.py`;
+  - ele pode rodar standalone pela CLI ou ser importado em Python por outro script, inclusive pelo `pipeline28` no futuro;
+  - o wrapper aceita arquivo `.open` unico ou diretorio com varios `.open`;
+  - quando a entrada e um diretorio, ele varre os `.open` recursivamente e converte um por um;
+  - quando a entrada e um arquivo, ele isola o `.open` em pasta temporaria e chama o `OpenToCSV.exe` so para aquele arquivo.
+- Padrao operacional adotado para compatibilidade com o pipeline:
+  - `type=res`
+  - `sep=tab`
+  - `cno`
+  - isso replica o estilo dos CSVs `_i.csv` ja conhecidos pelo `pipeline28`:
+    - uma linha por ciclo;
+    - primeira coluna com `Cycle number`;
+    - separador tab.
+- Modos de nome:
+  - `source`:
+    - mesmo stem do `.open`, trocando para `.csv`;
+  - `pipeline`:
+    - stem + `_i.csv`;
+  - `tool`:
+    - mantem o sufixo natural do `OpenToCSV` (`_res`, `_sig`, `_tim`);
+  - `--output-name`:
+    - permite forcar um nome final especifico, util quando o `.open` nao carrega composicao no nome e voce quer casar com um `.xlsx` ou com o naming do pipeline.
+- Uso basico:
+  - `& ".\.venv\Scripts\python.exe" .\kibox_open_to_csv.py "C:\caminho\arquivo.open" --type res --separator tab --name-mode pipeline`
+- GUI Windows:
+  - o mesmo `kibox_open_to_csv.py` agora tambem abre uma janela grafica com:
+    - selecao multipla de arquivos `.open`;
+    - selecao de diretorio de saida;
+    - bootstrap do `OpenToCSV.exe` na primeira abertura:
+      - se o executavel nao for encontrado automaticamente, a GUI pede para localizar o arquivo uma vez;
+      - o caminho fica salvo em `%LOCALAPPDATA%\nanum_pipeline_28\kibox_open_to_csv_settings.json`;
+      - se o notebook mudar ou a instalacao estiver em outra pasta, a GUI pede o novo caminho sem derrubar a execucao;
+    - log em tempo real da execucao do `OpenToCSV`;
+    - barra de progresso por arquivo e indicacao do arquivo atual;
+    - naming forcado para `nome_original_i.csv`, voltado ao padrao de leitura do `pipeline28`.
+  - a GUI tambem ganhou customizacao de nome:
+    - campo para inserir texto adicional;
+    - dropdown dinamico de ponto de insercao, baseado no nome do arquivo selecionado na lista;
+    - o dropdown mostra o proprio nome amostra com o texto ja colocado na posicao escolhida;
+    - exemplos de opcao visual:
+      - `NANUM_xxxx_17,5KW-2026-03-06--20-17-31-041.open`
+      - `NANUM_17,5KW_xxxx_-2026-03-06--20-17-31-041.open`
+    - a conversao final continua gerando CSV no padrao do pipeline:
+      - `..._i.csv`.
+  - comando:
+    - `& ".\.venv\Scripts\python.exe" .\kibox_open_to_csv.py --gui`
+
+## Pipeline28 com popup para RAW_INPUT_DIR e OUT_DIR - 2026-03-10
+- Motivo:
+  - o fluxo via aba `Defaults` do Excel continuava causando erro de caminho errado entre PCs e entre diretorios de dados diferentes;
+  - o pedido foi tirar a escolha operacional de `RAW_INPUT_DIR` e `OUT_DIR` do Excel e levar isso para popup Windows em toda execucao.
+- Implementacao no `nanum_pipeline_28.py`:
+  - a cada execucao, antes de limpar `OUT_DIR` e antes de ler os arquivos de ensaio, abre uma janela para escolher:
+    - diretorio de entrada do pipeline;
+    - diretorio de saida.
+  - robustez do seletor:
+    - primeiro tenta o seletor nativo de pastas do Windows via PowerShell/.NET;
+    - se isso falhar, tenta popup Tkinter;
+    - se a GUI falhar mesmo assim, cai para prompt manual no terminal.
+  - a ultima selecao fica salva localmente em:
+    - `%LOCALAPPDATA%\nanum_pipeline_28\pipeline28_runtime_paths.json`
+  - na execucao seguinte, o popup volta preenchido com esses ultimos caminhos.
+- Relacao com o Excel:
+  - o restante do `config/config_incertezas_rev3.xlsx` continua sendo carregado normalmente;
+  - apenas `RAW_INPUT_DIR` e `OUT_DIR` sao sincronizados de volta na aba `Defaults`;
+  - nenhuma outra linha/aba da planilha e alterada por esse fluxo.
+- Log esperado:
+  - `[INFO] RAW_INPUT_DIR (GUI): ...`
+  - `[INFO] OUT_DIR (GUI): ...`
+  - `[INFO] Ultima selecao salva em: ...`
+  - `[INFO] Aba Defaults sincronizada apenas para RAW_INPUT_DIR/OUT_DIR em: ...`
+- Impacto operacional:
+  - nao e mais necessario abrir o Excel para trocar pasta de entrada/saida entre notebook de casa, notebook do trabalho ou novas pastas de dados;
+  - ainda fica registrado no Excel quais foram os ultimos caminhos usados, mas o valor operacional passa a ser o escolhido no popup daquela execucao.
+
+## Correcao do merge KIBOX para diesel em `raw_NANUM` - 2026-03-10
+- Sintoma observado:
+  - `Subindo_baseline_2` tinha arquivos de combustao KIBOX no input (`*_i.csv`), mas o `out` nao gerava plots `kibox_*`;
+  - ao mesmo tempo, a campanha podia herdar combustao de outra serie com mesma carga/composicao.
+- Causas encontradas:
+  - o parser de composicao aceitava `D85B15`, mas nao aceitava nomes invertidos como `B15D85`;
+  - `kibox_aggregate()` descartava diesel porque exigia `EtOH_pct/H2O_pct` preenchidos;
+  - o merge do KIBOX com a tabela final usava apenas `Load_kW + composicao`, o que permitia vazamento entre `subida` e `descida`.
+- Correcao aplicada no `nanum_pipeline_28.py`:
+  - `_parse_filename_composition()` passou a aceitar `BxxDyy` alem de `DxxByy`;
+  - `kibox_aggregate()` passou a agregar arquivos diesel quando `DIES_pct/BIOD_pct` existem;
+  - `kibox_mean_row()` passou a carregar `SourceFolder`;
+  - o merge KIBOX na tabela final passou a usar:
+    - `SourceFolder`
+    - `Load_kW`
+    - composicao
+  - o helper `_normalized_extra_merge_key()` foi adicionado para tratar merge extra numerico ou textual com normalizacao consistente.
+- Validacao feita:
+  - `Subindo_baseline_2`:
+    - `19/19` pontos com `KIBOX_AI05_1` no `lv_kpis_clean.xlsx`;
+    - plots `kibox_*` gerados em `out_NANUM\plots\Subindo_baseline_2`.
+  - `Descendo_baseline_2`:
+    - `0/19` pontos com `KIBOX_AI05_1` enquanto nao houver `_i.csv` correspondente;
+    - sem plots `kibox_*` na pasta da descida.
+  - o `out_NANUM` foi reprocessado apos a correcao para substituir a execucao anterior com merge incorreto.
+- Observacao importante:
+  - a pasta `Descendo_baseline_2` ainda contem apenas `.open` de combustao;
+  - para ter KIBOX real nessa serie, primeiro e preciso converter esses `.open` para `*_i.csv`.

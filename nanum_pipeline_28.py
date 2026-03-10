@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import csv
+import json
+import os
 import re
 import shutil
+import subprocess
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +18,15 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
+try:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, ttk
+except Exception:
+    tk = None
+    filedialog = None
+    messagebox = None
+    ttk = None
+
 
 # =========================
 # Paths / constants
@@ -24,6 +36,8 @@ DEFAULT_RAW_DIR = BASE_DIR / "raw"
 DEFAULT_PROCESS_DIR = DEFAULT_RAW_DIR / "PROCESSAR"
 DEFAULT_OUT_DIR = BASE_DIR / "out"
 MESTRADO_ROOT = Path(r"D:\Drive\Faculdade\PUC\Mestrado")
+RUNTIME_SETTINGS_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "nanum_pipeline_28"
+RUNTIME_SETTINGS_PATH = RUNTIME_SETTINGS_DIR / "pipeline28_runtime_paths.json"
 
 RAW_DIR = DEFAULT_RAW_DIR
 PROCESS_DIR = DEFAULT_PROCESS_DIR
@@ -745,6 +759,12 @@ def _parse_filename_composition(stem: str) -> Tuple[Optional[float], Optional[fl
         dies_pct = _to_pct_or_none(m_db.group(1))
         biod_pct = _to_pct_or_none(m_db.group(2))
         return dies_pct, biod_pct, None, None, "filename_diesel"
+
+    m_bd = re.search(r"(?:^|[^A-Za-z0-9])B(\d+(?:[.,]\d+)?)\s*D(\d+(?:[.,]\d+)?)(?:$|[^A-Za-z0-9])", stem, flags=re.IGNORECASE)
+    if m_bd:
+        biod_pct = _to_pct_or_none(m_bd.group(1))
+        dies_pct = _to_pct_or_none(m_bd.group(2))
+        return dies_pct, biod_pct, None, None, "filename_diesel_reversed"
 
     m_dies = re.search(r"(?:dies_pct|diesel|dies)\s*[-_ ]*(\d+(?:[.,]\d+)?)", stem, flags=re.IGNORECASE)
     if m_dies:
@@ -1517,6 +1537,7 @@ def kibox_mean_row(meta: FileMeta) -> pd.DataFrame:
     row = {f"KIBOX_{c}": float(means[c]) if pd.notna(means[c]) else pd.NA for c in means.index}
     row.update(
         {
+            "SourceFolder": _basename_source_folder_display(meta.basename),
             "Load_kW": meta.load_kw,
             "DIES_pct": meta.dies_pct,
             "BIOD_pct": meta.biod_pct,
@@ -1530,8 +1551,10 @@ def kibox_mean_row(meta: FileMeta) -> pd.DataFrame:
 def kibox_aggregate(kibox_files: List[FileMeta]) -> pd.DataFrame:
     rows: List[pd.DataFrame] = []
     for m in kibox_files:
-        if m.load_kw is None or m.etoh_pct is None or m.h2o_pct is None:
-            print(f"[WARN] Kibox sem KW/E/H no nome (nÃ£o vou agregar): {m.path.name}")
+        has_diesel = m.dies_pct is not None or m.biod_pct is not None
+        has_ethanol = m.etoh_pct is not None or m.h2o_pct is not None
+        if m.load_kw is None or (not has_diesel and not has_ethanol):
+            print(f"[WARN] Kibox sem composicao valida no nome (nao vou agregar): {m.path.name}")
             continue
         try:
             rows.append(kibox_mean_row(m))
@@ -1542,7 +1565,7 @@ def kibox_aggregate(kibox_files: List[FileMeta]) -> pd.DataFrame:
         return pd.DataFrame(columns=["Load_kW", "DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct"])
 
     allk = pd.concat(rows, ignore_index=True)
-    key_cols = ["Load_kW", "DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct"]
+    key_cols = ["SourceFolder", "Load_kW", "DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct"]
     value_cols = [c for c in allk.columns if c.startswith("KIBOX_")]
 
     agg = allk.groupby(key_cols, dropna=False, sort=True)[value_cols].mean(numeric_only=True).reset_index()
@@ -1660,33 +1683,345 @@ def _prepare_output_dir(path: Path) -> bool:
         return False
 
 
-def apply_runtime_path_overrides(defaults_cfg: Dict[str, str]) -> None:
+def _load_runtime_path_settings() -> Dict[str, str]:
+    try:
+        if not RUNTIME_SETTINGS_PATH.exists():
+            return {}
+        return json.loads(RUNTIME_SETTINGS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_runtime_path_settings(input_dir: Path, out_dir: Path) -> None:
+    RUNTIME_SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "raw_input_dir": str(input_dir),
+        "out_dir": str(out_dir),
+    }
+    RUNTIME_SETTINGS_PATH.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=True),
+        encoding="utf-8",
+    )
+
+
+def _best_existing_dir(*candidates: object) -> Path:
+    for candidate in candidates:
+        raw = str(candidate or "").strip().strip('"').strip("'")
+        if not raw:
+            continue
+        try:
+            p = Path(raw).expanduser()
+        except Exception:
+            continue
+        if p.exists() and p.is_dir():
+            return p
+        if p.parent.exists() and p.parent.is_dir():
+            return p.parent
+    return BASE_DIR
+
+
+def _run_windows_folder_dialog(*, title: str, initial_dir: Path) -> Optional[Path]:
+    initial_dir = _best_existing_dir(initial_dir)
+    escaped_title = title.replace("'", "''")
+    escaped_initial = str(initial_dir).replace("'", "''")
+    ps_script = f"""
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = '{escaped_title}'
+$dialog.ShowNewFolderButton = $true
+if (Test-Path -LiteralPath '{escaped_initial}') {{
+    $dialog.SelectedPath = '{escaped_initial}'
+}}
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK -and $dialog.SelectedPath) {{
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    Write-Output $dialog.SelectedPath
+    exit 0
+}}
+exit 2
+"""
+
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+        capture_output=True,
+        text=True,
+    )
+    stdout_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    stdout = stdout_lines[0] if stdout_lines else ""
+    stderr = completed.stderr.strip()
+    if completed.returncode == 0 and stdout:
+        return Path(stdout).expanduser().resolve()
+    if completed.returncode == 2:
+        return None
+    raise RuntimeError(
+        "Falha ao abrir o seletor nativo de pasta no Windows. "
+        f"stdout={stdout!r} stderr={stderr!r} code={completed.returncode}"
+    )
+
+
+def _prompt_runtime_dirs_via_windows_dialog(initial_input_dir: Path, initial_out_dir: Path) -> Tuple[Path, Path]:
+    print("[INFO] Abrindo seletor nativo do Windows para o diretorio de entrada...")
+    input_dir = _run_windows_folder_dialog(
+        title="Selecione o diretorio de entrada do pipeline",
+        initial_dir=initial_input_dir,
+    )
+    if input_dir is None:
+        raise SystemExit("Execucao cancelada pelo usuario na selecao do diretorio de entrada.")
+
+    print("[INFO] Abrindo seletor nativo do Windows para o diretorio de saida...")
+    out_dir = _run_windows_folder_dialog(
+        title="Selecione o diretorio de saida do pipeline",
+        initial_dir=initial_out_dir,
+    )
+    if out_dir is None:
+        raise SystemExit("Execucao cancelada pelo usuario na selecao do diretorio de saida.")
+    return input_dir, out_dir
+
+
+def _prompt_runtime_dirs_via_tk_dialog(initial_input_dir: Path, initial_out_dir: Path) -> Tuple[Path, Path]:
+    if tk is None or ttk is None or filedialog is None or messagebox is None:
+        raise RuntimeError(
+            "Tkinter nao esta disponivel neste Python. O pipeline28 agora exige popup Windows "
+            "para selecionar RAW_INPUT_DIR e OUT_DIR."
+        )
+
+    root = tk.Tk()
+    root.title("Pipeline 28 - Diretorios de execucao")
+    root.resizable(False, False)
+    root.attributes("-topmost", True)
+
+    input_var = tk.StringVar(master=root, value=str(initial_input_dir))
+    out_var = tk.StringVar(master=root, value=str(initial_out_dir))
+    result: dict[str, Path] = {}
+
+    root.columnconfigure(1, weight=1)
+
+    ttk.Label(
+        root,
+        text="Selecione o diretorio de entrada do pipeline e o diretorio de saida para esta execucao.",
+    ).grid(row=0, column=0, columnspan=3, sticky="w", padx=12, pady=(12, 10))
+
+    ttk.Label(root, text="Input dir").grid(row=1, column=0, sticky="w", padx=(12, 8), pady=6)
+    input_entry = ttk.Entry(root, textvariable=input_var, width=90)
+    input_entry.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=6)
+
+    def browse_input() -> None:
+        selected = filedialog.askdirectory(
+            parent=root,
+            title="Selecione o diretorio de entrada do pipeline",
+            initialdir=str(_best_existing_dir(input_var.get(), initial_input_dir)),
+        )
+        if selected:
+            input_var.set(selected)
+
+    ttk.Button(root, text="Browse...", command=browse_input).grid(row=1, column=2, sticky="e", padx=(0, 12), pady=6)
+
+    ttk.Label(root, text="Out dir").grid(row=2, column=0, sticky="w", padx=(12, 8), pady=6)
+    out_entry = ttk.Entry(root, textvariable=out_var, width=90)
+    out_entry.grid(row=2, column=1, sticky="ew", padx=(0, 8), pady=6)
+
+    def browse_output() -> None:
+        selected = filedialog.askdirectory(
+            parent=root,
+            title="Selecione o diretorio de saida",
+            initialdir=str(_best_existing_dir(out_var.get(), initial_out_dir)),
+        )
+        if selected:
+            out_var.set(selected)
+
+    ttk.Button(root, text="Browse...", command=browse_output).grid(row=2, column=2, sticky="e", padx=(0, 12), pady=6)
+
+    ttk.Label(
+        root,
+        text="A ultima selecao fica salva localmente e volta preenchida na proxima abertura.",
+    ).grid(row=3, column=0, columnspan=3, sticky="w", padx=12, pady=(4, 10))
+
+    def confirm() -> None:
+        raw_input = input_var.get().strip()
+        out_input = out_var.get().strip()
+        if not raw_input:
+            messagebox.showerror("Pipeline 28", "Selecione o diretorio de entrada.", parent=root)
+            return
+        if not out_input:
+            messagebox.showerror("Pipeline 28", "Selecione o diretorio de saida.", parent=root)
+            return
+
+        input_dir = Path(raw_input).expanduser().resolve()
+        out_dir = Path(out_input).expanduser().resolve()
+
+        if not input_dir.exists():
+            messagebox.showerror("Pipeline 28", f"Input dir nao existe:\n{input_dir}", parent=root)
+            return
+        if not input_dir.is_dir():
+            messagebox.showerror("Pipeline 28", f"Input dir nao e diretorio:\n{input_dir}", parent=root)
+            return
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            messagebox.showerror(
+                "Pipeline 28",
+                f"Nao consegui preparar o diretorio de saida:\n{out_dir}\n\n{exc}",
+                parent=root,
+            )
+            return
+
+        result["input_dir"] = input_dir
+        result["out_dir"] = out_dir
+        root.destroy()
+
+    def cancel() -> None:
+        root.destroy()
+
+    button_row = ttk.Frame(root)
+    button_row.grid(row=4, column=0, columnspan=3, sticky="e", padx=12, pady=(0, 12))
+    ttk.Button(button_row, text="Cancelar", command=cancel).pack(side="right")
+    ttk.Button(button_row, text="Confirmar", command=confirm).pack(side="right", padx=(0, 8))
+
+    root.protocol("WM_DELETE_WINDOW", cancel)
+    root.bind("<Return>", lambda _event: confirm())
+    root.bind("<Escape>", lambda _event: cancel())
+    input_entry.focus_set()
+
+    root.update_idletasks()
+    width = max(root.winfo_reqwidth(), 900)
+    height = root.winfo_reqheight()
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+    pos_x = max((screen_w - width) // 2, 0)
+    pos_y = max((screen_h - height) // 3, 0)
+    root.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
+    root.deiconify()
+    root.lift()
+    try:
+        root.focus_force()
+    except Exception:
+        pass
+    root.after(400, lambda: root.attributes("-topmost", False))
+    root.mainloop()
+
+    input_dir = result.get("input_dir")
+    out_dir = result.get("out_dir")
+    if input_dir is None or out_dir is None:
+        raise SystemExit("Execucao cancelada pelo usuario na selecao de diretorios.")
+    return input_dir, out_dir
+
+
+def _prompt_runtime_dirs_via_cli(initial_input_dir: Path, initial_out_dir: Path) -> Tuple[Path, Path]:
+    print("[WARN] GUI indisponivel. Caindo para entrada manual no terminal.")
+    raw_prompt = f"RAW_INPUT_DIR [{initial_input_dir}]: "
+    out_prompt = f"OUT_DIR [{initial_out_dir}]: "
+
+    raw_input = input(raw_prompt).strip()
+    out_input = input(out_prompt).strip()
+
+    input_dir = Path(raw_input or str(initial_input_dir)).expanduser().resolve()
+    out_dir = Path(out_input or str(initial_out_dir)).expanduser().resolve()
+    return input_dir, out_dir
+
+
+def _prompt_runtime_dirs(initial_input_dir: Path, initial_out_dir: Path) -> Tuple[Path, Path]:
+    if os.name == "nt":
+        try:
+            return _prompt_runtime_dirs_via_windows_dialog(initial_input_dir, initial_out_dir)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            print(f"[WARN] Seletor nativo do Windows falhou: {exc}")
+
+    try:
+        return _prompt_runtime_dirs_via_tk_dialog(initial_input_dir, initial_out_dir)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(f"[WARN] Popup Tkinter falhou: {exc}")
+
+    return _prompt_runtime_dirs_via_cli(initial_input_dir, initial_out_dir)
+
+
+def _write_runtime_dirs_to_defaults_excel(xlsx_path: Path, input_dir: Path, out_dir: Path) -> None:
+    try:
+        from openpyxl import load_workbook
+    except Exception as exc:
+        print(f"[WARN] Nao consegui importar openpyxl para atualizar o Excel de Defaults: {exc}")
+        return
+
+    wb = load_workbook(xlsx_path)
+    ws = None
+    for sheet_name in wb.sheetnames:
+        if str(sheet_name).strip().lower() == "defaults":
+            ws = wb[sheet_name]
+            break
+    if ws is None:
+        print(f"[WARN] Aba 'Defaults' nao encontrada em {xlsx_path}.")
+        return
+
+    header_map: dict[str, int] = {}
+    for idx, cell in enumerate(ws[1], start=1):
+        header = norm_key(cell.value)
+        if header:
+            header_map[header] = idx
+
+    param_col = header_map.get("param", 1)
+    value_col = header_map.get("value", 2)
+
+    replacements = {
+        norm_key("RAW_INPUT_DIR"): str(input_dir),
+        norm_key("OUT_DIR"): str(out_dir),
+    }
+    updated = set()
+
+    for row_idx in range(1, ws.max_row + 1):
+        param_value = norm_key(ws.cell(row=row_idx, column=param_col).value)
+        if param_value in replacements:
+            ws.cell(row=row_idx, column=value_col).value = replacements[param_value]
+            updated.add(param_value)
+
+    next_row = ws.max_row + 1
+    for param_key, value in replacements.items():
+        if param_key in updated:
+            continue
+        ws.cell(row=next_row, column=param_col).value = "RAW_INPUT_DIR" if param_key == norm_key("RAW_INPUT_DIR") else "OUT_DIR"
+        ws.cell(row=next_row, column=value_col).value = value
+        next_row += 1
+
+    wb.save(xlsx_path)
+
+
+def _choose_runtime_dirs(defaults_cfg: Dict[str, str], xlsx_path: Path) -> Tuple[Path, Path]:
+    saved_cfg = _load_runtime_path_settings()
+
+    raw_cfg = saved_cfg.get("raw_input_dir") or defaults_cfg.get(norm_key("RAW_INPUT_DIR"), "")
+    out_cfg = saved_cfg.get("out_dir") or defaults_cfg.get(norm_key("OUT_DIR"), "")
+
+    initial_input_dir = _resolve_runtime_dir(raw_cfg, DEFAULT_PROCESS_DIR)
+    initial_out_dir = _resolve_runtime_dir(out_cfg, DEFAULT_OUT_DIR)
+
+    print("[INFO] Abrindo popup para selecionar RAW_INPUT_DIR e OUT_DIR...")
+    input_dir, out_dir = _prompt_runtime_dirs(initial_input_dir, initial_out_dir)
+    _save_runtime_path_settings(input_dir, out_dir)
+    defaults_cfg[norm_key("RAW_INPUT_DIR")] = str(input_dir)
+    defaults_cfg[norm_key("OUT_DIR")] = str(out_dir)
+    _write_runtime_dirs_to_defaults_excel(xlsx_path, input_dir, out_dir)
+    print(f"[INFO] RAW_INPUT_DIR (GUI): {input_dir}")
+    print(f"[INFO] OUT_DIR (GUI): {out_dir}")
+    print(f"[INFO] Ultima selecao salva em: {RUNTIME_SETTINGS_PATH}")
+    print(f"[INFO] Aba Defaults sincronizada apenas para RAW_INPUT_DIR/OUT_DIR em: {xlsx_path}")
+    return input_dir, out_dir
+
+
+def apply_runtime_path_overrides(defaults_cfg: Dict[str, str], xlsx_path: Path) -> None:
     global RAW_DIR, PROCESS_DIR, OUT_DIR, PLOTS_DIR
 
-    raw_input_cfg = defaults_cfg.get(norm_key("RAW_INPUT_DIR"), "")
-    out_dir_cfg = defaults_cfg.get(norm_key("OUT_DIR"), "")
-
-    input_dir = _resolve_runtime_dir(raw_input_cfg, DEFAULT_PROCESS_DIR)
-    out_dir = _resolve_runtime_dir(out_dir_cfg, DEFAULT_OUT_DIR)
-
-    if raw_input_cfg:
-        print(f"[INFO] RAW_INPUT_DIR (Excel): {input_dir}")
-    else:
-        print(f"[INFO] RAW_INPUT_DIR vazio no Excel; usando default: {input_dir}")
-
-    if out_dir_cfg:
-        print(f"[INFO] OUT_DIR (Excel): {out_dir}")
-    else:
-        print(f"[INFO] OUT_DIR vazio no Excel; usando default: {out_dir}")
+    input_dir, out_dir = _choose_runtime_dirs(defaults_cfg, xlsx_path)
 
     if not input_dir.exists():
-        raise FileNotFoundError(f"Nao encontrei o diretorio configurado em RAW_INPUT_DIR: {input_dir}")
+        raise FileNotFoundError(f"Nao encontrei o diretorio selecionado para RAW_INPUT_DIR: {input_dir}")
     if not input_dir.is_dir():
-        raise NotADirectoryError(f"RAW_INPUT_DIR nao aponta para um diretorio: {input_dir}")
+        raise NotADirectoryError(f"RAW_INPUT_DIR selecionado nao aponta para um diretorio: {input_dir}")
 
     if not _prepare_output_dir(out_dir):
         raise FileNotFoundError(
-            f"Nao consegui preparar o diretorio de saida configurado em OUT_DIR: {out_dir}"
+            f"Nao consegui preparar o diretorio de saida selecionado em OUT_DIR: {out_dir}"
         )
 
     RAW_DIR = input_dir.parent
@@ -2241,6 +2576,15 @@ def _normalized_composition_keys(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _normalized_extra_merge_key(df: pd.DataFrame, col: str) -> pd.Series:
+    idx = df.index
+    raw = df.get(col, pd.Series(pd.NA, index=idx))
+    numeric = pd.to_numeric(raw, errors="coerce")
+    if numeric.notna().any():
+        return numeric
+    return raw.map(_canon_name)
+
+
 def _left_merge_on_fuel_keys(left: pd.DataFrame, right: pd.DataFrame, extra_on: Optional[List[str]] = None) -> pd.DataFrame:
     extra = extra_on or []
 
@@ -2254,8 +2598,8 @@ def _left_merge_on_fuel_keys(left: pd.DataFrame, right: pd.DataFrame, extra_on: 
     for c in extra + COMPOSITION_COLS:
         tmp = f"__merge_{c}"
         if c in extra:
-            l[tmp] = pd.to_numeric(l[c], errors="coerce")
-            r[tmp] = pd.to_numeric(r[c], errors="coerce")
+            l[tmp] = _normalized_extra_merge_key(l, c)
+            r[tmp] = _normalized_extra_merge_key(r, c)
         else:
             l[tmp] = pd.to_numeric(l_norm[c], errors="coerce")
             r[tmp] = pd.to_numeric(r_norm[c], errors="coerce")
@@ -2311,9 +2655,10 @@ def build_final_table(
     instruments_df: pd.DataFrame,
     reporting_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    df = _left_merge_on_fuel_keys(ponto, lhv)
+    df = add_source_identity_columns(ponto)
+    df = _left_merge_on_fuel_keys(df, lhv)
     if kibox_agg is not None and not kibox_agg.empty:
-        df = _left_merge_on_fuel_keys(df, kibox_agg, extra_on=["Load_kW"])
+        df = _left_merge_on_fuel_keys(df, kibox_agg, extra_on=["SourceFolder", "Load_kW"])
     if motec_ponto is not None and not motec_ponto.empty:
         df = _left_merge_on_fuel_keys(df, motec_ponto, extra_on=["Load_kW"])
 
@@ -3084,15 +3429,24 @@ def _export_compare_iteracoes_bl_adtv_excel(
 ) -> None:
     chunks: List[pd.DataFrame] = []
     specs = [
-        ("media_subida_descida", b_med, a_med, "baseline", "aditivado", "economia_aditivado", "piora_aditivado"),
-        ("subida", b_sub, a_sub, "baseline", "aditivado", "economia_aditivado", "piora_aditivado"),
-        ("descida", b_des, a_des, "baseline", "aditivado", "economia_aditivado", "piora_aditivado"),
+        ("bl_vs_adtv_media_subida_descida", b_med, a_med, "baseline", "aditivado", "economia_aditivado", "piora_aditivado"),
+        ("bl_vs_adtv_subida", b_sub, a_sub, "baseline", "aditivado", "economia_aditivado", "piora_aditivado"),
+        ("bl_vs_adtv_descida", b_des, a_des, "baseline", "aditivado", "economia_aditivado", "piora_aditivado"),
         (
             "baseline_subida_vs_descida",
             b_sub,
             b_des,
             "baseline_subida",
             "baseline_descida",
+            "descida_menor_que_subida",
+            "descida_maior_que_subida",
+        ),
+        (
+            "aditivado_subida_vs_descida",
+            a_sub,
+            a_des,
+            "aditivado_subida",
+            "aditivado_descida",
             "descida_menor_que_subida",
             "descida_maior_que_subida",
         ),
@@ -3210,7 +3564,7 @@ def _plot_compare_iteracoes_bl_vs_adtv(df: pd.DataFrame, *, root_plot_dir: Optio
         b_sub,
         b_des,
         title="Compare baseline subida vs descida - Consumo absoluto",
-        filename="compare_iteracoes_bl_vs_adtv_baseline_subida_vs_descida_consumo_abs.png",
+        filename="compare_iteracoes_baseline_subida_vs_descida_consumo_abs.png",
         target_dir=target_dir,
         label_bl="Baseline subida",
         label_adtv="Baseline descida",
@@ -3219,12 +3573,35 @@ def _plot_compare_iteracoes_bl_vs_adtv(df: pd.DataFrame, *, root_plot_dir: Optio
         b_sub,
         b_des,
         title="Compare baseline subida vs descida - Delta percentual (descida/subida)",
-        filename="compare_iteracoes_bl_vs_adtv_baseline_subida_vs_descida_razao_delta_pct.png",
+        filename="compare_iteracoes_baseline_subida_vs_descida_razao_delta_pct.png",
         target_dir=target_dir,
         label_line="Descida vs Subida (baseline)",
         note_text="Negativo = descida com menor consumo; Positivo = descida com maior consumo",
         label_bl="baseline_subida",
         label_adtv="baseline_descida",
+        interpret_neg="descida_menor_que_subida",
+        interpret_pos="descida_maior_que_subida",
+    )
+
+    _plot_bl_adtv_consumo_absolute(
+        a_sub,
+        a_des,
+        title="Compare aditivado subida vs descida - Consumo absoluto",
+        filename="compare_iteracoes_aditivado_subida_vs_descida_consumo_abs.png",
+        target_dir=target_dir,
+        label_bl="Aditivado subida",
+        label_adtv="Aditivado descida",
+    )
+    _plot_bl_adtv_delta_pct(
+        a_sub,
+        a_des,
+        title="Compare aditivado subida vs descida - Delta percentual (descida/subida)",
+        filename="compare_iteracoes_aditivado_subida_vs_descida_razao_delta_pct.png",
+        target_dir=target_dir,
+        label_line="Descida vs Subida (aditivado)",
+        note_text="Negativo = descida com menor consumo; Positivo = descida com maior consumo",
+        label_bl="aditivado_subida",
+        label_adtv="aditivado_descida",
         interpret_neg="descida_menor_que_subida",
         interpret_pos="descida_maior_que_subida",
     )
@@ -4192,7 +4569,7 @@ def main() -> None:
     print(f"[INFO] Base do script: {BASE_DIR}")
     config_path = _choose_config_path()
     mappings, instruments_df, reporting_df, plots_df, data_quality_cfg, defaults_cfg = load_config_excel(config_path)
-    apply_runtime_path_overrides(defaults_cfg)
+    apply_runtime_path_overrides(defaults_cfg, config_path)
     print(f"[INFO] Config: {config_path}")
     print(f"[INFO] Entrada LabVIEW/Kibox: {PROCESS_DIR}")
     print(f"[INFO] Saida: {OUT_DIR}")

@@ -62,18 +62,19 @@ powershell -ExecutionPolicy Bypass -File .\setup_env.ps1 -WithGui -PythonExe "C:
 ```
 
 ## Como rodar o pipeline
-1. Ajuste os caminhos de entrada e saida na aba `Defaults` de `config/config_incertezas_rev3.xlsx`.
-2. Campos usados:
-   - `RAW_INPUT_DIR`
-   - `OUT_DIR`
-3. Se esses campos ficarem vazios, o pipeline usa:
-   - entrada: `raw/PROCESSAR`
-   - saida: `out/`
-
-Rodar:
+1. Rode o pipeline normalmente:
 ```powershell
 & ".\.venv\Scripts\python.exe" .\nanum_pipeline_28.py
 ```
+2. Em toda execucao, o pipeline abre um popup Windows para selecionar:
+   - `RAW_INPUT_DIR`
+   - `OUT_DIR`
+3. O fluxo tenta primeiro o seletor nativo de pastas do Windows; se ele falhar, cai para popup Tkinter e, em ultimo caso, para prompt no terminal.
+4. A ultima selecao fica salva localmente em:
+   - `%LOCALAPPDATA%\nanum_pipeline_28\pipeline28_runtime_paths.json`
+5. O popup volta preenchido com a ultima selecao para acelerar a proxima execucao.
+6. O restante do `config/config_incertezas_rev3.xlsx` continua sendo lido normalmente.
+7. Apenas `RAW_INPUT_DIR` e `OUT_DIR` sao sincronizados de volta na aba `Defaults`; o resto da planilha nao e alterado.
 
 ## Como rodar os utilitarios KIBOX
 Viewer rapido Qt:
@@ -83,6 +84,34 @@ Viewer rapido Qt:
 
 Se o `--input` padrao nao existir neste PC, o viewer abre um seletor de arquivo para voce escolher o CSV na hora.
 
+Conversor `.open -> .csv` usando o `OpenToCSV.exe` ja instalado com o KiBox Cockpit:
+```powershell
+& ".\.venv\Scripts\python.exe" .\kibox_open_to_csv.py "C:\caminho\arquivo.open" --type res --separator tab --name-mode pipeline
+```
+
+Observacoes:
+- o wrapper usa `type=res sep=tab cno` por padrao operacional para ficar proximo do formato `_i.csv` que o `pipeline28` ja le;
+- para um nome final explicito, por exemplo casar com um `.xlsx`, use `--output-name D85B15_45kW_i.csv`;
+- se a entrada for um diretorio, o utilitario varre os `.open` recursivamente e converte um a um.
+
+Interface grafica Windows para selecionar varios `.open`, escolher pasta de saida e acompanhar o log em tempo real:
+```powershell
+& ".\.venv\Scripts\python.exe" .\kibox_open_to_csv.py --gui
+```
+
+Na GUI:
+- selecione varios arquivos `.open` ao mesmo tempo;
+- selecione a pasta de destino da conversao;
+- na primeira abertura, se o `OpenToCSV.exe` nao for encontrado automaticamente, a GUI pede o executavel e salva o caminho em `%LOCALAPPDATA%\nanum_pipeline_28\kibox_open_to_csv_settings.json`;
+- nas proximas execucoes, a GUI reutiliza esse caminho salvo e, se voce trocar de computador ou de instalacao, pede o novo `OpenToCSV.exe` sem crashar;
+- o nome de saida e sempre `nome_original_i.csv`, para seguir o padrao que o `pipeline28` detecta como KIBOX;
+- a GUI usa o arquivo selecionado na lista como amostra visual do lote e monta um dropdown dinamico com pontos de insercao baseados no nome original;
+- o dropdown mostra o proprio nome com o texto inserido na posicao escolhida, por exemplo:
+  - `NANUM_xxxx_17,5KW-2026-03-06--20-17-31-041.open`
+  - `NANUM_17,5KW_xxxx_-2026-03-06--20-17-31-041.open`
+- a propria tela mostra a previa final do CSV de saida antes de converter;
+- a barra de progresso geral avanca por arquivo concluido e o log mostra a saida do `OpenToCSV` durante a execucao.
+
 ## Regras para evitar problema entre PCs
 1. Antes de comecar, rodar:
 ```powershell
@@ -91,8 +120,9 @@ git pull --ff-only origin main
 ```
 2. Se mexer em codigo ou config, registrar no `HANDOFF_GLOBAL.md`.
 3. Se mexer na planilha `config_incertezas_rev3.xlsx`, tratar isso como mudanca consciente de configuracao e commitar separado quando fizer sentido.
-4. Nao usar o Drive como fonte principal do codigo. O codigo deve vir do Git. O Drive fica para dados pesados e backup.
-5. Nao apontar o VS Code para Python aleatorio do Windows. Use a `.venv` local do repo.
+4. O pipeline agora atualiza automaticamente apenas `RAW_INPUT_DIR` e `OUT_DIR` na aba `Defaults` quando voce confirma o popup de execucao.
+5. Nao usar o Drive como fonte principal do codigo. O codigo deve vir do Git. O Drive fica para dados pesados e backup.
+6. Nao apontar o VS Code para Python aleatorio do Windows. Use a `.venv` local do repo.
 
 ## Retomar em casa sem atrito
 1. Sincronize o repo:
@@ -111,10 +141,10 @@ git switch -c continue-from-lab
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\setup_env.ps1 -WithGui
 ```
-4. Ajuste `RAW_INPUT_DIR` e `OUT_DIR` na aba `Defaults` de `config/config_incertezas_rev3.xlsx` para caminhos existentes no PC de casa.
-5. Rode o pipeline e valide no log as linhas:
-   - `[INFO] RAW_INPUT_DIR (Excel): ...`
-   - `[INFO] OUT_DIR (Excel): ...`
+4. Rode o pipeline; o popup vai pedir `RAW_INPUT_DIR` e `OUT_DIR` para o PC atual e ja trazer a ultima selecao preenchida.
+5. Valide no log as linhas:
+   - `[INFO] RAW_INPUT_DIR (GUI): ...`
+   - `[INFO] OUT_DIR (GUI): ...`
 
 ## Pacotes usados
 Pipeline:
