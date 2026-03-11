@@ -1206,3 +1206,103 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
 - Observacao importante:
   - a pasta `Descendo_baseline_2` ainda contem apenas `.open` de combustao;
   - para ter KIBOX real nessa serie, primeiro e preciso converter esses `.open` para `*_i.csv`.
+
+## Robustez do `standalone_kibox_cycle_viewer_fast.py` na abertura de CSV - 2026-03-11
+- Sintomas observados:
+  - em alguns PCs com Python `3.12`, a abertura do viewer podia cair no `platform._syscmd_ver()` por problema de code page do Windows;
+  - mesmo depois disso, alguns CSVs selecionados manualmente nao abriam porque o loader exigia:
+    - separador `tab`;
+    - nomes de coluna exatamente `Cycle number`, `Crank angle`, `PCYL_1`, `Q_1`;
+    - layout fixo com a segunda linha ignorada.
+- Correcao aplicada em `standalone_kibox_cycle_viewer_fast.py`:
+  - adicionado fallback seguro para `platform._syscmd_ver()` quando ocorrer `UnicodeDecodeError` no Windows;
+  - o loader do CSV passou a:
+    - detectar delimitador automaticamente (`tab`, `;`, `,`, `|`);
+    - detectar a linha de cabecalho;
+    - aceitar variacoes razoaveis de nome nas colunas esperadas, inclusive com unidades no header;
+    - converter numericos com virgula ou ponto decimal sem depender de `decimal=","`.
+  - quando o arquivo escolhido nao for um CSV KIBOX compativel, o script agora mostra erro legivel com as colunas encontradas, em vez de deixar traceback cru do `pandas`.
+- Validacao feita:
+  - `--no-show` passou com CSV sintetico em formato:
+    - `tab` + linha de unidades;
+    - `;` + cabecalho com unidades;
+  - CSV propositalmente incompatível retorna mensagem clara de incompatibilidade.
+
+## Feedback de carregamento para CSV KIBOX grande no viewer - 2026-03-11
+- Sintoma observado:
+  - ao abrir um CSV de traço KIBOX real e grande, por exemplo `C:\Users\SC61730\Downloads\TESTE_50KW_E100-2026-01-17--17-12-46-081.csv`, o terminal mostrava apenas:
+    - `[WARN] Input padrao indisponivel: ...`
+  - depois disso parecia que nada acontecia, mas o script ainda estava carregando o dataset em memoria.
+- Diagnostico:
+  - o arquivo citado tem cerca de `315 MB`;
+  - o viewer precisa consolidar cerca de `4.320.000` linhas para montar os mapas ciclo a ciclo;
+  - em cache quente, o preparo ficou na faixa de `38 s` e a execucao completa em subprocesso ficou na faixa de `50 s`;
+  - em leitura fria o tempo percebido pode ser maior.
+- Correcao aplicada em `standalone_kibox_cycle_viewer_fast.py`:
+  - adicionado `fast path` para o formato KIBOX padrao, lendo apenas:
+    - `Cycle number`
+    - `Crank angle`
+    - `PCYL_1`
+    - `Q_1`
+  - a deteccao de layout passou a ler apenas uma amostra inicial do arquivo, em vez de carregar o CSV inteiro em bytes antes do parse;
+  - o `main()` agora:
+    - imprime `[INFO] Loading viewer dataset: ...`;
+    - imprime `[INFO] Viewer dataset ready in X.Ys: ...`;
+    - abre um `QProgressDialog` modal de `Loading KIBOX CSV...` enquanto o parse pesado roda.
+- Otimizacao adicional aplicada depois:
+  - o `fast path` deixou de ler as 4 colunas como texto com coercao posterior;
+  - para o CSV KIBOX padrao ele agora usa `pd.read_csv(... decimal=\",\" usecols=[...])` direto no parse numerico, mantendo o fallback robusto so para formatos fora do padrao.
+- Ganho medido:
+  - no arquivo `TESTE_50KW_E100-2026-01-17--17-12-46-081.csv`, `load_cycle_dataframe()` caiu de cerca de `92 s` para cerca de `6,3 s`;
+  - o `--no-show` completo caiu para cerca de `8,8 s` no mesmo arquivo.
+- Observacao operacional:
+  - os arquivos `_m.csv` (MoTeC) e `_i.csv` (KIBOX resumido por ciclo) continuam incompatíveis com esse viewer;
+  - para o viewer de `Crank angle`, usar o CSV completo de traço, como os `TESTE_...csv` sem sufixo `_m` ou `_i`.
+
+## Layout 2x2 no `standalone_kibox_cycle_viewer_fast.py` com diagrama P-V - 2026-03-11
+- Pedido aplicado no viewer principal:
+  - `PCYL_1` por crank angle deixou de ocupar a largura total e passou para o quadrante superior esquerdo;
+  - no quadrante superior direito entrou um diagrama `P-V` com:
+    - `Volume` no eixo X;
+    - `P_CYL` no eixo Y;
+    - escala logaritmica no eixo de pressao;
+  - o quadrante inferior esquerdo ficou com `Q_1` por crank angle;
+  - o quadrante inferior direito ficou com `PMAX` por ciclo.
+- Implementacao:
+  - o loader passou a exigir tambem a coluna `Volume`;
+  - foi criada uma serie dedicada `PVSeries` com:
+    - curva do ciclo selecionado;
+    - media por bloco no mesmo estilo do overlay existente;
+    - limites proprios de `Volume` e de pressao positiva para o eixo log.
+  - o diagrama `P-V` passou a usar `log10` nos dois eixos:
+    - `Volume` no X;
+    - `P_CYL` no Y.
+- Validacao feita:
+  - `--no-show` no arquivo `C:\Users\SC61730\Downloads\raw_kibox\TESTE_50KW_E100-2026-01-17--17-12-46-081.csv` concluiu com `600` ciclos;
+  - instanciacao da UI em `offscreen` confirmou os quatro plots:
+    - `pcyl_plot`
+    - `pv_plot`
+    - `q1_plot`
+    - `pmax_plot`.
+
+## Correcao do recarregamento do P-V em `log10-log10` - 2026-03-11
+- Sintoma observado:
+  - depois de ativar `log10` em `Volume` e `P_CYL`, o quadrante `P-V` podia sumir ao abrir/recarregar arquivos.
+- Causa:
+  - no `pyqtgraph`, quando `setLogMode(x=True, y=True)` esta ativo, o `ViewBox` trabalha com ranges ja transformados em `log10`;
+  - o viewer ainda estava aplicando `setXRange` e `setYRange` com limites lineares ao configurar e ao recarregar dataset.
+- Correcao aplicada:
+  - criado helper para converter os limites positivos do `P-V` para faixa `log10` antes de chamar `setXRange`/`setYRange`;
+  - o ajuste foi aplicado tanto na configuracao inicial quanto no `_apply_dataset()` do recarregamento.
+- Validacao feita:
+  - teste de recarregar datasets diferentes dentro da mesma instancia confirmou que o range do `P-V` continua cobrindo os `dataBounds` da curva apos `_apply_dataset()`.
+
+## Layout horizontal na aba `Compare` do viewer - 2026-03-11
+- Pedido aplicado:
+  - os plots comparativos de `PCYL_1` e `Q_1` deixaram de ficar empilhados;
+  - agora eles aparecem lado a lado na aba `Compare`.
+- Implementacao:
+  - `compare_pcyl_plot` ficou em `row=0, col=0`;
+  - `compare_q1_plot` passou para `row=0, col=1`.
+- Validacao feita:
+  - instanciacao em `offscreen` confirmou posicoes distintas na horizontal e curvas carregadas nos dois plots.

@@ -3,10 +3,110 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from datetime import datetime
+import locale
 from pathlib import Path
+import platform
+import re
+import subprocess
+import sys
+import time
+from typing import Sequence
 
 import numpy as np
 import pandas as pd
+
+
+# Python 3.12 on some Windows setups can decode `cmd /c ver` with the wrong code page.
+_WIN_VER_OUTPUT_RE = re.compile(r"(?:([\w ]+) ([\w.]+) .* \[.* ([\d.]+)\])")
+
+
+def _decode_windows_cmd_output(raw: bytes) -> str:
+    candidates: list[str] = []
+    locale_encoding = locale.getpreferredencoding(False)
+    if locale_encoding:
+        candidates.append(locale_encoding)
+    getencoding = getattr(locale, "getencoding", None)
+    if callable(getencoding):
+        detected = getencoding()
+        if detected and detected not in candidates:
+            candidates.append(detected)
+    for encoding in ("utf-8", "mbcs", "cp850", "cp437", "latin-1"):
+        if encoding not in candidates:
+            candidates.append(encoding)
+
+    for encoding in candidates:
+        try:
+            return raw.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return raw.decode("latin-1", errors="replace")
+
+
+def _fallback_syscmd_ver(
+    system: str = "",
+    release: str = "",
+    version: str = "",
+    supported_platforms: tuple[str, ...] = ("win32", "win16", "dos"),
+) -> tuple[str, str, str]:
+    if sys.platform not in supported_platforms:
+        return system, release, version
+
+    for cmd in ("ver", "command /c ver", "cmd /c ver"):
+        try:
+            raw = subprocess.check_output(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=False,
+                shell=True,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            continue
+
+        info = _decode_windows_cmd_output(raw).strip()
+        if not info:
+            continue
+
+        for line in reversed([line.strip() for line in info.splitlines() if line.strip()]):
+            match = _WIN_VER_OUTPUT_RE.search(line)
+            if match is None:
+                continue
+            system, release, version = match.groups()
+            if release.endswith("."):
+                release = release[:-1]
+            if version.endswith("."):
+                version = version[:-1]
+            return system, release, platform._norm_version(version)
+        return system, release, version
+
+    return system, release, version
+
+
+def _patch_platform_syscmd_ver() -> None:
+    if sys.platform != "win32":
+        return
+
+    original = getattr(platform, "_syscmd_ver", None)
+    if original is None or getattr(platform, "_kibox_safe_syscmd_ver", False):
+        return
+
+    def _safe_syscmd_ver(
+        system: str = "",
+        release: str = "",
+        version: str = "",
+        supported_platforms: tuple[str, ...] = ("win32", "win16", "dos"),
+    ) -> tuple[str, str, str]:
+        try:
+            return original(system, release, version, supported_platforms)
+        except UnicodeDecodeError:
+            return _fallback_syscmd_ver(system, release, version, supported_platforms)
+
+    platform._syscmd_ver = _safe_syscmd_ver
+    platform._kibox_safe_syscmd_ver = True
+
+
+_patch_platform_syscmd_ver()
+
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -30,6 +130,19 @@ COMPARE_SLOT_COLORS = [
     (255, 110, 0),
     (180, 255, 0),
 ]
+
+REQUIRED_VIEWER_COLUMNS = ("CycleNumber", "CrankAngle_deg", "Volume_l", "PCYL_1", "Q_1")
+VIEWER_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
+    "CycleNumber": ("cyclenumber", "cycleno", "cyclenr", "cycle"),
+    "CrankAngle_deg": ("crankangledegca", "crankangledeg", "crankangleca", "crankangle"),
+    "Volume_l": ("volumel", "volume", "cylindervolume", "vol"),
+    "PCYL_1": ("pcyl1bar", "pcyl1", "pcyl", "pcyl1abs"),
+    "Q_1": ("q1jdegca", "q1jdeg", "q1"),
+}
+
+
+class UnsupportedTraceCsvError(ValueError):
+    pass
 
 
 @dataclass
@@ -56,9 +169,18 @@ class ViewerSeries:
 
 
 @dataclass
+class PVSeries:
+    cycle_lookup: dict[int, CurveData]
+    block_lookup: dict[int, BlockCurveData]
+    x_limits: tuple[float, float]
+    y_limits: tuple[float, float]
+
+
+@dataclass
 class ViewerDataset:
     csv_path: Path
     pcyl_series: ViewerSeries
+    pv_series: PVSeries
     q1_series: ViewerSeries
     pmax_cycles: np.ndarray
     pmax_values: np.ndarray
@@ -130,19 +252,256 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _normalize_cols(cols: Sequence[object]) -> list[str]:
+    return [str(c).replace("\ufeff", "").strip() for c in cols]
+
+
+def _normalize_repeated_stat_tokens_in_name(x: object) -> str:
+    s = str(x).replace("\ufeff", "").strip()
+    if not s:
+        return s
+
+    replacements = [
+        ("_mean_mean_of_windows", "_mean_of_windows"),
+        ("_mean_sd_of_windows", "_sd_of_windows"),
+        ("_sd_mean_of_windows", "_sd_of_windows"),
+        ("_sd_sd_of_windows", "_sd_of_windows"),
+        ("_mean_mean", "_mean"),
+        ("_sd_sd", "_sd"),
+    ]
+
+    prev = None
+    while prev != s:
+        prev = s
+        for old, new in replacements:
+            s = s.replace(old, new)
+    return re.sub(r"__+", "_", s)
+
+
+def _coalesce_equivalent_columns(df: pd.DataFrame, context: str = "") -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+
+    merged: dict[str, pd.Series] = {}
+    sources: dict[str, list[str]] = {}
+    for idx, raw_col in enumerate(df.columns):
+        col = _normalize_repeated_stat_tokens_in_name(raw_col)
+        series = df.iloc[:, idx].copy()
+        series.name = col
+        sources.setdefault(col, []).append(str(raw_col))
+        if col in merged:
+            merged[col] = merged[col].where(merged[col].notna(), series)
+        else:
+            merged[col] = series
+
+    duplicates = {col: cols for col, cols in sources.items() if len(cols) > 1}
+    if duplicates:
+        preview = "; ".join(f"{col} <= {cols}" for col, cols in list(duplicates.items())[:5])
+        where = f" em {context}" if context else ""
+        print(f"[INFO] Consolidei colunas equivalentes{where}: {preview}")
+
+    return pd.DataFrame(merged, index=df.index)
+
+
+def _canon_header(x: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(x).replace("\ufeff", "").strip().lower())
+
+
+def _decode_text_with_fallbacks(raw: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1", errors="replace")
+
+
+def _read_text_sample(csv_path: Path, max_bytes: int = 262_144) -> str:
+    with csv_path.open("rb") as fh:
+        raw = fh.read(max_bytes)
+    return _decode_text_with_fallbacks(raw)
+
+
+def _coerce_numeric_series(s: pd.Series) -> pd.Series:
+    if pd.api.types.is_numeric_dtype(s):
+        return pd.to_numeric(s, errors="coerce")
+
+    x = s.astype(str).str.replace("\ufeff", "", regex=False).str.strip()
+    x = x.str.replace("\u00A0", " ", regex=False).str.replace(" ", "", regex=False)
+    x = x.str.replace(r"[^0-9,.\-+]+", "", regex=True)
+
+    def _fix_num(v: object) -> str:
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            return ""
+        v = str(v)
+        if not v:
+            return ""
+        if "," in v and "." in v:
+            if v.rfind(",") > v.rfind("."):
+                return v.replace(".", "").replace(",", ".")
+            return v.replace(",", "")
+        if "," in v:
+            return v.replace(",", ".")
+        return v
+
+    fixed = x.map(_fix_num)
+    return pd.to_numeric(fixed, errors="coerce")
+
+
+def _resolve_required_columns(columns: Sequence[object]) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    canon_map: dict[str, str] = {}
+    for raw in _normalize_cols(columns):
+        canon = _canon_header(raw)
+        if canon and canon not in canon_map:
+            canon_map[canon] = raw
+
+    for target, aliases in VIEWER_COLUMN_ALIASES.items():
+        for alias in aliases:
+            if alias in canon_map:
+                resolved[target] = canon_map[alias]
+                break
+        if target in resolved:
+            continue
+        for canon, raw in canon_map.items():
+            if any(canon.startswith(alias) or alias.startswith(canon) for alias in aliases):
+                resolved[target] = raw
+                break
+    return resolved
+
+
+def _detect_kibox_layout(text: str) -> tuple[str, int]:
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        raise ValueError("Arquivo CSV vazio.")
+
+    best: tuple[int, int, int, str, int] | None = None
+    for delim in ("\t", ";", ",", "|"):
+        for row_idx, line in enumerate(lines[:80]):
+            cells = [cell.strip() for cell in line.split(delim)]
+            if len(cells) < 2:
+                continue
+            resolved = _resolve_required_columns(cells)
+            alpha_cells = sum(1 for cell in cells if any(ch.isalpha() for ch in cell))
+            score = (len(resolved), alpha_cells, len(cells), delim, row_idx)
+            if best is None or score > best:
+                best = score
+
+    if best is None:
+        raise ValueError("Nao consegui detectar o formato do CSV.")
+    return best[3], best[4]
+
+
+def _read_kibox_csv_raw(csv_path: Path) -> pd.DataFrame:
+    text = _read_text_sample(csv_path)
+    delimiter, header_row = _detect_kibox_layout(text)
+
+    last_error: Exception | None = None
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            df = pd.read_csv(
+                csv_path,
+                sep=delimiter,
+                engine="python",
+                encoding=encoding,
+                skiprows=header_row,
+                dtype=str,
+            )
+            break
+        except UnicodeDecodeError as exc:
+            last_error = exc
+    else:
+        raise ValueError(f"Nao consegui ler o CSV com as codificacoes tentadas: {csv_path}") from last_error
+
+    df.columns = _normalize_cols(list(df.columns))
+    df = df.loc[:, ~pd.Series(df.columns).astype(str).str.startswith("Unnamed").values].copy()
+    df = _coalesce_equivalent_columns(df, context=csv_path.name)
+    return df
+
+
+def _try_fast_load_cycle_dataframe(csv_path: Path) -> pd.DataFrame | None:
+    text = _read_text_sample(csv_path)
+    delimiter, header_row = _detect_kibox_layout(text)
+    if header_row != 0:
+        return None
+
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return None
+    header_cells = _normalize_cols(lines[header_row].split(delimiter))
+    resolved = _resolve_required_columns(header_cells)
+    if any(col not in resolved for col in REQUIRED_VIEWER_COLUMNS):
+        return None
+
+    usecols = [
+        resolved["CycleNumber"],
+        resolved["CrankAngle_deg"],
+        resolved["Volume_l"],
+        resolved["PCYL_1"],
+        resolved["Q_1"],
+    ]
+    skiprows = [1] if len(lines) > 1 and any(ch.isalpha() for ch in lines[1]) else None
+    last_error: Exception | None = None
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            df = pd.read_csv(
+                csv_path,
+                sep=delimiter,
+                decimal=",",
+                encoding=encoding,
+                skiprows=skiprows,
+                usecols=usecols,
+                memory_map=True,
+            )
+            df = df.rename(
+                columns={
+                    resolved["CycleNumber"]: "CycleNumber",
+                    resolved["CrankAngle_deg"]: "CrankAngle_deg",
+                    resolved["Volume_l"]: "Volume_l",
+                    resolved["PCYL_1"]: "PCYL_1",
+                    resolved["Q_1"]: "Q_1",
+                }
+            )
+            df["CycleNumber"] = pd.to_numeric(df["CycleNumber"], errors="coerce").ffill()
+            df["CrankAngle_deg"] = pd.to_numeric(df["CrankAngle_deg"], errors="coerce").round(1)
+            df["Volume_l"] = pd.to_numeric(df["Volume_l"], errors="coerce")
+            df["PCYL_1"] = pd.to_numeric(df["PCYL_1"], errors="coerce")
+            df["Q_1"] = pd.to_numeric(df["Q_1"], errors="coerce")
+            df = df.dropna(subset=["CycleNumber", "CrankAngle_deg"])
+            df["CycleNumber"] = df["CycleNumber"].astype("int64")
+            return df
+        except (UnicodeDecodeError, ValueError) as exc:
+            last_error = exc
+            continue
+    if last_error is not None:
+        raise last_error
+    return None
+
+
 def load_cycle_dataframe(csv_path: Path) -> pd.DataFrame:
-    df = pd.read_csv(
-        csv_path,
-        sep="\t",
-        decimal=",",
-        skiprows=[1],
-        usecols=["Cycle number", "Crank angle", "PCYL_1", "Q_1"],
-    )
-    df = df.rename(columns={"Cycle number": "CycleNumber", "Crank angle": "CrankAngle_deg"})
-    df["CycleNumber"] = pd.to_numeric(df["CycleNumber"], errors="coerce").ffill()
-    df["CrankAngle_deg"] = pd.to_numeric(df["CrankAngle_deg"], errors="coerce").round(1)
-    df["PCYL_1"] = pd.to_numeric(df["PCYL_1"], errors="coerce")
-    df["Q_1"] = pd.to_numeric(df["Q_1"], errors="coerce")
+    fast_df = _try_fast_load_cycle_dataframe(csv_path)
+    if fast_df is not None:
+        return fast_df
+
+    raw_df = _read_kibox_csv_raw(csv_path)
+    resolved = _resolve_required_columns(raw_df.columns)
+    missing = [col for col in REQUIRED_VIEWER_COLUMNS if col not in resolved]
+    if missing:
+        found = ", ".join(list(raw_df.columns)[:12]) or "(nenhuma coluna)"
+        raise UnsupportedTraceCsvError(
+            "CSV incompativel com o viewer. "
+            "Esperado um export KIBOX com colunas equivalentes a "
+            "'Cycle number', 'Crank angle', 'Volume', 'PCYL_1' e 'Q_1'. "
+            f"Colunas encontradas: {found}"
+        )
+
+    df = raw_df.rename(columns={raw: canonical for canonical, raw in resolved.items()})
+    df = df[list(REQUIRED_VIEWER_COLUMNS)].copy()
+    df["CycleNumber"] = _coerce_numeric_series(df["CycleNumber"]).ffill()
+    df["CrankAngle_deg"] = _coerce_numeric_series(df["CrankAngle_deg"]).round(1)
+    df["Volume_l"] = _coerce_numeric_series(df["Volume_l"])
+    df["PCYL_1"] = _coerce_numeric_series(df["PCYL_1"])
+    df["Q_1"] = _coerce_numeric_series(df["Q_1"])
     df = df.dropna(subset=["CycleNumber", "CrankAngle_deg"])
     df["CycleNumber"] = df["CycleNumber"].astype("int64")
     return df
@@ -172,11 +531,12 @@ def _prompt_input_csv(initial_target: Path) -> Path | None:
 def build_per_cycle_means(df: pd.DataFrame) -> pd.DataFrame:
     # KIBOX files used here already contain one row per cycle/crank-angle pair.
     # A global groupby on both keys only burns memory on large files.
-    per_cycle = df[["CycleNumber", "CrankAngle_deg", "PCYL_1", "Q_1"]].sort_values(
+    per_cycle = df[["CycleNumber", "CrankAngle_deg", "Volume_l", "PCYL_1", "Q_1"]].sort_values(
         ["CycleNumber", "CrankAngle_deg"]
     )
     per_cycle["CycleNumber"] = per_cycle["CycleNumber"].astype(np.int32)
     per_cycle["CrankAngle_deg"] = per_cycle["CrankAngle_deg"].astype(np.float32)
+    per_cycle["Volume_l"] = pd.to_numeric(per_cycle["Volume_l"], errors="coerce", downcast="float")
     per_cycle["PCYL_1"] = pd.to_numeric(per_cycle["PCYL_1"], errors="coerce", downcast="float")
     per_cycle["Q_1"] = pd.to_numeric(per_cycle["Q_1"], errors="coerce", downcast="float")
     return per_cycle
@@ -269,6 +629,110 @@ def _compute_y_limits(cycle_lookup: dict[int, CurveData], block_lookup: dict[int
     return (ymin - pad, ymax + pad)
 
 
+def _compute_x_limits(cycle_lookup: dict[int, CurveData], block_lookup: dict[int, BlockCurveData]) -> tuple[float, float]:
+    arrays: list[np.ndarray] = []
+    for d in cycle_lookup.values():
+        if d.x.size:
+            arrays.append(d.x.astype(float, copy=False))
+    for d in block_lookup.values():
+        if d.x.size:
+            arrays.append(d.x.astype(float, copy=False))
+    if not arrays:
+        return (1e-4, 1.0)
+
+    all_values = np.concatenate(arrays)
+    valid = all_values[np.isfinite(all_values) & (all_values > 0.0)]
+    if valid.size == 0:
+        return (1e-4, 1.0)
+
+    xmin = float(np.nanmin(valid))
+    xmax = float(np.nanmax(valid))
+    if np.isclose(xmin, xmax):
+        return (max(xmin / 1.2, 1e-6), xmax * 1.2)
+    pad = (xmax - xmin) * 0.03
+    return (max(xmin - pad, 1e-6), xmax + pad)
+
+
+def _compute_positive_y_limits(
+    cycle_lookup: dict[int, CurveData],
+    block_lookup: dict[int, BlockCurveData],
+) -> tuple[float, float]:
+    arrays: list[np.ndarray] = []
+    for d in cycle_lookup.values():
+        if d.y.size:
+            arrays.append(d.y.astype(float, copy=False))
+    for d in block_lookup.values():
+        if d.y.size:
+            arrays.append(d.y.astype(float, copy=False))
+    if not arrays:
+        return (0.1, 1.0)
+
+    all_values = np.concatenate(arrays)
+    valid = all_values[np.isfinite(all_values) & (all_values > 0.0)]
+    if valid.size == 0:
+        return (0.1, 1.0)
+
+    ymin = float(np.nanmin(valid))
+    ymax = float(np.nanmax(valid))
+    if np.isclose(ymin, ymax):
+        return (max(ymin / 1.2, 1e-3), ymax * 1.2)
+    return (max(ymin / 1.1, 1e-3), ymax * 1.1)
+
+
+def build_pv_series(per_cycle: pd.DataFrame, *, cycle_block_size: int) -> PVSeries:
+    filtered = per_cycle[
+        per_cycle["Volume_l"].notna()
+        & (per_cycle["Volume_l"] > 0.0)
+        & per_cycle["PCYL_1"].notna()
+        & (per_cycle["PCYL_1"] > 0.0)
+    ][["CycleNumber", "CrankAngle_deg", "Volume_l", "PCYL_1"]].copy()
+    if filtered.empty:
+        return PVSeries(cycle_lookup={}, block_lookup={}, x_limits=(1e-4, 1.0), y_limits=(0.1, 1.0))
+
+    filtered = filtered.sort_values(["CycleNumber", "CrankAngle_deg"])
+
+    cycle_lookup: dict[int, CurveData] = {}
+    for cycle, group in filtered.groupby("CycleNumber", sort=True):
+        cycle_lookup[int(cycle)] = CurveData(
+            x=group["Volume_l"].to_numpy(dtype=np.float32, copy=True),
+            y=group["PCYL_1"].to_numpy(dtype=np.float32, copy=True),
+        )
+
+    filtered["CycleBlockIndex"] = ((filtered["CycleNumber"] - 1) // cycle_block_size) + 1
+    block_curve = (
+        filtered.groupby(["CycleBlockIndex", "CrankAngle_deg"], as_index=False, sort=False)[["Volume_l", "PCYL_1"]]
+        .mean()
+        .sort_values(["CycleBlockIndex", "CrankAngle_deg"])
+    )
+    max_cycle = int(filtered["CycleNumber"].max())
+    block_curve["CycleBlockStart"] = ((block_curve["CycleBlockIndex"] - 1) * cycle_block_size) + 1
+    block_curve["CycleBlockEnd"] = (block_curve["CycleBlockStart"] + cycle_block_size - 1).clip(upper=max_cycle)
+    block_curve["CycleBlockLabel"] = (
+        block_curve["CycleBlockStart"].astype(str) + "-" + block_curve["CycleBlockEnd"].astype(str)
+    )
+
+    block_lookup: dict[int, BlockCurveData] = {}
+    for block_index, group in block_curve.groupby("CycleBlockIndex", sort=True):
+        block_lookup[int(block_index)] = BlockCurveData(
+            x=group["Volume_l"].to_numpy(dtype=np.float32, copy=True),
+            y=group["PCYL_1"].to_numpy(dtype=np.float32, copy=True),
+            label=str(group["CycleBlockLabel"].iloc[0]),
+        )
+
+    return PVSeries(
+        cycle_lookup=cycle_lookup,
+        block_lookup=block_lookup,
+        x_limits=_compute_x_limits(cycle_lookup, block_lookup),
+        y_limits=_compute_positive_y_limits(cycle_lookup, block_lookup),
+    )
+
+
+def _log10_range(limits: tuple[float, float]) -> tuple[float, float]:
+    lo = max(float(limits[0]), 1e-12)
+    hi = max(float(limits[1]), lo * 1.0001)
+    return (float(np.log10(lo)), float(np.log10(hi)))
+
+
 def build_viewer_series(
     per_cycle: pd.DataFrame,
     *,
@@ -300,6 +764,7 @@ def prepare_viewer_dataset(csv_path: Path, cycle_block_size: int) -> ViewerDatas
     df = load_cycle_dataframe(csv_path)
     df["CycleNumber"] = df["CycleNumber"].astype(np.int32)
     df["CrankAngle_deg"] = df["CrankAngle_deg"].astype(np.float32)
+    df["Volume_l"] = pd.to_numeric(df["Volume_l"], errors="coerce", downcast="float")
     df["PCYL_1"] = pd.to_numeric(df["PCYL_1"], errors="coerce", downcast="float")
     df["Q_1"] = pd.to_numeric(df["Q_1"], errors="coerce", downcast="float")
 
@@ -310,6 +775,10 @@ def prepare_viewer_dataset(csv_path: Path, cycle_block_size: int) -> ViewerDatas
         value_col="PCYL_1",
         y_label="P_CYL (bar)",
         x_range=PCYL_X_RANGE,
+        cycle_block_size=cycle_block_size,
+    )
+    pv_series = build_pv_series(
+        per_cycle,
         cycle_block_size=cycle_block_size,
     )
     q1_series = build_viewer_series(
@@ -338,6 +807,7 @@ def prepare_viewer_dataset(csv_path: Path, cycle_block_size: int) -> ViewerDatas
     return ViewerDataset(
         csv_path=csv_path,
         pcyl_series=pcyl_series,
+        pv_series=pv_series,
         q1_series=q1_series,
         pmax_cycles=pmax_cycles,
         pmax_values=pmax_values,
@@ -370,6 +840,7 @@ class FastCycleViewer(QtWidgets.QWidget):
         self.dataset = dataset
         self.csv_path = dataset.csv_path
         self.pcyl_series = dataset.pcyl_series
+        self.pv_series = dataset.pv_series
         self.q1_series = dataset.q1_series
         self.pmax_cycles = dataset.pmax_cycles
         self.pmax_values = dataset.pmax_values
@@ -406,8 +877,9 @@ class FastCycleViewer(QtWidgets.QWidget):
         viewer_layout.addWidget(self.graphics, stretch=1)
 
         self.pcyl_plot = self.graphics.addPlot(row=0, col=0)
+        self.pv_plot = self.graphics.addPlot(row=0, col=1)
         self.q1_plot = self.graphics.addPlot(row=1, col=0)
-        self.pmax_plot = self.graphics.addPlot(row=2, col=0)
+        self.pmax_plot = self.graphics.addPlot(row=1, col=1)
 
         control_layout = QtWidgets.QHBoxLayout()
         viewer_layout.addLayout(control_layout)
@@ -446,7 +918,7 @@ class FastCycleViewer(QtWidgets.QWidget):
         compare_layout.addWidget(self.compare_graphics, stretch=1)
 
         self.compare_pcyl_plot = self.compare_graphics.addPlot(row=0, col=0)
-        self.compare_q1_plot = self.compare_graphics.addPlot(row=1, col=0)
+        self.compare_q1_plot = self.compare_graphics.addPlot(row=0, col=1)
 
         compare_action_row = QtWidgets.QHBoxLayout()
         compare_layout.addLayout(compare_action_row)
@@ -519,20 +991,26 @@ class FastCycleViewer(QtWidgets.QWidget):
         pg.setConfigOptions(antialias=True, useOpenGL=True)
 
         self.pcyl_plot.showGrid(x=True, y=True, alpha=0.25)
+        self.pv_plot.showGrid(x=True, y=True, alpha=0.25)
         self.q1_plot.showGrid(x=True, y=True, alpha=0.25)
         self.pmax_plot.showGrid(x=True, y=True, alpha=0.25)
 
         self.pcyl_plot.setLabel("bottom", "Crank angle", units="deg CA")
         self.pcyl_plot.setLabel("left", self.pcyl_series.y_label)
+        self.pv_plot.setLabel("bottom", "Volume", units="l")
+        self.pv_plot.setLabel("left", "P_CYL (bar)")
         self.q1_plot.setLabel("bottom", "Crank angle", units="deg CA")
         self.q1_plot.setLabel("left", self.q1_series.y_label)
         self.pmax_plot.setLabel("bottom", "Cycle")
         self.pmax_plot.setLabel("left", "PMAX (bar)")
 
+        self.pv_plot.setLogMode(x=True, y=True)
         self.pcyl_plot.setXRange(self.pcyl_series.x_min, self.pcyl_series.x_max, padding=0.0)
         self.q1_plot.setXRange(self.q1_series.x_min, self.q1_series.x_max, padding=0.0)
         self.pcyl_plot.setYRange(*self.pcyl_series.y_limits, padding=0.0)
         self.q1_plot.setYRange(*self.q1_series.y_limits, padding=0.0)
+        self.pv_plot.setXRange(*_log10_range(self.pv_series.x_limits), padding=0.0)
+        self.pv_plot.setYRange(*_log10_range(self.pv_series.y_limits), padding=0.0)
 
         pmax_min = float(np.nanmin(self.pmax_values))
         pmax_max = float(np.nanmax(self.pmax_values))
@@ -548,6 +1026,8 @@ class FastCycleViewer(QtWidgets.QWidget):
 
         self.pcyl_curve = self.pcyl_plot.plot(pen=pcyl_pen, name="Selected cycle")
         self.pcyl_block_curve = self.pcyl_plot.plot(pen=block_pen, name="Block mean")
+        self.pv_curve = self.pv_plot.plot(pen=pcyl_pen, name="Selected cycle")
+        self.pv_block_curve = self.pv_plot.plot(pen=block_pen, name="Block mean")
         self.q1_curve = self.q1_plot.plot(pen=q1_pen, name="Selected cycle")
         self.q1_block_curve = self.q1_plot.plot(pen=block_pen, name="Block mean")
         self.pmax_curve = self.pmax_plot.plot(self.pmax_cycles, self.pmax_values, pen=pmax_pen, name="PMAX per cycle")
@@ -558,18 +1038,23 @@ class FastCycleViewer(QtWidgets.QWidget):
 
         if not self.show_block_mean:
             self.pcyl_block_curve.hide()
+            self.pv_block_curve.hide()
             self.q1_block_curve.hide()
 
         legend1 = self.pcyl_plot.addLegend(offset=(10, 10))
         legend1.addItem(self.pcyl_curve, "Selected cycle")
         legend1.addItem(self.pcyl_block_curve, "Block mean")
 
-        legend2 = self.q1_plot.addLegend(offset=(10, 10))
-        legend2.addItem(self.q1_curve, "Selected cycle")
-        legend2.addItem(self.q1_block_curve, "Block mean")
+        legend2 = self.pv_plot.addLegend(offset=(10, 10))
+        legend2.addItem(self.pv_curve, "Selected cycle")
+        legend2.addItem(self.pv_block_curve, "Block mean")
 
-        legend3 = self.pmax_plot.addLegend(offset=(10, 10))
-        legend3.addItem(self.pmax_curve, "PMAX per cycle")
+        legend3 = self.q1_plot.addLegend(offset=(10, 10))
+        legend3.addItem(self.q1_curve, "Selected cycle")
+        legend3.addItem(self.q1_block_curve, "Block mean")
+
+        legend4 = self.pmax_plot.addLegend(offset=(10, 10))
+        legend4.addItem(self.pmax_curve, "PMAX per cycle")
 
         # Keep crank-angle plots aligned during interactive pan/zoom.
         self.pcyl_plot.getViewBox().sigXRangeChanged.connect(
@@ -993,6 +1478,7 @@ class FastCycleViewer(QtWidgets.QWidget):
         self.dataset = dataset
         self.csv_path = dataset.csv_path
         self.pcyl_series = dataset.pcyl_series
+        self.pv_series = dataset.pv_series
         self.q1_series = dataset.q1_series
         self.pmax_cycles = dataset.pmax_cycles
         self.pmax_values = dataset.pmax_values
@@ -1011,6 +1497,8 @@ class FastCycleViewer(QtWidgets.QWidget):
         self.q1_plot.setXRange(self.q1_series.x_min, self.q1_series.x_max, padding=0.0)
         self.pcyl_plot.setYRange(*self.pcyl_series.y_limits, padding=0.0)
         self.q1_plot.setYRange(*self.q1_series.y_limits, padding=0.0)
+        self.pv_plot.setXRange(*_log10_range(self.pv_series.x_limits), padding=0.0)
+        self.pv_plot.setYRange(*_log10_range(self.pv_series.y_limits), padding=0.0)
 
         pmax_min = float(np.nanmin(self.pmax_values))
         pmax_max = float(np.nanmax(self.pmax_values))
@@ -1085,14 +1573,21 @@ class FastCycleViewer(QtWidgets.QWidget):
 
         block_index = ((cycle - 1) // self.cycle_block_size) + 1
         pcyl_cycle = self.pcyl_series.cycle_lookup.get(cycle)
+        pv_cycle = self.pv_series.cycle_lookup.get(cycle)
         q1_cycle = self.q1_series.cycle_lookup.get(cycle)
         pcyl_block = self.pcyl_series.block_lookup.get(block_index)
+        pv_block = self.pv_series.block_lookup.get(block_index)
         q1_block = self.q1_series.block_lookup.get(block_index)
 
         if pcyl_cycle is not None:
             self.pcyl_curve.setData(pcyl_cycle.x, pcyl_cycle.y)
         else:
             self.pcyl_curve.setData([], [])
+
+        if pv_cycle is not None:
+            self.pv_curve.setData(pv_cycle.x, pv_cycle.y)
+        else:
+            self.pv_curve.setData([], [])
 
         if q1_cycle is not None:
             self.q1_curve.setData(q1_cycle.x, q1_cycle.y)
@@ -1104,6 +1599,12 @@ class FastCycleViewer(QtWidgets.QWidget):
             self.pcyl_block_curve.show()
         else:
             self.pcyl_block_curve.hide()
+
+        if self.show_block_mean and pv_block is not None:
+            self.pv_block_curve.setData(pv_block.x, pv_block.y)
+            self.pv_block_curve.show()
+        else:
+            self.pv_block_curve.hide()
 
         if self.show_block_mean and q1_block is not None:
             self.q1_block_curve.setData(q1_block.x, q1_block.y)
@@ -1125,6 +1626,7 @@ class FastCycleViewer(QtWidgets.QWidget):
             self.pmax_point.clear()
 
         self.pcyl_plot.setTitle(f"PCYL_1 - Cycle {cycle} (block {block_label})")
+        self.pv_plot.setTitle(f"Log10 P-V - Cycle {cycle} (block {block_label})")
         self.q1_plot.setTitle(f"Q_1 - Cycle {cycle} (block {block_label})")
         self.pmax_plot.setTitle(f"PMAX by cycle - selected cycle {cycle}")
 
@@ -1148,7 +1650,45 @@ def main() -> None:
             raise SystemExit("Nenhum CSV selecionado. Execucao cancelada.")
         csv_path = selected_path
 
-    dataset = prepare_viewer_dataset(csv_path, args.cycle_block_size)
+    app: QtWidgets.QApplication | None = None
+    loading_dialog: QtWidgets.QProgressDialog | None = None
+    if not args.no_show:
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+        app.setApplicationName("Fast KIBOX Cycle Viewer")
+        loading_dialog = QtWidgets.QProgressDialog(
+            f"Loading KIBOX CSV...\n{csv_path.name}",
+            None,
+            0,
+            0,
+        )
+        loading_dialog.setWindowTitle("Fast KIBOX Cycle Viewer")
+        loading_dialog.setCancelButton(None)
+        loading_dialog.setMinimumDuration(0)
+        loading_dialog.setWindowModality(QtCore.Qt.WindowModality.ApplicationModal)
+        loading_dialog.setValue(0)
+        loading_dialog.show()
+        QtWidgets.QApplication.processEvents()
+
+    print(f"[INFO] Loading viewer dataset: {csv_path}")
+    started_at = time.perf_counter()
+    try:
+        dataset = prepare_viewer_dataset(csv_path, args.cycle_block_size)
+    except Exception as exc:
+        if loading_dialog is not None:
+            loading_dialog.close()
+        message = f"Falha ao abrir CSV do viewer:\n{csv_path}\n\n{exc}"
+        print(f"[ERROR] {message}", file=sys.stderr)
+        if not args.no_show:
+            app = app or QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+            QtWidgets.QMessageBox.critical(None, "Fast KIBOX Cycle Viewer", message)
+        raise SystemExit(1) from exc
+    finally:
+        if loading_dialog is not None:
+            loading_dialog.close()
+
+    elapsed_s = time.perf_counter() - started_at
+    print(f"[INFO] Viewer dataset ready in {elapsed_s:.1f}s: {csv_path.name}")
+
     if args.no_show:
         print(f"[OK] Fast viewer prepared for {csv_path}")
         print(f"[OK] Available cycles: {len(dataset.available_cycles)}")
@@ -1156,7 +1696,7 @@ def main() -> None:
         print(f"[OK] Block mean overlay: {not args.hide_block_mean}")
         return
 
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    app = app or QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     app.setApplicationName("Fast KIBOX Cycle Viewer")
     viewer = FastCycleViewer(
         dataset=dataset,
