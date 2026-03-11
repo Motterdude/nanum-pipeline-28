@@ -1306,3 +1306,69 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - `compare_q1_plot` passou para `row=0, col=1`.
 - Validacao feita:
   - instanciacao em `offscreen` confirmou posicoes distintas na horizontal e curvas carregadas nos dois plots.
+
+## Vazao volumetrica e custo horario no `nanum_pipeline_28.py` - 2026-03-11
+- Pedido aplicado no pipeline 28:
+  - adicionar vazao convertida de `kg/h` para `L/h` usando densidade por combustivel;
+  - adicionar custo em `R$/h` em funcao da potencia total para todos os combustiveis;
+  - garantir que essas contas existam primeiro no `lv_kpis_clean.xlsx`, e so depois entrem nos plots.
+- Implementacao em `nanum_pipeline_28.py`:
+  - criado mapeamento explicito dos blends:
+    - `D85B15`
+    - `E94H6`
+    - `E75H25`
+    - `E65H35`
+  - `build_final_table()` passou a receber `defaults_cfg` e agora grava no output:
+    - `Fuel_Label`
+    - `Fuel_Density_kg_m3`
+    - `Fuel_Cost_R_L`
+    - `Consumo_L_h`
+    - `uA_Consumo_L_h`
+    - `uB_Consumo_L_h`
+    - `uc_Consumo_L_h`
+    - `U_Consumo_L_h`
+    - `Custo_R_h`
+    - `uA_Custo_R_h`
+    - `uB_Custo_R_h`
+    - `uc_Custo_R_h`
+    - `U_Custo_R_h`
+  - a conversao usada foi:
+    - `Consumo_L_h = Consumo_kg_h * 1000 / densidade_kg_m3`
+    - `Custo_R_h = Consumo_L_h * custo_R_L`
+  - a propagacao de incerteza foi mantida coerente com o fluxo atual:
+    - `L/h` herda a incerteza de `kg/h` escalada por `1000 / densidade`;
+    - `R$/h` herda a incerteza de `L/h` escalada por `custo_R_L`;
+    - densidade e custo entram como inputs fixos do `Defaults`, sem termo extra de incerteza neste patch.
+- Ajuste nos plots:
+  - `_fuel_plot_groups()` passou a aceitar tolerancia na comparacao de `H2O_pct` e a rotular os grupos pelo blend identificado;
+  - isso permite usar `0,6,25,35` no `Plots` e obter legenda com:
+    - `D85B15`
+    - `E94H6`
+    - `E75H25`
+    - `E65H35`
+- Atualizacao em `config/config_incertezas_rev3.xlsx`:
+  - adicionadas no `Defaults` as entradas:
+    - `FUEL_DENSITY_KG_M3_D85B15`
+    - `FUEL_DENSITY_KG_M3_E94H6`
+    - `FUEL_DENSITY_KG_M3_E75H25`
+    - `FUEL_DENSITY_KG_M3_E65H35`
+    - `FUEL_COST_R_L_D85B15`
+    - `FUEL_COST_R_L_E94H6`
+    - `FUEL_COST_R_L_E75H25`
+    - `FUEL_COST_R_L_E65H35`
+  - adicionadas no `Plots` as linhas:
+    - `consumo_l_h_vs_power_all.png`
+    - `custo_r_h_vs_power_all.png`
+  - ambos usam `Load_kW` no eixo X com a mesma escala dos demais plots all-fuels:
+    - `0 .. 55`
+    - passo `5`
+  - os novos plots usam `filter_h2o_list = 0,6,25,35` para incluir diesel e os tres blends hidratados.
+- Observacao operacional:
+  - os novos campos do `Defaults` foram criados em branco para preenchimento manual;
+  - enquanto densidade e custo nao forem preenchidos, `Consumo_L_h` e `Custo_R_h` permanecem vazios e os plots novos nao terao dados.
+- Validacao feita:
+  - `python -m py_compile nanum_pipeline_28.py` passou;
+  - teste rapido com dataframe sintetico confirmou:
+    - identificacao correta de `D85B15`, `E94H6`, `E75H25`, `E65H35`;
+    - lookup correto de densidade/custo via `defaults_cfg`;
+    - rotulagem correta dos grupos para os plots.

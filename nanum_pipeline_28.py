@@ -74,6 +74,24 @@ def is_mestrado_runtime() -> bool:
 
 FUEL_H2O_LEVELS = [6, 25, 35]  # â€œcombustÃ­veisâ€ por hidrataÃ§Ã£o
 COMPOSITION_COLS = ["DIES_pct", "BIOD_pct", "EtOH_pct", "H2O_pct"]
+FUEL_BLEND_DEFAULTS = {
+    "D85B15": {
+        "density_param": "FUEL_DENSITY_KG_M3_D85B15",
+        "cost_param": "FUEL_COST_R_L_D85B15",
+    },
+    "E94H6": {
+        "density_param": "FUEL_DENSITY_KG_M3_E94H6",
+        "cost_param": "FUEL_COST_R_L_E94H6",
+    },
+    "E75H25": {
+        "density_param": "FUEL_DENSITY_KG_M3_E75H25",
+        "cost_param": "FUEL_COST_R_L_E75H25",
+    },
+    "E65H35": {
+        "density_param": "FUEL_DENSITY_KG_M3_E65H35",
+        "cost_param": "FUEL_COST_R_L_E65H35",
+    },
+}
 
 # =========================
 # Airflow assumptions (E94H6 reference)
@@ -2239,6 +2257,59 @@ def _lookup_lhv_for_blend(
     return float(vals.iloc[0])
 
 
+def _fuel_blend_labels(df: pd.DataFrame, tol: float = 0.6) -> pd.Series:
+    idx = df.index
+    labels = pd.Series(pd.NA, index=idx, dtype="object")
+
+    dies = pd.to_numeric(df.get("DIES_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
+    biod = pd.to_numeric(df.get("BIOD_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
+    etoh = pd.to_numeric(df.get("EtOH_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
+    h2o = pd.to_numeric(df.get("H2O_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
+
+    blend_masks = [
+        ("D85B15", (dies.sub(85.0).abs() <= tol) & (biod.sub(15.0).abs() <= tol)),
+        ("E94H6", (etoh.sub(94.0).abs() <= tol) & (h2o.sub(6.0).abs() <= tol)),
+        ("E75H25", (etoh.sub(75.0).abs() <= tol) & (h2o.sub(25.0).abs() <= tol)),
+        ("E65H35", (etoh.sub(65.0).abs() <= tol) & (h2o.sub(35.0).abs() <= tol)),
+    ]
+    for label, mask in blend_masks:
+        labels = labels.mask(mask & labels.isna(), label)
+
+    return labels
+
+
+def _fuel_default_lookup_series(
+    df: pd.DataFrame,
+    defaults_cfg: Dict[str, str],
+    *,
+    field: str,
+) -> Tuple[pd.Series, List[str]]:
+    labels = _fuel_blend_labels(df)
+    values = pd.Series(np.nan, index=df.index, dtype="float64")
+    missing: List[str] = []
+
+    for label, spec in FUEL_BLEND_DEFAULTS.items():
+        mask = labels.eq(label)
+        if not bool(mask.any()):
+            continue
+
+        param_name = spec[field]
+        param_value = _to_float(defaults_cfg.get(norm_key(param_name), ""), default=float("nan"))
+        if np.isfinite(param_value) and (param_value > 0):
+            values.loc[mask] = float(param_value)
+        else:
+            missing.append(f"{label} -> {param_name}")
+
+    return values, missing
+
+
+def _fuel_label_for_group(df: pd.DataFrame) -> str:
+    labels = _fuel_blend_labels(df).dropna()
+    if labels.empty:
+        return ""
+    return str(labels.iloc[0]).strip()
+
+
 # =========================
 # Instruments rev2: uB computation
 # =========================
@@ -2654,6 +2725,7 @@ def build_final_table(
     mappings: dict,
     instruments_df: pd.DataFrame,
     reporting_df: pd.DataFrame,
+    defaults_cfg: Dict[str, str],
 ) -> pd.DataFrame:
     df = add_source_identity_columns(ponto)
     df = _left_merge_on_fuel_keys(df, lhv)
@@ -2694,12 +2766,38 @@ def build_final_table(
         df["uc_Consumo_kg_h"] = pd.NA
         df["U_Consumo_kg_h"] = pd.NA
 
+    df["Fuel_Label"] = _fuel_blend_labels(df)
+    df["Fuel_Density_kg_m3"], missing_density = _fuel_default_lookup_series(
+        df,
+        defaults_cfg,
+        field="density_param",
+    )
+    df["Fuel_Cost_R_L"], missing_cost = _fuel_default_lookup_series(
+        df,
+        defaults_cfg,
+        field="cost_param",
+    )
+    if missing_density:
+        print(
+            "[WARN] Densidade ausente/invalida no Defaults para: "
+            + ", ".join(sorted(set(missing_density)))
+            + ". Consumo_L_h ficara vazio nesses combustiveis."
+        )
+    if missing_cost:
+        print(
+            "[WARN] Custo por litro ausente/invalido no Defaults para: "
+            + ", ".join(sorted(set(missing_cost)))
+            + ". Custo_R_h ficara vazio nesses combustiveis."
+        )
+
     P_mean = resolve_col(df, mappings["power_kw"]["mean"])
     F_mean = resolve_col(df, mappings["fuel_kgh"]["mean"])
     L_col = resolve_col(df, mappings["lhv_kj_kg"]["mean"])
 
     PkW = pd.to_numeric(df[P_mean], errors="coerce")
     Fkgh = pd.to_numeric(df[F_mean], errors="coerce")
+    fuel_density = pd.to_numeric(df["Fuel_Density_kg_m3"], errors="coerce")
+    fuel_cost = pd.to_numeric(df["Fuel_Cost_R_L"], errors="coerce")
     mdot = Fkgh / 3600.0
     LHVv = pd.to_numeric(df[L_col], errors="coerce")
     lhv_e94h6_kj_kg = _lookup_lhv_for_blend(lhv, etoh_pct=94.0, h2o_pct=6.0)
@@ -2723,6 +2821,30 @@ def build_final_table(
     df["uc_n_th"] = df["n_th"] * rel_uc
     df["U_n_th"] = K_COVERAGE * df["uc_n_th"]
     df["U_n_th_pct"] = df["U_n_th"] * 100.0
+
+    volume_factor = 1000.0 / fuel_density
+    valid_volumetric = Fkgh.notna() & fuel_density.gt(0)
+    df["Consumo_L_h"] = (Fkgh * volume_factor).where(valid_volumetric, pd.NA)
+    for src_col, dst_col in [
+        ("uA_Consumo_kg_h", "uA_Consumo_L_h"),
+        ("uB_Consumo_kg_h", "uB_Consumo_L_h"),
+        ("uc_Consumo_kg_h", "uc_Consumo_L_h"),
+        ("U_Consumo_kg_h", "U_Consumo_L_h"),
+    ]:
+        src = pd.to_numeric(df.get(src_col, pd.NA), errors="coerce")
+        df[dst_col] = (src * volume_factor).where(valid_volumetric, pd.NA)
+
+    consumo_l_h = pd.to_numeric(df["Consumo_L_h"], errors="coerce")
+    valid_cost = consumo_l_h.notna() & fuel_cost.gt(0)
+    df["Custo_R_h"] = (consumo_l_h * fuel_cost).where(valid_cost, pd.NA)
+    for src_col, dst_col in [
+        ("uA_Consumo_L_h", "uA_Custo_R_h"),
+        ("uB_Consumo_L_h", "uB_Custo_R_h"),
+        ("uc_Consumo_L_h", "uc_Custo_R_h"),
+        ("U_Consumo_L_h", "U_Custo_R_h"),
+    ]:
+        src = pd.to_numeric(df.get(src_col, pd.NA), errors="coerce")
+        df[dst_col] = (src * fuel_cost).where(valid_cost, pd.NA)
 
     # Specific fuel consumption (g/kWh): BSFC = 1000 * fuel_kg_h / power_kW.
     bsfc = (Fkgh * 1000.0) / PkW
@@ -2911,11 +3033,13 @@ def _fuel_plot_groups(df: pd.DataFrame, fuels_override: Optional[List[int]] = No
 
     for h in fuels:
         hv = float(h)
-        d = df[h2o.eq(hv)].copy()
+        d = df[h2o.sub(hv).abs() <= 0.6].copy()
         if d.empty:
             continue
 
-        label = f"H2O={int(hv)}%" if hv.is_integer() else f"H2O={hv:g}%"
+        label = _fuel_label_for_group(d)
+        if not label:
+            label = f"H2O={int(hv)}%" if hv.is_integer() else f"H2O={hv:g}%"
         groups.append((label, d))
 
     return groups
@@ -4736,7 +4860,7 @@ def main() -> None:
         else:
             print("[WARN] Arquivos MOTEC encontrados, mas nenhum foi lido com sucesso.")
 
-    out = build_final_table(ponto, lhv, kibox_agg, motec_ponto, mappings, instruments_df, reporting_df)
+    out = build_final_table(ponto, lhv, kibox_agg, motec_ponto, mappings, instruments_df, reporting_df, defaults_cfg)
 
     out_xlsx = safe_to_excel(out, OUT_DIR / "lv_kpis_clean.xlsx")
     print(f"[OK] Excel gerado: {out_xlsx}")
