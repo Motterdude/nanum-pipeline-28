@@ -1372,3 +1372,53 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
     - identificacao correta de `D85B15`, `E94H6`, `E75H25`, `E65H35`;
     - lookup correto de densidade/custo via `defaults_cfg`;
     - rotulagem correta dos grupos para os plots.
+
+## 2026-03-12 - Pipeline 28: GUI de filtro, economia vs diesel e cenarios de maquinas
+
+- `nanum_pipeline_28.py`:
+  - filtro interativo de pontos para plots finalizado com `PySide6`, colunas por combustivel e linhas por carga;
+  - abertura do filtro antecipada com base no metadata dos arquivos para reduzir a espera percebida;
+  - otimizacoes no diagnostico de qualidade:
+    - caminho vetorizado para `TIME_DELTA_REFERENCE_s`;
+    - formatacao de tempo reduzida para os pontos realmente usados;
+    - `TIME_DIAG_PLOT_DPI = 150`;
+    - amostragem de scatter limitada por `TIME_DIAG_FILE_SCATTER_MAX_POINTS = 200`;
+  - `build_final_table()` passou a gerar baseline diesel por carga e as colunas:
+    - `Diesel_Baseline_Custo_R_h`
+    - `Economia_vs_Diesel_R_h`
+    - `Economia_vs_Diesel_pct`
+    - colunas `uA/uB/uc/U` associadas;
+  - adicionados cenarios de maquinas baseados no delta de custo `D85B15` vs `E94H6`, incluindo:
+    - custo horario diesel vs etanol;
+    - consumo volumetrico diesel vs etanol;
+    - consumo anual de etanol;
+    - custo anual diesel vs etanol;
+    - economia anual vs diesel;
+  - o pipeline agora corrige automaticamente parametros de maquinas invertidos no `Defaults` quando detectar `horas/ano` absurdamente baixo e `diesel L/h` absurdamente alto.
+- Plots:
+  - novos plots configurados em `config/config_incertezas_rev3.xlsx`:
+    - `economia_pct_vs_diesel_power_all.png`
+    - `economia_r_h_vs_diesel_power_all.png`
+  - suite de plots de cenarios de maquinas adicionada ao fluxo final;
+  - eixo X desses cenarios alinhado com `Potencia UPD medida (kW, bin 0.1)`;
+  - escalas finais ajustadas para:
+    - custo horario em `R$/h`;
+    - economia horaria em `R$/h`;
+    - consumo anual em `x10^3 L/ano`;
+    - custo anual em `x10^3 R$/ano`;
+  - legenda dos plots de cenario volta ao canto superior esquerdo com folga automatica no eixo Y.
+- `config/config_incertezas_rev3.xlsx`:
+  - `Defaults` atualizado com parametros das maquinas:
+    - `MACHINE_HOURS_PER_YEAR_COLHEITADEIRA = 3150`
+    - `MACHINE_DIESEL_L_H_COLHEITADEIRA = 34`
+    - `MACHINE_HOURS_PER_YEAR_TRATOR_TRANSBORDO = 1675`
+    - `MACHINE_DIESEL_L_H_TRATOR_TRANSBORDO = 12.1`
+    - `MACHINE_HOURS_PER_YEAR_CAMINHAO = 4800`
+    - `MACHINE_DIESEL_L_H_CAMINHAO = 41`
+- Validacoes feitas:
+  - `python -m py_compile nanum_pipeline_28.py`;
+  - verificacao numerica do `lv_kpis_clean.xlsx` confirmou:
+    - `Consumo_L_h = Consumo_kg_h * 1000 / densidade`;
+    - `Custo_R_h = Consumo_L_h * custo_R_L`;
+    - economias negativas vs diesel para os blends etanolicos;
+  - os plots de cenario foram regenerados localmente apos a correcao dos parametros das maquinas.

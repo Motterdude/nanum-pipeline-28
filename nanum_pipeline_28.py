@@ -17,6 +17,7 @@ import difflib
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 
 try:
     import tkinter as tk
@@ -26,6 +27,41 @@ except Exception:
     filedialog = None
     messagebox = None
     ttk = None
+
+try:
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import (
+        QApplication,
+        QCheckBox,
+        QDialog,
+        QGridLayout,
+        QHBoxLayout,
+        QLabel,
+        QMessageBox,
+        QPushButton,
+        QStyleFactory,
+        QTableWidget,
+        QTableWidgetItem,
+        QVBoxLayout,
+        QWidget,
+        QHeaderView,
+    )
+except Exception:
+    QApplication = None
+    QCheckBox = None
+    QDialog = None
+    QGridLayout = None
+    QHBoxLayout = None
+    QLabel = None
+    QMessageBox = None
+    QPushButton = None
+    QStyleFactory = None
+    QTableWidget = None
+    QTableWidgetItem = None
+    QVBoxLayout = None
+    QWidget = None
+    QHeaderView = None
+    Qt = None
 
 
 # =========================
@@ -58,6 +94,8 @@ TIME_DELTA_PLOT_YSTEP_S = 0.1
 DEFAULT_MAX_DELTA_BETWEEN_SAMPLES_MS = 1200.0
 DEFAULT_MAX_ACT_CONTROL_ERROR_C = 5.0
 DEFAULT_MAX_ECT_CONTROL_ERROR_C = 2.0
+TIME_DIAG_PLOT_DPI = 150
+TIME_DIAG_FILE_SCATTER_MAX_POINTS = 200
 K_COVERAGE = 2.0
 
 
@@ -92,6 +130,37 @@ FUEL_BLEND_DEFAULTS = {
         "cost_param": "FUEL_COST_R_L_E65H35",
     },
 }
+FUEL_LABEL_BY_H2O_LEVEL = {
+    0: "D85B15",
+    6: "E94H6",
+    25: "E75H25",
+    35: "E65H35",
+}
+FUEL_H2O_LEVEL_BY_LABEL = {label: level for level, label in FUEL_LABEL_BY_H2O_LEVEL.items()}
+SCENARIO_REFERENCE_FUEL_LABEL = "E94H6"
+MACHINE_SCENARIO_SPECS = [
+    {
+        "key": "Colheitadeira",
+        "label": "Colheitadeira",
+        "hours_param": "MACHINE_HOURS_PER_YEAR_COLHEITADEIRA",
+        "diesel_l_h_param": "MACHINE_DIESEL_L_H_COLHEITADEIRA",
+        "color": "#1f77b4",
+    },
+    {
+        "key": "Trator_Transbordo",
+        "label": "Trator transbordo",
+        "hours_param": "MACHINE_HOURS_PER_YEAR_TRATOR_TRANSBORDO",
+        "diesel_l_h_param": "MACHINE_DIESEL_L_H_TRATOR_TRANSBORDO",
+        "color": "#ff7f0e",
+    },
+    {
+        "key": "Caminhao",
+        "label": "Caminhao",
+        "hours_param": "MACHINE_HOURS_PER_YEAR_CAMINHAO",
+        "diesel_l_h_param": "MACHINE_DIESEL_L_H_CAMINHAO",
+        "color": "#2ca02c",
+    },
+]
 
 # =========================
 # Airflow assumptions (E94H6 reference)
@@ -334,6 +403,15 @@ def _is_blank_cell(x: object) -> bool:
 
 def _to_str_or_empty(x: object) -> str:
     return "" if _is_blank_cell(x) else str(x).replace("\ufeff", "").strip()
+
+
+def _format_load_kw_label(v: object) -> str:
+    x = _to_float(v, default=float("nan"))
+    if not np.isfinite(x):
+        return ""
+    if abs(x - round(x)) <= 1e-9:
+        return f"{int(round(x))}"
+    return f"{x:g}"
 
 
 def _find_first_col_by_substrings(df: pd.DataFrame, substrings: List[str]) -> Optional[str]:
@@ -1091,29 +1169,29 @@ def build_time_diagnostics(
     out = add_run_context_columns(out)
 
     t = _parse_time_series(out[time_col])
+    base_name_series = out.get("BaseName", pd.Series([pd.NA] * len(out), index=out.index))
     out["TIME_PARSED"] = t
-    out["TIME_TEXT_ms"] = t.dt.strftime("%Y-%m-%d %H:%M:%S.%f").str[:-3]
     out["TIME_HOUR"] = t.dt.hour.astype("Int64")
     out["TIME_MINUTE"] = t.dt.minute.astype("Int64")
     out["TIME_SECOND"] = t.dt.second.astype("Int64")
     out["TIME_MILLISECOND"] = (t.dt.microsecond // 1000).astype("Int64")
 
-    prev_t = t.groupby(out["BaseName"], dropna=False).shift(1)
-    next_t = t.groupby(out["BaseName"], dropna=False).shift(-1)
+    prev_t = t.groupby(base_name_series, dropna=False, sort=False).shift(1)
+    next_t = t.groupby(base_name_series, dropna=False, sort=False).shift(-1)
 
-    out["TIME_DELTA_FROM_PREV_s"] = (t - prev_t).dt.total_seconds()
-    out["TIME_DELTA_TO_NEXT_s"] = (next_t - t).dt.total_seconds()
-    out["TIME_DELTA_TO_NEXT_ms"] = pd.to_numeric(out["TIME_DELTA_TO_NEXT_s"], errors="coerce") * 1000.0
+    delta_from_prev_s = (t - prev_t).dt.total_seconds()
+    delta_to_next_s = (next_t - t).dt.total_seconds()
+    out["TIME_DELTA_FROM_PREV_s"] = delta_from_prev_s
+    out["TIME_DELTA_TO_NEXT_s"] = delta_to_next_s
+    out["TIME_DELTA_TO_NEXT_ms"] = delta_to_next_s * 1000.0
 
-    typical_dt = out.groupby("BaseName", dropna=False)["TIME_DELTA_TO_NEXT_s"].transform(
-        lambda s: float(pd.to_numeric(s, errors="coerce").dropna().median()) if pd.to_numeric(s, errors="coerce").dropna().any() else np.nan
-    )
+    typical_dt = delta_to_next_s.groupby(base_name_series, dropna=False, sort=False).transform("median")
     out["TIME_DELTA_REFERENCE_s"] = typical_dt
-    out["TIME_DELTA_ERROR_ms"] = (pd.to_numeric(out["TIME_DELTA_TO_NEXT_s"], errors="coerce") - pd.to_numeric(typical_dt, errors="coerce")) * 1000.0
+    out["TIME_DELTA_ERROR_ms"] = (delta_to_next_s - typical_dt) * 1000.0
     out["MAX_DELTA_BETWEEN_SAMPLES_ms"] = max_delta_ms
     out["TIME_DELTA_LIMIT_s"] = max_delta_s
     out["TIME_DELTA_LIMIT_ms"] = max_delta_ms
-    out["TIME_DELTA_ERROR_FLAG"] = pd.to_numeric(out["TIME_DELTA_TO_NEXT_s"], errors="coerce") > max_delta_s
+    out["TIME_DELTA_ERROR_FLAG"] = delta_to_next_s > max_delta_s
     out["TIME_SAMPLE_GLOBAL"] = np.arange(len(out), dtype=int)
 
     t_adm_col = "T_ADMISSAO" if "T_ADMISSAO" in lv_raw.columns else _find_first_col_by_substrings(lv_raw, ["t", "admiss"])
@@ -1214,18 +1292,21 @@ def _time_diag_status_from_flags(flags: pd.Series) -> str:
 
 def _first_last_transient_times(
     flags: pd.Series,
-    time_text_ms: pd.Series,
+    time_parsed: pd.Series,
 ) -> Tuple[object, object]:
     mask = pd.Series(flags).fillna(False).astype(bool)
     if mask.sum() == 0:
         return pd.NA, pd.NA
 
-    times = pd.Series(time_text_ms)
-    flagged_times = times[mask]
+    times = pd.to_datetime(pd.Series(time_parsed), errors="coerce")
+    flagged_times = times[mask].dropna()
     if flagged_times.empty:
         return pd.NA, pd.NA
 
-    return flagged_times.iloc[0], flagged_times.iloc[-1]
+    return (
+        flagged_times.iloc[0].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+        flagged_times.iloc[-1].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+    )
 
 
 def _apply_time_delta_axis_format(ax: plt.Axes) -> None:
@@ -1244,7 +1325,7 @@ def summarize_time_diagnostics(time_df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     rows: List[dict] = []
-    for basename, d in time_df.groupby("BaseName", dropna=False, sort=True):
+    for basename, d in time_df.groupby("BaseName", dropna=False, sort=False):
         dt_next = pd.to_numeric(d["TIME_DELTA_TO_NEXT_s"], errors="coerce")
         err_ms = pd.to_numeric(d["TIME_DELTA_ERROR_ms"], errors="coerce")
         t_parsed = pd.to_datetime(d["TIME_PARSED"], errors="coerce")
@@ -1268,12 +1349,12 @@ def summarize_time_diagnostics(time_df: pd.DataFrame) -> pd.DataFrame:
         act_transient_status = act_status
         act_transient_t_on, act_transient_t_off = _first_last_transient_times(
             act_flag,
-            d.get("TIME_TEXT_ms", pd.Series([pd.NA] * len(d))),
+            d.get("TIME_PARSED", pd.Series([pd.NA] * len(d))),
         )
         ect_transient_status = ect_status
         ect_transient_t_on, ect_transient_t_off = _first_last_transient_times(
             ect_flag,
-            d.get("TIME_TEXT_ms", pd.Series([pd.NA] * len(d))),
+            d.get("TIME_PARSED", pd.Series([pd.NA] * len(d))),
         )
         max_act_error = _to_float(
             d.get("MAX_ACT_CONTROL_ERROR", pd.Series([DEFAULT_MAX_ACT_CONTROL_ERROR_C])).iloc[0],
@@ -1359,7 +1440,11 @@ def plot_time_delta_all_samples(
 
     fig, ax = plt.subplots(figsize=(14, 5))
     ax.plot(x[valid], y[valid], "-", linewidth=0.8, color="tab:blue", alpha=0.85)
-    ax.scatter(x[valid], y[valid], s=8, color="tab:blue", alpha=0.45)
+    valid_idx = np.flatnonzero(valid.to_numpy(dtype=bool))
+    if len(valid_idx) > 0:
+        step = max(len(valid_idx) // TIME_DIAG_FILE_SCATTER_MAX_POINTS, 1)
+        scatter_idx = valid_idx[::step]
+        ax.scatter(x.iloc[scatter_idx], y.iloc[scatter_idx], s=8, color="tab:blue", alpha=0.35)
 
     median_dt = float(y[valid].median())
     ax.axhline(median_dt, color="tab:red", linestyle="--", linewidth=1.0, label=f"median={median_dt:.6f} s")
@@ -1388,7 +1473,7 @@ def plot_time_delta_all_samples(
     target_dir.mkdir(parents=True, exist_ok=True)
     outpath = target_dir / filename
     fig.tight_layout()
-    fig.savefig(outpath, dpi=220)
+    fig.savefig(outpath, dpi=TIME_DIAG_PLOT_DPI)
     plt.close(fig)
     print(f"[OK] Salvei {outpath}")
 
@@ -1427,7 +1512,11 @@ def plot_time_delta_by_file(time_df: pd.DataFrame, plot_dir: Optional[Path] = No
 
         fig, ax = plt.subplots(figsize=(12, 4.5))
         ax.plot(x[valid], y[valid], "-", linewidth=0.9, color="tab:blue", alpha=0.9)
-        ax.scatter(x[valid], y[valid], s=10, color="tab:blue", alpha=0.45)
+        valid_idx = np.flatnonzero(valid.to_numpy(dtype=bool))
+        if len(valid_idx) > 0:
+            step = max(len(valid_idx) // TIME_DIAG_FILE_SCATTER_MAX_POINTS, 1)
+            scatter_idx = valid_idx[::step]
+            ax.scatter(x.iloc[scatter_idx], y.iloc[scatter_idx], s=10, color="tab:blue", alpha=0.35)
         if has_sampling_error:
             ax.scatter(x[error_mask], y[error_mask], s=18, color="tab:red", alpha=0.95, label=f"delta T > {time_limit_s:.3f} s")
             ax.set_facecolor("#fff4f4")
@@ -1465,7 +1554,7 @@ def plot_time_delta_by_file(time_df: pd.DataFrame, plot_dir: Optional[Path] = No
         filename_stem = f"{error_prefix}time_delta_to_next_{source_folder}_{load_slug}_{source_file}"
         outpath = out_dir / f"{_safe_name(filename_stem)}.png"
         fig.tight_layout()
-        fig.savefig(outpath, dpi=220)
+        fig.savefig(outpath, dpi=TIME_DIAG_PLOT_DPI)
         plt.close(fig)
         print(f"[OK] Salvei {outpath}")
         n_ok += 1
@@ -2048,6 +2137,520 @@ def apply_runtime_path_overrides(defaults_cfg: Dict[str, str], xlsx_path: Path) 
     PLOTS_DIR = OUT_DIR / "plots"
 
 
+def _plot_point_fuel_labels(df: pd.DataFrame) -> pd.Series:
+    idx = df.index
+    labels = df.get("Fuel_Label", pd.Series(pd.NA, index=idx, dtype="object")).copy()
+    labels = labels.where(labels.map(lambda x: not _is_blank_cell(x)), _fuel_blend_labels(df))
+
+    h2o = pd.to_numeric(df.get("H2O_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
+    fallback = pd.Series(pd.NA, index=idx, dtype="object")
+    for level, label in FUEL_LABEL_BY_H2O_LEVEL.items():
+        fallback = fallback.mask(h2o.sub(float(level)).abs() <= 0.6, label)
+
+    labels = labels.where(labels.map(lambda x: not _is_blank_cell(x)), fallback)
+    labels = labels.where(labels.map(lambda x: not _is_blank_cell(x)), pd.NA)
+    return labels
+
+
+def _normalized_plot_point_loads(df: pd.DataFrame) -> pd.Series:
+    loads = pd.to_numeric(df.get("Load_kW", pd.Series(pd.NA, index=df.index)), errors="coerce")
+    return loads.round(6)
+
+
+def _fuel_label_from_composition_values(
+    dies_pct: object,
+    biod_pct: object,
+    etoh_pct: object,
+    h2o_pct: object,
+    tol: float = 0.6,
+) -> str:
+    dies = _to_float(dies_pct, default=float("nan"))
+    biod = _to_float(biod_pct, default=float("nan"))
+    etoh = _to_float(etoh_pct, default=float("nan"))
+    h2o = _to_float(h2o_pct, default=float("nan"))
+
+    if np.isfinite(dies) and np.isfinite(biod) and abs(dies - 85.0) <= tol and abs(biod - 15.0) <= tol:
+        return "D85B15"
+    if np.isfinite(etoh) and np.isfinite(h2o) and abs(etoh - 94.0) <= tol and abs(h2o - 6.0) <= tol:
+        return "E94H6"
+    if np.isfinite(etoh) and np.isfinite(h2o) and abs(etoh - 75.0) <= tol and abs(h2o - 25.0) <= tol:
+        return "E75H25"
+    if np.isfinite(etoh) and np.isfinite(h2o) and abs(etoh - 65.0) <= tol and abs(h2o - 35.0) <= tol:
+        return "E65H35"
+    return ""
+
+
+def _preferred_fuel_label_order(labels: List[str]) -> List[str]:
+    preferred = ["D85B15", "E94H6", "E75H25", "E65H35"]
+    uniq = [str(v).strip() for v in labels if str(v).strip()]
+    ordered = [label for label in preferred if label in uniq]
+    extras = sorted([label for label in uniq if label not in ordered], key=_canon_name)
+    return ordered + extras
+
+
+def _build_plot_point_catalog(df: pd.DataFrame) -> Tuple[List[str], List[float], Dict[Tuple[str, float], int]]:
+    if df is None or df.empty:
+        return [], [], {}
+
+    labels = _plot_point_fuel_labels(df)
+    loads = _normalized_plot_point_loads(df)
+    tmp = pd.DataFrame({"Fuel_Label": labels, "Load_kW": loads}, index=df.index).dropna(subset=["Fuel_Label", "Load_kW"])
+    if tmp.empty:
+        return [], [], {}
+
+    counts_df = (
+        tmp.groupby(["Fuel_Label", "Load_kW"], dropna=False, sort=True)
+        .size()
+        .reset_index(name="N_points")
+    )
+    counts: Dict[Tuple[str, float], int] = {}
+    for _, row in counts_df.iterrows():
+        key = (str(row["Fuel_Label"]).strip(), float(row["Load_kW"]))
+        counts[key] = int(row["N_points"])
+
+    fuel_labels = _preferred_fuel_label_order(counts_df["Fuel_Label"].astype(str).tolist())
+    load_values = sorted(float(v) for v in counts_df["Load_kW"].dropna().unique().tolist())
+    return fuel_labels, load_values, counts
+
+
+def _build_plot_point_catalog_from_metas(metas: List["FileMeta"]) -> Tuple[List[str], List[float], Dict[Tuple[str, float], int]]:
+    rows: List[Tuple[str, float]] = []
+    for meta in metas:
+        label = _fuel_label_from_composition_values(meta.dies_pct, meta.biod_pct, meta.etoh_pct, meta.h2o_pct)
+        if not label:
+            continue
+        if meta.load_kw is None or not np.isfinite(meta.load_kw):
+            continue
+        rows.append((label, round(float(meta.load_kw), 6)))
+
+    if not rows:
+        return [], [], {}
+
+    counts: Dict[Tuple[str, float], int] = {}
+    for key in rows:
+        counts[key] = counts.get(key, 0) + 1
+
+    fuel_labels = _preferred_fuel_label_order([fuel_label for fuel_label, _ in counts.keys()])
+    load_values = sorted({float(load_kw) for _, load_kw in counts.keys()})
+    return fuel_labels, load_values, counts
+
+
+def _ensure_qt_application() -> Tuple[object, bool]:
+    if QApplication is None:
+        raise RuntimeError("PySide6 nao esta disponivel.")
+
+    app = QApplication.instance()
+    owns_app = False
+    if app is None:
+        app = QApplication(["pipeline28"])
+        owns_app = True
+        if QStyleFactory is not None:
+            try:
+                if "Fusion" in QStyleFactory.keys():
+                    app.setStyle("Fusion")
+            except Exception:
+                pass
+    return app, owns_app
+
+
+def _prompt_plot_point_filter_catalog_via_qt(
+    fuel_labels: List[str],
+    load_values: List[float],
+    counts: Dict[Tuple[str, float], int],
+) -> Optional[set[Tuple[str, float]]]:
+    if QApplication is None or QDialog is None or QTableWidget is None or Qt is None:
+        raise RuntimeError("PySide6 nao esta disponivel.")
+    if not fuel_labels or not load_values or not counts:
+        return None
+
+    app, owns_app = _ensure_qt_application()
+    _ = app
+    dialog = QDialog()
+    dialog.setWindowTitle("Pipeline 28 - filtro de pontos para plots")
+    dialog.setModal(True)
+    dialog.resize(1120, 760)
+
+    main_layout = QVBoxLayout(dialog)
+    title = QLabel("Selecione os pontos que entram nos graficos. Os calculos e o lv_kpis_clean.xlsx continuam completos.")
+    title.setWordWrap(True)
+    title.setStyleSheet("font-size: 15px; font-weight: 600;")
+    subtitle = QLabel("Colunas = combustiveis | Linhas = cargas nominais | Tudo vem selecionado por padrao.")
+    subtitle.setStyleSheet("color: #5f6b76;")
+    main_layout.addWidget(title)
+    main_layout.addWidget(subtitle)
+
+    toolbar = QHBoxLayout()
+    btn_select_all = QPushButton("Selecionar tudo")
+    btn_clear_all = QPushButton("Limpar tudo")
+    info_label = QLabel("Numero pequeno = quantidade de linhas/iteracoes do ponto.")
+    info_label.setStyleSheet("color: #5f6b76;")
+    status_label = QLabel()
+    status_label.setStyleSheet("font-weight: 600;")
+    toolbar.addWidget(btn_select_all)
+    toolbar.addWidget(btn_clear_all)
+    toolbar.addSpacing(8)
+    toolbar.addWidget(info_label)
+    toolbar.addStretch(1)
+    toolbar.addWidget(status_label)
+    main_layout.addLayout(toolbar)
+
+    table = QTableWidget(len(load_values), len(fuel_labels))
+    table.setHorizontalHeaderLabels(fuel_labels)
+    table.setVerticalHeaderLabels([_format_load_kw_label(v) for v in load_values])
+    table.setShowGrid(True)
+    table.setAlternatingRowColors(True)
+    table.setSelectionMode(QTableWidget.NoSelection)
+    table.setEditTriggers(QTableWidget.NoEditTriggers)
+    table.setFocusPolicy(Qt.NoFocus)
+    table.setStyleSheet(
+        """
+        QTableWidget {
+            gridline-color: #d7dce1;
+            background: #ffffff;
+            alternate-background-color: #fbfcfd;
+            border: 1px solid #d7dce1;
+        }
+        QHeaderView::section {
+            background: #f3f5f7;
+            color: #1f2933;
+            padding: 6px;
+            border: 1px solid #d7dce1;
+            font-weight: 600;
+        }
+        """
+    )
+    table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+    table.verticalHeader().setDefaultSectionSize(72)
+    table.horizontalHeader().setMinimumSectionSize(120)
+    main_layout.addWidget(table, stretch=1)
+
+    checkbox_map: Dict[Tuple[str, float], object] = {}
+
+    def refresh_status() -> None:
+        selected = sum(1 for cb in checkbox_map.values() if bool(cb.isChecked()))
+        status_label.setText(f"Pontos selecionados: {selected} / {len(checkbox_map)}")
+
+    def set_all(value: bool) -> None:
+        for checkbox in checkbox_map.values():
+            checkbox.setChecked(value)
+        refresh_status()
+
+    for row_idx, load_kw in enumerate(load_values):
+        for col_idx, fuel_label in enumerate(fuel_labels):
+            key = (fuel_label, float(load_kw))
+            count = counts.get(key, 0)
+            if count <= 0:
+                item = QTableWidgetItem("—")
+                item.setTextAlignment(int(Qt.AlignCenter))
+                item.setFlags(Qt.ItemIsEnabled)
+                table.setItem(row_idx, col_idx, item)
+                continue
+
+            checkbox = QCheckBox()
+            checkbox.setChecked(True)
+            checkbox.stateChanged.connect(lambda _state, _refresh=refresh_status: _refresh())
+            count_label = QLabel("" if count == 1 else f"{count}x")
+            count_label.setAlignment(Qt.AlignCenter)
+            count_label.setStyleSheet("color: #5f6b76; font-size: 11px;")
+
+            cell_widget = QWidget()
+            cell_layout = QVBoxLayout(cell_widget)
+            cell_layout.setContentsMargins(0, 4, 0, 4)
+            cell_layout.setSpacing(2)
+            cell_layout.addStretch(1)
+            cell_layout.addWidget(checkbox, alignment=Qt.AlignCenter)
+            cell_layout.addWidget(count_label, alignment=Qt.AlignCenter)
+            cell_layout.addStretch(1)
+
+            table.setCellWidget(row_idx, col_idx, cell_widget)
+            checkbox_map[key] = checkbox
+
+    refresh_status()
+
+    buttons_layout = QHBoxLayout()
+    buttons_layout.addStretch(1)
+    btn_cancel = QPushButton("Cancelar")
+    btn_run = QPushButton("Gerar graficos")
+    btn_run.setDefault(True)
+    buttons_layout.addWidget(btn_cancel)
+    buttons_layout.addWidget(btn_run)
+    main_layout.addLayout(buttons_layout)
+
+    btn_select_all.clicked.connect(lambda: set_all(True))
+    btn_clear_all.clicked.connect(lambda: set_all(False))
+
+    selected_result: dict[str, object] = {"selected": None}
+
+    def accept_selection() -> None:
+        selected = {key for key, checkbox in checkbox_map.items() if bool(checkbox.isChecked())}
+        if not selected:
+            QMessageBox.critical(dialog, "Pipeline 28", "Selecione pelo menos um ponto para gerar os graficos.")
+            return
+        selected_result["selected"] = selected
+        dialog.accept()
+
+    btn_run.clicked.connect(accept_selection)
+    btn_cancel.clicked.connect(dialog.reject)
+
+    if dialog.exec() != QDialog.Accepted:
+        raise SystemExit("Execucao cancelada pelo usuario na selecao de pontos para plot.")
+
+    selected = selected_result.get("selected")
+    if selected is None:
+        raise SystemExit("Execucao cancelada pelo usuario na selecao de pontos para plot.")
+    return set(selected)
+
+
+def _prompt_plot_point_filter_catalog_via_tk(
+    fuel_labels: List[str],
+    load_values: List[float],
+    counts: Dict[Tuple[str, float], int],
+) -> Optional[set[Tuple[str, float]]]:
+    if tk is None or ttk is None or messagebox is None:
+        raise RuntimeError("Tkinter nao esta disponivel.")
+    if not fuel_labels or not load_values or not counts:
+        return None
+
+    result: dict[str, object] = {"selected": None}
+    root = tk.Tk()
+    root.title("Pipeline 28 - filtro de pontos para plots")
+    root.withdraw()
+    root.resizable(True, True)
+    root.attributes("-topmost", True)
+
+    ttk.Label(
+        root,
+        text="Selecione os pontos que entram nos graficos. Os calculos e o lv_kpis_clean.xlsx continuam completos.",
+        wraplength=1100,
+        justify="left",
+    ).grid(row=0, column=0, columnspan=3, sticky="w", padx=12, pady=(12, 4))
+    ttk.Label(
+        root,
+        text="Colunas = combustiveis | Linhas = cargas nominais. Tudo vem selecionado por padrao.",
+    ).grid(row=1, column=0, columnspan=3, sticky="w", padx=12, pady=(0, 8))
+
+    toolbar = ttk.Frame(root)
+    toolbar.grid(row=2, column=0, columnspan=3, sticky="we", padx=12, pady=(0, 8))
+    toolbar.columnconfigure(3, weight=1)
+
+    body = ttk.Frame(root)
+    body.grid(row=3, column=0, columnspan=3, sticky="nsew", padx=12, pady=0)
+    root.columnconfigure(0, weight=1)
+    root.rowconfigure(3, weight=1)
+    body.columnconfigure(0, weight=1)
+    body.rowconfigure(0, weight=1)
+
+    canvas = tk.Canvas(body, highlightthickness=0)
+    vbar = ttk.Scrollbar(body, orient="vertical", command=canvas.yview)
+    hbar = ttk.Scrollbar(body, orient="horizontal", command=canvas.xview)
+    canvas.configure(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
+    canvas.grid(row=0, column=0, sticky="nsew")
+    vbar.grid(row=0, column=1, sticky="ns")
+    hbar.grid(row=1, column=0, sticky="ew")
+
+    grid_frame = ttk.Frame(canvas)
+    canvas_window = canvas.create_window((0, 0), window=grid_frame, anchor="nw")
+
+    def _sync_canvas(_event: object = None) -> None:
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        canvas.itemconfigure(canvas_window, width=max(canvas.winfo_width(), grid_frame.winfo_reqwidth()))
+
+    grid_frame.bind("<Configure>", _sync_canvas)
+    canvas.bind("<Configure>", _sync_canvas)
+
+    header_bg = "#f4f6f8"
+    cell_border = "#d7dce1"
+
+    def make_cell(row: int, column: int, *, bg: str = "white") -> tk.Frame:
+        cell = tk.Frame(
+            grid_frame,
+            bg=bg,
+            highlightbackground=cell_border,
+            highlightthickness=1,
+            bd=0,
+            padx=4,
+            pady=3,
+        )
+        cell.grid(row=row, column=column, sticky="nsew")
+        return cell
+
+    header_cell = make_cell(0, 0, bg=header_bg)
+    ttk.Label(header_cell, text="Carga (kW)", anchor="center").pack(fill="both", expand=True)
+    cell_vars: Dict[Tuple[str, float], tk.BooleanVar] = {}
+
+    for col_idx, fuel_label in enumerate(fuel_labels, start=1):
+        header_cell = make_cell(0, col_idx, bg=header_bg)
+        ttk.Label(header_cell, text=fuel_label, anchor="center", justify="center").pack(fill="both", expand=True)
+        grid_frame.columnconfigure(col_idx, weight=1)
+
+    for row_idx, load_kw in enumerate(load_values, start=1):
+        load_cell = make_cell(row_idx, 0, bg=header_bg)
+        ttk.Label(load_cell, text=_format_load_kw_label(load_kw), anchor="center").pack(fill="both", expand=True)
+        for col_idx, fuel_label in enumerate(fuel_labels, start=1):
+            key = (fuel_label, float(load_kw))
+            count = counts.get(key, 0)
+            if count <= 0:
+                empty_cell = make_cell(row_idx, col_idx)
+                ttk.Label(empty_cell, text="-", anchor="center").pack(fill="both", expand=True)
+                continue
+
+            var = tk.BooleanVar(value=True)
+            cell_vars[key] = var
+            point_cell = make_cell(row_idx, col_idx)
+            inner = ttk.Frame(point_cell)
+            inner.pack(fill="both", expand=True)
+            ttk.Checkbutton(inner, variable=var).pack(anchor="center", pady=(0, 1))
+            ttk.Label(inner, text="" if count == 1 else f"{count}x", anchor="center", justify="center").pack(anchor="center")
+
+    status_var = tk.StringVar()
+
+    def refresh_status() -> None:
+        selected = sum(1 for var in cell_vars.values() if bool(var.get()))
+        status_var.set(f"Pontos selecionados para plot: {selected} / {len(cell_vars)}")
+
+    for var in cell_vars.values():
+        var.trace_add("write", lambda *_args: refresh_status())
+
+    def set_all(value: bool) -> None:
+        for var in cell_vars.values():
+            var.set(value)
+
+    def confirm() -> None:
+        selected = {key for key, var in cell_vars.items() if bool(var.get())}
+        if not selected:
+            messagebox.showerror("Pipeline 28", "Selecione pelo menos um ponto para gerar os graficos.", parent=root)
+            return
+        result["selected"] = selected
+        root.destroy()
+
+    def cancel() -> None:
+        root.destroy()
+
+    ttk.Button(toolbar, text="Selecionar tudo", command=lambda: set_all(True)).grid(row=0, column=0, padx=(0, 8), pady=0)
+    ttk.Button(toolbar, text="Limpar tudo", command=lambda: set_all(False)).grid(row=0, column=1, padx=(0, 8), pady=0)
+    ttk.Label(toolbar, text="Numero no checkbox = quantidade de linhas/iteracoes para o ponto.").grid(
+        row=0,
+        column=2,
+        sticky="w",
+    )
+    ttk.Label(toolbar, textvariable=status_var).grid(row=0, column=3, sticky="e")
+    refresh_status()
+
+    buttons = ttk.Frame(root)
+    buttons.grid(row=4, column=0, columnspan=3, sticky="e", padx=12, pady=(8, 12))
+    ttk.Button(buttons, text="Cancelar", command=cancel).pack(side="right")
+    ttk.Button(buttons, text="Gerar graficos", command=confirm).pack(side="right", padx=(0, 8))
+
+    root.protocol("WM_DELETE_WINDOW", cancel)
+    root.bind("<Return>", lambda _event: confirm())
+    root.bind("<Escape>", lambda _event: cancel())
+
+    root.update_idletasks()
+    width = min(max(root.winfo_reqwidth(), 1000), max(root.winfo_screenwidth() - 80, 1000))
+    height = min(max(root.winfo_reqheight(), 600), max(root.winfo_screenheight() - 120, 600))
+    pos_x = max((root.winfo_screenwidth() - width) // 2, 0)
+    pos_y = max((root.winfo_screenheight() - height) // 4, 0)
+    root.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
+    root.deiconify()
+    root.lift()
+    try:
+        root.focus_force()
+    except Exception:
+        pass
+    root.after(400, lambda: root.attributes("-topmost", False))
+    root.mainloop()
+
+    selected = result.get("selected")
+    if selected is None:
+        raise SystemExit("Execucao cancelada pelo usuario na selecao de pontos para plot.")
+    return set(selected)
+
+
+def prompt_plot_point_filter(df: pd.DataFrame) -> Optional[set[Tuple[str, float]]]:
+    fuel_labels, load_values, counts = _build_plot_point_catalog(df)
+    if not fuel_labels or not load_values or not counts:
+        print("[WARN] Nao encontrei pontos com Fuel_Label e Load_kW para abrir o filtro de plots. Vou usar todos.")
+        return None
+
+    if QApplication is not None:
+        try:
+            return _prompt_plot_point_filter_catalog_via_qt(fuel_labels, load_values, counts)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            print(f"[WARN] GUI PySide6 de filtro de pontos falhou: {exc}. Tentando fallback...")
+
+    if os.name == "nt" or (tk is not None and ttk is not None):
+        try:
+            return _prompt_plot_point_filter_catalog_via_tk(fuel_labels, load_values, counts)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            print(f"[WARN] GUI de filtro de pontos falhou: {exc}. Vou usar todos os pontos.")
+            return None
+
+    print("[WARN] GUI de filtro de pontos indisponivel neste ambiente. Vou usar todos os pontos.")
+    return None
+
+
+def prompt_plot_point_filter_from_metas(metas: List["FileMeta"]) -> Optional[set[Tuple[str, float]]]:
+    valid_meta_count = 0
+    for meta in metas:
+        label = _fuel_label_from_composition_values(meta.dies_pct, meta.biod_pct, meta.etoh_pct, meta.h2o_pct)
+        if label and meta.load_kw is not None and np.isfinite(meta.load_kw):
+            valid_meta_count += 1
+    if valid_meta_count < len(metas):
+        print(
+            "[INFO] Alguns pontos dependem de inferencia posterior de carga/composicao; "
+            "vou abrir o filtro de plots depois do processamento completo."
+        )
+        return None
+
+    fuel_labels, load_values, counts = _build_plot_point_catalog_from_metas(metas)
+    if not fuel_labels or not load_values or not counts:
+        return None
+
+    if QApplication is not None:
+        try:
+            return _prompt_plot_point_filter_catalog_via_qt(fuel_labels, load_values, counts)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            print(f"[WARN] GUI PySide6 de filtro de pontos falhou: {exc}. Tentando fallback...")
+
+    if os.name == "nt" or (tk is not None and ttk is not None):
+        try:
+            return _prompt_plot_point_filter_catalog_via_tk(fuel_labels, load_values, counts)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            print(f"[WARN] GUI de filtro de pontos falhou: {exc}. Vou usar todos os pontos.")
+            return None
+
+    return None
+
+
+def _apply_plot_point_filter(df: pd.DataFrame, selected_points: Optional[set[Tuple[str, float]]]) -> pd.DataFrame:
+    if df is None:
+        return pd.DataFrame()
+    if df.empty or selected_points is None:
+        return df.copy()
+
+    fuel_labels = _plot_point_fuel_labels(df)
+    loads = _normalized_plot_point_loads(df)
+    mask = pd.Series(False, index=df.index, dtype="bool")
+
+    for fuel_label, load_kw in selected_points:
+        if not fuel_label or not np.isfinite(load_kw):
+            continue
+        mask = mask | (fuel_labels.eq(fuel_label) & loads.eq(round(float(load_kw), 6)))
+
+    kept = int(mask.sum())
+    print(f"[INFO] Filtro de plots: {kept} linha(s) mantida(s) para os graficos.")
+    return df.loc[mask].copy()
+
+
 def load_config_excel(xlsx_path: Optional[Path] = None) -> Tuple[dict, pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[str, str]]:
     p = _choose_config_path() if xlsx_path is None else xlsx_path
 
@@ -2303,11 +2906,382 @@ def _fuel_default_lookup_series(
     return values, missing
 
 
+def _aggregate_metric_with_uncertainty(
+    df: pd.DataFrame,
+    *,
+    group_cols: List[str],
+    value_col: str,
+    uA_col: str,
+    uB_col: str,
+    uc_col: str,
+    U_col: str,
+    value_name: str,
+) -> pd.DataFrame:
+    out_cols = group_cols + [
+        value_name,
+        f"uA_{value_name}",
+        f"uB_{value_name}",
+        f"uc_{value_name}",
+        f"U_{value_name}",
+        "n_points",
+    ]
+    if df is None or df.empty:
+        return pd.DataFrame(columns=out_cols)
+
+    tmp = df.copy()
+    required_cols = group_cols + [value_col, uA_col, uB_col, uc_col, U_col]
+    for c in required_cols:
+        if c not in tmp.columns:
+            tmp[c] = pd.NA
+
+    tmp = tmp.dropna(subset=group_cols).copy()
+    for c in [value_col, uA_col, uB_col, uc_col, U_col]:
+        tmp[c] = pd.to_numeric(tmp[c], errors="coerce")
+    tmp = tmp.dropna(subset=[value_col]).copy()
+    if tmp.empty:
+        return pd.DataFrame(columns=out_cols)
+
+    g = (
+        tmp.groupby(group_cols, dropna=False, sort=True)
+        .agg(
+            **{
+                value_name: (value_col, "mean"),
+                "n_points": (value_col, "count"),
+                "_uA_rss": (uA_col, _rss_or_na),
+                "_uB_rss": (uB_col, _rss_or_na),
+                "_uc_rss": (uc_col, _rss_or_na),
+                "_U_rss": (U_col, _rss_or_na),
+            }
+        )
+        .reset_index()
+    )
+
+    n = pd.to_numeric(g["n_points"], errors="coerce").replace(0, np.nan)
+    g[f"uA_{value_name}"] = g["_uA_rss"] / n
+    g[f"uB_{value_name}"] = g["_uB_rss"] / n
+    g[f"uc_{value_name}"] = (
+        pd.to_numeric(g[f"uA_{value_name}"], errors="coerce") ** 2
+        + pd.to_numeric(g[f"uB_{value_name}"], errors="coerce") ** 2
+    ) ** 0.5
+    g[f"uc_{value_name}"] = g[f"uc_{value_name}"].where(
+        g[f"uc_{value_name}"].notna(),
+        g["_uc_rss"] / n,
+    )
+    g[f"U_{value_name}"] = K_COVERAGE * pd.to_numeric(g[f"uc_{value_name}"], errors="coerce")
+    g[f"U_{value_name}"] = g[f"U_{value_name}"].where(
+        g[f"U_{value_name}"].notna(),
+        g["_U_rss"] / n,
+    )
+
+    return g[out_cols].copy()
+
+
+def _attach_diesel_cost_delta_metrics(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+
+    out = df.copy()
+    idx = out.index
+    fuel_labels = out.get("Fuel_Label", pd.Series(pd.NA, index=idx, dtype="object"))
+    fuel_labels = fuel_labels.where(fuel_labels.notna(), _fuel_blend_labels(out))
+    out["Fuel_Label"] = fuel_labels
+
+    load_key = pd.to_numeric(out.get("Load_kW", pd.Series(pd.NA, index=idx)), errors="coerce").round(6)
+    out["_diesel_baseline_load_key"] = load_key
+
+    diesel_points = out[fuel_labels.eq("D85B15")].copy()
+    diesel_points = diesel_points[diesel_points["_diesel_baseline_load_key"].notna()].copy()
+
+    baseline_ref_cols = [
+        "Diesel_Baseline_Custo_R_h",
+        "uA_Diesel_Baseline_Custo_R_h",
+        "uB_Diesel_Baseline_Custo_R_h",
+        "uc_Diesel_Baseline_Custo_R_h",
+        "U_Diesel_Baseline_Custo_R_h",
+        "Diesel_Baseline_N_points",
+    ]
+    delta_cols = [
+        "Razao_Custo_vs_Diesel",
+        "Economia_vs_Diesel_R_h",
+        "uA_Economia_vs_Diesel_R_h",
+        "uB_Economia_vs_Diesel_R_h",
+        "uc_Economia_vs_Diesel_R_h",
+        "U_Economia_vs_Diesel_R_h",
+        "Economia_vs_Diesel_pct",
+        "uA_Economia_vs_Diesel_pct",
+        "uB_Economia_vs_Diesel_pct",
+        "uc_Economia_vs_Diesel_pct",
+        "U_Economia_vs_Diesel_pct",
+        "delta_over_U_Economia_vs_Diesel_pct",
+        "Interpretacao_Economia_vs_Diesel",
+    ]
+    for c in delta_cols:
+        if c not in out.columns:
+            out[c] = pd.NA
+
+    if diesel_points.empty:
+        print("[WARN] Nao encontrei pontos Diesel D85B15 para calcular economia vs diesel.")
+        for c in baseline_ref_cols:
+            if c not in out.columns:
+                out[c] = pd.NA
+        return out.drop(columns=["_diesel_baseline_load_key"], errors="ignore")
+
+    diesel_baseline = _aggregate_metric_with_uncertainty(
+        diesel_points,
+        group_cols=["_diesel_baseline_load_key"],
+        value_col="Custo_R_h",
+        uA_col="uA_Custo_R_h",
+        uB_col="uB_Custo_R_h",
+        uc_col="uc_Custo_R_h",
+        U_col="U_Custo_R_h",
+        value_name="Diesel_Baseline_Custo_R_h",
+    )
+    if diesel_baseline.empty:
+        print("[WARN] Nao consegui agregar o baseline Diesel por carga para economia vs diesel.")
+        for c in baseline_ref_cols:
+            if c not in out.columns:
+                out[c] = pd.NA
+        return out.drop(columns=["_diesel_baseline_load_key"], errors="ignore")
+
+    diesel_baseline = diesel_baseline.rename(columns={"n_points": "Diesel_Baseline_N_points"})
+    out = out.drop(columns=baseline_ref_cols, errors="ignore")
+    out = out.merge(diesel_baseline, on="_diesel_baseline_load_key", how="left", suffixes=("", "_drop"))
+    out = out.drop(columns=[c for c in out.columns if c.endswith("_drop")], errors="ignore")
+
+    custo_atual = pd.to_numeric(out.get("Custo_R_h", pd.NA), errors="coerce")
+    custo_diesel = pd.to_numeric(out.get("Diesel_Baseline_Custo_R_h", pd.NA), errors="coerce")
+    valid_delta = custo_atual.notna() & custo_diesel.gt(0)
+
+    ua_atual = pd.to_numeric(out.get("uA_Custo_R_h", pd.NA), errors="coerce")
+    ub_atual = pd.to_numeric(out.get("uB_Custo_R_h", pd.NA), errors="coerce")
+    uc_atual = pd.to_numeric(out.get("uc_Custo_R_h", pd.NA), errors="coerce")
+
+    ua_diesel = pd.to_numeric(out.get("uA_Diesel_Baseline_Custo_R_h", pd.NA), errors="coerce")
+    ub_diesel = pd.to_numeric(out.get("uB_Diesel_Baseline_Custo_R_h", pd.NA), errors="coerce")
+    uc_diesel = pd.to_numeric(out.get("uc_Diesel_Baseline_Custo_R_h", pd.NA), errors="coerce")
+
+    out["Razao_Custo_vs_Diesel"] = (custo_atual / custo_diesel).where(valid_delta, pd.NA)
+    out["Economia_vs_Diesel_R_h"] = (custo_atual - custo_diesel).where(valid_delta, pd.NA)
+    out["uA_Economia_vs_Diesel_R_h"] = ((ua_atual**2 + ua_diesel**2) ** 0.5).where(valid_delta, pd.NA)
+    out["uB_Economia_vs_Diesel_R_h"] = ((ub_atual**2 + ub_diesel**2) ** 0.5).where(valid_delta, pd.NA)
+    out["uc_Economia_vs_Diesel_R_h"] = ((uc_atual**2 + uc_diesel**2) ** 0.5).where(valid_delta, pd.NA)
+    out["U_Economia_vs_Diesel_R_h"] = (K_COVERAGE * pd.to_numeric(out["uc_Economia_vs_Diesel_R_h"], errors="coerce")).where(valid_delta, pd.NA)
+
+    out["Economia_vs_Diesel_pct"] = (100.0 * (pd.to_numeric(out["Razao_Custo_vs_Diesel"], errors="coerce") - 1.0)).where(valid_delta, pd.NA)
+
+    d_pct_d_custo = 100.0 / custo_diesel
+    d_pct_d_diesel = -100.0 * custo_atual / (custo_diesel**2)
+    ua_pct_from_atual = d_pct_d_custo.abs() * ua_atual
+    ua_pct_from_diesel = d_pct_d_diesel.abs() * ua_diesel
+    ub_pct_from_atual = d_pct_d_custo.abs() * ub_atual
+    ub_pct_from_diesel = d_pct_d_diesel.abs() * ub_diesel
+    uc_pct_from_atual = d_pct_d_custo.abs() * uc_atual
+    uc_pct_from_diesel = d_pct_d_diesel.abs() * uc_diesel
+
+    out["uA_Economia_vs_Diesel_pct"] = ((ua_pct_from_atual**2 + ua_pct_from_diesel**2) ** 0.5).where(valid_delta, pd.NA)
+    out["uB_Economia_vs_Diesel_pct"] = ((ub_pct_from_atual**2 + ub_pct_from_diesel**2) ** 0.5).where(valid_delta, pd.NA)
+    out["uc_Economia_vs_Diesel_pct"] = ((uc_pct_from_atual**2 + uc_pct_from_diesel**2) ** 0.5).where(valid_delta, pd.NA)
+    out["U_Economia_vs_Diesel_pct"] = (K_COVERAGE * pd.to_numeric(out["uc_Economia_vs_Diesel_pct"], errors="coerce")).where(valid_delta, pd.NA)
+    out["delta_over_U_Economia_vs_Diesel_pct"] = (
+        pd.to_numeric(out["Economia_vs_Diesel_pct"], errors="coerce")
+        / pd.to_numeric(out["U_Economia_vs_Diesel_pct"], errors="coerce")
+    ).where(valid_delta, pd.NA)
+
+    diesel_mask = out["Fuel_Label"].astype("string").eq("D85B15") & valid_delta
+    out.loc[diesel_mask, "Razao_Custo_vs_Diesel"] = 1.0
+    out.loc[diesel_mask, "Economia_vs_Diesel_R_h"] = 0.0
+    out.loc[diesel_mask, "Economia_vs_Diesel_pct"] = 0.0
+    out.loc[diesel_mask, "delta_over_U_Economia_vs_Diesel_pct"] = 0.0
+
+    interpret = pd.Series(pd.NA, index=out.index, dtype="object")
+    economia_pct = pd.to_numeric(out["Economia_vs_Diesel_pct"], errors="coerce")
+    interpret.loc[economia_pct.lt(0)] = "economia_vs_diesel"
+    interpret.loc[economia_pct.gt(0)] = "piora_vs_diesel"
+    interpret.loc[economia_pct.eq(0)] = "igual_ao_diesel"
+    out["Interpretacao_Economia_vs_Diesel"] = interpret
+
+    return out.drop(columns=["_diesel_baseline_load_key"], errors="ignore")
+
+
+def _scenario_machine_col(machine_key: str, suffix: str) -> str:
+    return f"Scenario_{machine_key}_{suffix}"
+
+
+def _resolve_machine_scenario_inputs(
+    defaults_cfg: Dict[str, str],
+    spec: Dict[str, str],
+) -> Tuple[float, float, bool]:
+    hours = _to_float(defaults_cfg.get(norm_key(spec["hours_param"]), ""), default=float("nan"))
+    diesel_l_h = _to_float(defaults_cfg.get(norm_key(spec["diesel_l_h_param"]), ""), default=float("nan"))
+    swapped = False
+
+    if np.isfinite(hours) and np.isfinite(diesel_l_h):
+        likely_swapped = (
+            (hours < 100.0 and diesel_l_h > 200.0)
+            or (hours < 200.0 and diesel_l_h > 1000.0)
+        )
+        if likely_swapped:
+            hours, diesel_l_h = diesel_l_h, hours
+            swapped = True
+            print(
+                f"[WARN] Parametros de maquina parecem invertidos em {spec['label']}: "
+                f"{spec['hours_param']}={_to_float(defaults_cfg.get(norm_key(spec['hours_param']), ''), default=float('nan'))}, "
+                f"{spec['diesel_l_h_param']}={_to_float(defaults_cfg.get(norm_key(spec['diesel_l_h_param']), ''), default=float('nan'))}. "
+                f"Vou usar hours/ano={hours:g} e diesel_L_h={diesel_l_h:g}."
+            )
+
+    return hours, diesel_l_h, swapped
+
+
+def _attach_e94h6_machine_scenario_metrics(
+    df: pd.DataFrame,
+    defaults_cfg: Dict[str, str],
+) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+
+    out = df.copy()
+    idx = out.index
+    fuel_labels = out.get("Fuel_Label", pd.Series(pd.NA, index=idx, dtype="object"))
+    fuel_labels = fuel_labels.where(fuel_labels.notna(), _fuel_blend_labels(out))
+    out["Fuel_Label"] = fuel_labels
+
+    scenario_suffixes = [
+        "Hours_Ano",
+        "Diesel_L_h",
+        "Diesel_L_ano",
+        "Diesel_Custo_R_h",
+        "Diesel_Custo_R_ano",
+        "E94H6_L_h",
+        "U_E94H6_L_h",
+        "E94H6_L_ano",
+        "U_E94H6_L_ano",
+        "E94H6_Custo_R_h",
+        "U_E94H6_Custo_R_h",
+        "E94H6_Custo_R_ano",
+        "U_E94H6_Custo_R_ano",
+        "Economia_R_h",
+        "U_Economia_R_h",
+        "Economia_R_ano",
+        "U_Economia_R_ano",
+    ]
+    for spec in MACHINE_SCENARIO_SPECS:
+        for suffix in scenario_suffixes:
+            col = _scenario_machine_col(spec["key"], suffix)
+            if col not in out.columns:
+                out[col] = pd.NA
+
+    ref_mask = fuel_labels.eq(SCENARIO_REFERENCE_FUEL_LABEL)
+    if not bool(ref_mask.any()):
+        print(f"[WARN] Nao encontrei pontos {SCENARIO_REFERENCE_FUEL_LABEL} para os cenarios de maquinas.")
+        return out
+
+    diesel_cost_l = _to_float(defaults_cfg.get(norm_key("FUEL_COST_R_L_D85B15"), ""), default=float("nan"))
+    ethanol_cost_l = _to_float(defaults_cfg.get(norm_key("FUEL_COST_R_L_E94H6"), ""), default=float("nan"))
+    if not (np.isfinite(diesel_cost_l) and diesel_cost_l > 0):
+        print("[WARN] FUEL_COST_R_L_D85B15 invalido no Defaults; cenarios de maquinas ficarao vazios.")
+        return out
+    if not (np.isfinite(ethanol_cost_l) and ethanol_cost_l > 0):
+        print("[WARN] FUEL_COST_R_L_E94H6 invalido no Defaults; cenarios de maquinas ficarao vazios.")
+        return out
+
+    economia_pct = pd.to_numeric(out.get("Economia_vs_Diesel_pct", pd.NA), errors="coerce")
+    U_economia_pct = pd.to_numeric(out.get("U_Economia_vs_Diesel_pct", pd.NA), errors="coerce")
+    valid_ref = ref_mask & economia_pct.notna()
+
+    missing_params: List[str] = []
+    for spec in MACHINE_SCENARIO_SPECS:
+        hours, diesel_l_h, _swapped = _resolve_machine_scenario_inputs(defaults_cfg, spec)
+        if not (np.isfinite(hours) and hours > 0):
+            missing_params.append(spec["hours_param"])
+            continue
+        if not (np.isfinite(diesel_l_h) and diesel_l_h > 0):
+            missing_params.append(spec["diesel_l_h_param"])
+            continue
+
+        ratio_ethanol_vs_diesel = 1.0 + (economia_pct / 100.0)
+        valid = valid_ref & ratio_ethanol_vs_diesel.gt(0)
+        if not bool(valid.any()):
+            continue
+
+        diesel_cost_h = diesel_l_h * diesel_cost_l
+        diesel_l_ano = diesel_l_h * hours
+        diesel_cost_ano = diesel_cost_h * hours
+
+        ethanol_cost_h = diesel_cost_h * ratio_ethanol_vs_diesel
+        U_ethanol_cost_h = diesel_cost_h * (U_economia_pct.abs() / 100.0)
+        ethanol_l_h = ethanol_cost_h / ethanol_cost_l
+        U_ethanol_l_h = U_ethanol_cost_h / ethanol_cost_l
+        ethanol_l_ano = ethanol_l_h * hours
+        U_ethanol_l_ano = U_ethanol_l_h * hours
+        ethanol_cost_ano = ethanol_cost_h * hours
+        U_ethanol_cost_ano = U_ethanol_cost_h * hours
+        economia_r_h = ethanol_cost_h - diesel_cost_h
+        economia_r_ano = ethanol_cost_ano - diesel_cost_ano
+
+        const_pairs = {
+            "Hours_Ano": hours,
+            "Diesel_L_h": diesel_l_h,
+            "Diesel_L_ano": diesel_l_ano,
+            "Diesel_Custo_R_h": diesel_cost_h,
+            "Diesel_Custo_R_ano": diesel_cost_ano,
+        }
+        for suffix, value in const_pairs.items():
+            out.loc[valid, _scenario_machine_col(spec["key"], suffix)] = value
+
+        value_pairs = {
+            "E94H6_L_h": ethanol_l_h,
+            "U_E94H6_L_h": U_ethanol_l_h,
+            "E94H6_L_ano": ethanol_l_ano,
+            "U_E94H6_L_ano": U_ethanol_l_ano,
+            "E94H6_Custo_R_h": ethanol_cost_h,
+            "U_E94H6_Custo_R_h": U_ethanol_cost_h,
+            "E94H6_Custo_R_ano": ethanol_cost_ano,
+            "U_E94H6_Custo_R_ano": U_ethanol_cost_ano,
+            "Economia_R_h": economia_r_h,
+            "U_Economia_R_h": U_ethanol_cost_h,
+            "Economia_R_ano": economia_r_ano,
+            "U_Economia_R_ano": U_ethanol_cost_ano,
+        }
+        for suffix, series in value_pairs.items():
+            out.loc[valid, _scenario_machine_col(spec["key"], suffix)] = pd.to_numeric(series, errors="coerce").where(valid, pd.NA)
+
+    if missing_params:
+        print(
+            "[WARN] Defaults ausentes/invalidos para cenarios de maquinas: "
+            + ", ".join(sorted(set(missing_params)))
+            + ". As colunas desses cenarios ficarao vazias."
+        )
+
+    return out
+
+
 def _fuel_label_for_group(df: pd.DataFrame) -> str:
     labels = _fuel_blend_labels(df).dropna()
     if labels.empty:
         return ""
     return str(labels.iloc[0]).strip()
+
+
+def _expand_legacy_all_fuels_filter(df: pd.DataFrame, fuels_override: Optional[List[int]]) -> Optional[List[int]]:
+    if fuels_override is None:
+        return None
+
+    try:
+        normalized = sorted({int(float(v)) for v in fuels_override})
+    except Exception:
+        return fuels_override
+
+    if 0 in normalized:
+        return normalized
+    if set(normalized) != set(FUEL_H2O_LEVELS):
+        return normalized
+
+    labels = _fuel_blend_labels(df)
+    if not bool(labels.eq("D85B15").any()):
+        return normalized
+
+    return [0] + normalized
 
 
 # =========================
@@ -2846,6 +3820,9 @@ def build_final_table(
         src = pd.to_numeric(df.get(src_col, pd.NA), errors="coerce")
         df[dst_col] = (src * fuel_cost).where(valid_cost, pd.NA)
 
+    df = _attach_diesel_cost_delta_metrics(df)
+    df = _attach_e94h6_machine_scenario_metrics(df, defaults_cfg)
+
     # Specific fuel consumption (g/kWh): BSFC = 1000 * fuel_kg_h / power_kW.
     bsfc = (Fkgh * 1000.0) / PkW
     invalid_bsfc = (PkW <= 0) | (Fkgh <= 0)
@@ -3021,23 +3998,43 @@ def build_final_table(
 # Plot primitives
 # =========================
 def _fuel_plot_groups(df: pd.DataFrame, fuels_override: Optional[List[int]] = None) -> List[Tuple[Optional[str], pd.DataFrame]]:
-    if "H2O_pct" not in df.columns:
+    idx = df.index
+    h2o = pd.to_numeric(df.get("H2O_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
+    fuel_labels = df.get("Fuel_Label", pd.Series(pd.NA, index=idx, dtype="object"))
+    fuel_labels = fuel_labels.where(fuel_labels.notna(), _fuel_blend_labels(df))
+
+    fuels = _expand_legacy_all_fuels_filter(df, fuels_override)
+    if fuels is None:
+        fuels = sorted(float(v) for v in h2o.dropna().unique())
+        for label, level in FUEL_H2O_LEVEL_BY_LABEL.items():
+            if bool(fuel_labels.eq(label).any()) and (level not in fuels):
+                fuels.append(level)
+        fuels = sorted(fuels)
+
+    if not fuels:
         return [(None, df.copy())]
 
-    h2o = pd.to_numeric(df["H2O_pct"], errors="coerce")
-    if h2o.notna().sum() == 0:
-        return [(None, df.copy())]
-
-    fuels = fuels_override if fuels_override is not None else sorted(float(v) for v in h2o.dropna().unique())
     groups: List[Tuple[Optional[str], pd.DataFrame]] = []
+    seen_labels: set[str] = set()
 
     for h in fuels:
         hv = float(h)
-        d = df[h2o.sub(hv).abs() <= 0.6].copy()
+        mapped_label = None
+        if float(hv).is_integer():
+            mapped_label = FUEL_LABEL_BY_H2O_LEVEL.get(int(hv))
+        if mapped_label and bool(fuel_labels.eq(mapped_label).any()):
+            if mapped_label in seen_labels:
+                continue
+            d = df[fuel_labels.eq(mapped_label)].copy()
+            label = mapped_label
+            seen_labels.add(mapped_label)
+        else:
+            d = df[h2o.sub(hv).abs() <= 0.6].copy()
+            label = _fuel_label_for_group(d)
+
         if d.empty:
             continue
 
-        label = _fuel_label_for_group(d)
         if not label:
             label = f"H2O={int(hv)}%" if hv.is_integer() else f"H2O={hv:g}%"
         groups.append((label, d))
@@ -4305,6 +5302,343 @@ def plot_all_fuels_with_value_labels(
     print(f"[OK] Salvei {outpath}")
 
 
+def _prepare_machine_scenario_plot_df(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[str], str]:
+    if df is None or df.empty:
+        return pd.DataFrame(), None, ""
+
+    x_candidates: List[Tuple[str, bool]] = [
+        ("UPD_Power_Bin_kW", False),
+        ("UPD_Power_kW", False),
+    ]
+    x_col_base, mestrado_x_override = _resolve_plot_x_request("Load_kW")
+    if x_col_base not in {"UPD_Power_Bin_kW", "UPD_Power_kW"}:
+        x_candidates.append((x_col_base, mestrado_x_override))
+    if "Load_kW" != x_col_base:
+        x_candidates.append(("Load_kW", False))
+
+    x_col = None
+    x_label = ""
+    for requested, is_runtime_override in x_candidates:
+        try:
+            x_col = resolve_col(df, requested)
+            if requested == "UPD_Power_Bin_kW" or x_col == "UPD_Power_Bin_kW":
+                x_label = "Potencia UPD medida (kW, bin 0.1)"
+            elif requested == "UPD_Power_kW" or x_col == "UPD_Power_kW":
+                x_label = "Potencia UPD medida (kW)"
+            else:
+                x_label = _runtime_plot_x_label("", "Load_kW", x_col, is_runtime_override)
+            break
+        except Exception:
+            continue
+
+    if x_col is None:
+        return pd.DataFrame(), None, ""
+
+    if not x_label:
+        x_label = x_col
+
+    fuel_labels = df.get("Fuel_Label", pd.Series(pd.NA, index=df.index, dtype="object"))
+    fuel_labels = fuel_labels.where(fuel_labels.notna(), _fuel_blend_labels(df))
+    out = df[fuel_labels.eq(SCENARIO_REFERENCE_FUEL_LABEL)].copy()
+    if out.empty:
+        return pd.DataFrame(), x_col, x_label
+
+    out[x_col] = pd.to_numeric(out[x_col], errors="coerce")
+    out = out.dropna(subset=[x_col]).sort_values(x_col)
+    return out, x_col, x_label
+
+
+def _machine_scaled_tick_formatter(divisor: float) -> FuncFormatter:
+    return FuncFormatter(lambda value, _pos: f"{(value / divisor):g}")
+
+
+def _reserve_upper_legend_headroom(ax, *, ratio: float = 0.32) -> None:
+    try:
+        ymin, ymax = ax.get_ylim()
+    except Exception:
+        return
+
+    if not (np.isfinite(ymin) and np.isfinite(ymax)):
+        return
+
+    span = ymax - ymin
+    if not np.isfinite(span) or span <= 0:
+        span = max(abs(ymax), abs(ymin), 1.0)
+
+    ax.set_ylim(ymin, ymax + span * ratio)
+
+
+def _style_machine_scenario_axes(
+    fig,
+    ax,
+    *,
+    title: str,
+    x_label: str,
+    y_label: str,
+    y_tick_divisor: Optional[float] = None,
+) -> None:
+    ax.set_xlim(0.0, 55.0)
+    ax.set_xticks(np.arange(0.0, 55.0 + 1e-12, 5.0).tolist())
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.set_title(title)
+    ax.grid(True, which="both", linestyle="--", linewidth=0.5)
+    if y_tick_divisor is not None and np.isfinite(y_tick_divisor) and y_tick_divisor > 0 and y_tick_divisor != 1.0:
+        ax.yaxis.set_major_formatter(_machine_scaled_tick_formatter(float(y_tick_divisor)))
+
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        _reserve_upper_legend_headroom(ax)
+        ax.legend(
+            loc="upper left",
+            frameon=True,
+        )
+    fig.tight_layout()
+
+
+def _plot_machine_scenario_dual_metric(
+    df: pd.DataFrame,
+    *,
+    diesel_suffix: str,
+    ethanol_suffix: str,
+    ethanol_u_suffix: Optional[str],
+    title: str,
+    filename: str,
+    y_label: str,
+    plot_dir: Optional[Path] = None,
+    y_tick_divisor: Optional[float] = None,
+) -> None:
+    target_dir = PLOTS_DIR if plot_dir is None else plot_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    plot_df, x_col, x_label = _prepare_machine_scenario_plot_df(df)
+    if x_col is None or plot_df.empty:
+        print(f"[WARN] Sem dados {SCENARIO_REFERENCE_FUEL_LABEL} para plot de cenario {filename}.")
+        return
+
+    fig, ax = plt.subplots()
+    any_curve = False
+    for spec in MACHINE_SCENARIO_SPECS:
+        diesel_col = _scenario_machine_col(spec["key"], diesel_suffix)
+        ethanol_col = _scenario_machine_col(spec["key"], ethanol_suffix)
+        ethanol_u_col = _scenario_machine_col(spec["key"], ethanol_u_suffix) if ethanol_u_suffix else None
+
+        if diesel_col in plot_df.columns:
+            d_diesel = plot_df[[x_col, diesel_col]].copy()
+            d_diesel[diesel_col] = pd.to_numeric(d_diesel[diesel_col], errors="coerce")
+            d_diesel = d_diesel.dropna(subset=[x_col, diesel_col]).sort_values(x_col)
+            if not d_diesel.empty:
+                any_curve = True
+                ax.plot(
+                    d_diesel[x_col],
+                    d_diesel[diesel_col],
+                    "o--",
+                    color=spec["color"],
+                    linewidth=1.8,
+                    markersize=4.5,
+                    label=f"{spec['label']} diesel",
+                )
+
+        if ethanol_col in plot_df.columns:
+            cols = [x_col, ethanol_col]
+            if ethanol_u_col and ethanol_u_col in plot_df.columns:
+                cols.append(ethanol_u_col)
+            d_eth = plot_df[cols].copy()
+            d_eth[ethanol_col] = pd.to_numeric(d_eth[ethanol_col], errors="coerce")
+            if ethanol_u_col and ethanol_u_col in d_eth.columns:
+                d_eth[ethanol_u_col] = pd.to_numeric(d_eth[ethanol_u_col], errors="coerce")
+            d_eth = d_eth.dropna(subset=[x_col, ethanol_col]).sort_values(x_col)
+            if d_eth.empty:
+                continue
+
+            any_curve = True
+            if ethanol_u_col and ethanol_u_col in d_eth.columns and d_eth[ethanol_u_col].notna().any():
+                ax.errorbar(
+                    d_eth[x_col],
+                    d_eth[ethanol_col],
+                    yerr=d_eth[ethanol_u_col],
+                    fmt="o-",
+                    capsize=3,
+                    color=spec["color"],
+                    linewidth=1.8,
+                    markersize=4.5,
+                    label=f"{spec['label']} {SCENARIO_REFERENCE_FUEL_LABEL}",
+                )
+            else:
+                ax.plot(
+                    d_eth[x_col],
+                    d_eth[ethanol_col],
+                    "o-",
+                    color=spec["color"],
+                    linewidth=1.8,
+                    markersize=4.5,
+                    label=f"{spec['label']} {SCENARIO_REFERENCE_FUEL_LABEL}",
+                )
+
+    if not any_curve:
+        plt.close(fig)
+        print(f"[WARN] Cenario {filename}: nenhuma curva valida.")
+        return
+
+    _style_machine_scenario_axes(
+        fig,
+        ax,
+        title=title,
+        x_label=x_label,
+        y_label=y_label,
+        y_tick_divisor=y_tick_divisor,
+    )
+    outpath = target_dir / filename
+    fig.savefig(outpath, dpi=200)
+    plt.close(fig)
+    print(f"[OK] Salvei {outpath}")
+
+
+def _plot_machine_scenario_single_metric(
+    df: pd.DataFrame,
+    *,
+    value_suffix: str,
+    u_suffix: Optional[str],
+    title: str,
+    filename: str,
+    y_label: str,
+    plot_dir: Optional[Path] = None,
+    y_tick_divisor: Optional[float] = None,
+) -> None:
+    target_dir = PLOTS_DIR if plot_dir is None else plot_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    plot_df, x_col, x_label = _prepare_machine_scenario_plot_df(df)
+    if x_col is None or plot_df.empty:
+        print(f"[WARN] Sem dados {SCENARIO_REFERENCE_FUEL_LABEL} para plot de cenario {filename}.")
+        return
+
+    fig, ax = plt.subplots()
+    any_curve = False
+    for spec in MACHINE_SCENARIO_SPECS:
+        value_col = _scenario_machine_col(spec["key"], value_suffix)
+        u_col = _scenario_machine_col(spec["key"], u_suffix) if u_suffix else None
+        cols = [x_col, value_col]
+        if u_col and u_col in plot_df.columns:
+            cols.append(u_col)
+
+        if value_col not in plot_df.columns:
+            continue
+
+        d = plot_df[cols].copy()
+        d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
+        if u_col and u_col in d.columns:
+            d[u_col] = pd.to_numeric(d[u_col], errors="coerce")
+        d = d.dropna(subset=[x_col, value_col]).sort_values(x_col)
+        if d.empty:
+            continue
+
+        any_curve = True
+        if u_col and u_col in d.columns and d[u_col].notna().any():
+            ax.errorbar(
+                d[x_col],
+                d[value_col],
+                yerr=d[u_col],
+                fmt="o-",
+                capsize=3,
+                color=spec["color"],
+                linewidth=1.8,
+                markersize=4.5,
+                label=spec["label"],
+            )
+        else:
+            ax.plot(
+                d[x_col],
+                d[value_col],
+                "o-",
+                color=spec["color"],
+                linewidth=1.8,
+                markersize=4.5,
+                label=spec["label"],
+            )
+
+    if not any_curve:
+        plt.close(fig)
+        print(f"[WARN] Cenario {filename}: nenhuma curva valida.")
+        return
+
+    _style_machine_scenario_axes(
+        fig,
+        ax,
+        title=title,
+        x_label=x_label,
+        y_label=y_label,
+        y_tick_divisor=y_tick_divisor,
+    )
+    outpath = target_dir / filename
+    fig.savefig(outpath, dpi=200)
+    plt.close(fig)
+    print(f"[OK] Salvei {outpath}")
+
+
+def _plot_machine_scenario_suite(df: pd.DataFrame, *, plot_dir: Optional[Path] = None) -> None:
+    _plot_machine_scenario_dual_metric(
+        df,
+        diesel_suffix="Diesel_Custo_R_h",
+        ethanol_suffix="E94H6_Custo_R_h",
+        ethanol_u_suffix="U_E94H6_Custo_R_h",
+        title="Cenario de maquinas: custo horario diesel vs E94H6",
+        filename="scenario_maquinas_custo_r_h_diesel_vs_e94h6.png",
+        y_label="Custo horario (R$/h)",
+        plot_dir=plot_dir,
+    )
+    _plot_machine_scenario_single_metric(
+        df,
+        value_suffix="Economia_R_h",
+        u_suffix="U_Economia_R_h",
+        title="Cenario de maquinas: economia horaria vs diesel (negativo = economia)",
+        filename="scenario_maquinas_economia_r_h_vs_diesel.png",
+        y_label="Delta de custo vs diesel (R$/h)",
+        plot_dir=plot_dir,
+    )
+    _plot_machine_scenario_dual_metric(
+        df,
+        diesel_suffix="Diesel_L_h",
+        ethanol_suffix="E94H6_L_h",
+        ethanol_u_suffix="U_E94H6_L_h",
+        title="Cenario de maquinas: consumo volumetrico diesel vs E94H6",
+        filename="scenario_maquinas_consumo_l_h_diesel_vs_e94h6.png",
+        y_label="Consumo volumetrico (L/h)",
+        plot_dir=plot_dir,
+    )
+    _plot_machine_scenario_single_metric(
+        df,
+        value_suffix="E94H6_L_ano",
+        u_suffix="U_E94H6_L_ano",
+        title="Cenario de maquinas: consumo anual de E94H6",
+        filename="scenario_maquinas_consumo_anual_e94h6_l.png",
+        y_label="Consumo anual de E94H6 (x10^3 L/ano)",
+        plot_dir=plot_dir,
+        y_tick_divisor=1000.0,
+    )
+    _plot_machine_scenario_dual_metric(
+        df,
+        diesel_suffix="Diesel_Custo_R_ano",
+        ethanol_suffix="E94H6_Custo_R_ano",
+        ethanol_u_suffix="U_E94H6_Custo_R_ano",
+        title="Cenario de maquinas: custo anual diesel vs E94H6",
+        filename="scenario_maquinas_custo_anual_diesel_vs_e94h6.png",
+        y_label="Custo anual (x10^3 R$/ano)",
+        plot_dir=plot_dir,
+        y_tick_divisor=1000.0,
+    )
+    _plot_machine_scenario_single_metric(
+        df,
+        value_suffix="Economia_R_ano",
+        u_suffix="U_Economia_R_ano",
+        title="Cenario de maquinas: economia anual vs diesel (negativo = economia)",
+        filename="scenario_maquinas_economia_anual_vs_diesel.png",
+        y_label="Delta de custo anual vs diesel (x10^3 R$/ano)",
+        plot_dir=plot_dir,
+        y_tick_divisor=1000.0,
+    )
+
+
 # =========================
 # Plots-config dispatcher
 # =========================
@@ -4700,7 +6034,12 @@ def main() -> None:
     clear_output_dir(OUT_DIR)
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    raw_files = [p for p in PROCESS_DIR.rglob("*") if p.is_file() and not p.name.startswith("~$")]
+    raw_files = [
+        p
+        for pattern in ("*.xlsx", "*.csv")
+        for p in PROCESS_DIR.rglob(pattern)
+        if p.is_file() and not p.name.startswith("~$")
+    ]
     metas = [parse_meta(p) for p in raw_files]
 
     lv_files = [m for m in metas if m.source_type == "LABVIEW" and m.path.suffix.lower() == ".xlsx"]
@@ -4736,6 +6075,9 @@ def main() -> None:
             f"[INFO] {len(missing_load)} arquivo(s) sem carga explÃ­cita no nome; "
             f"vou tentar inferir Load_kW pela coluna de carga. Exemplos: {preview}{suffix}"
         )
+
+    print("[INFO] Abrindo filtro de pontos para os plots finais...")
+    selected_plot_points = prompt_plot_point_filter_from_metas(lv_files)
 
     lv_all: List[pd.DataFrame] = []
     for m in lv_files:
@@ -4864,8 +6206,11 @@ def main() -> None:
 
     out_xlsx = safe_to_excel(out, OUT_DIR / "lv_kpis_clean.xlsx")
     print(f"[OK] Excel gerado: {out_xlsx}")
+    if selected_plot_points is None:
+        selected_plot_points = prompt_plot_point_filter(out)
+    plot_out = _apply_plot_point_filter(out, selected_plot_points)
 
-    for source_folder, plot_dir, out_group in iter_source_plot_groups(out):
+    for source_folder, plot_dir, out_group in iter_source_plot_groups(plot_out):
         source_label = source_folder if source_folder else "(raiz PROCESSAR)"
         print(f"[INFO] Gerando plots finais em {plot_dir} para {source_label}.")
         make_plots_from_config(out_group, plots_df, mappings=mappings, plot_dir=plot_dir)
@@ -4873,8 +6218,9 @@ def main() -> None:
         _plot_ethanol_equivalent_ratio(out_group, plot_dir=plot_dir)
         _plot_nth_e94h6_eq_flow(out_group, plot_dir=plot_dir)
         _plot_nth_lhv_vs_eq6(out_group, plot_dir=plot_dir)
+        _plot_machine_scenario_suite(out_group, plot_dir=plot_dir)
 
-    compare_groups = iter_compare_plot_groups(out, root=PLOTS_DIR)
+    compare_groups = iter_compare_plot_groups(plot_out, root=PLOTS_DIR)
     if compare_groups:
         for compare_key, plot_dir, cmp_group in compare_groups:
             series_vals = sorted(
@@ -4894,7 +6240,7 @@ def main() -> None:
     else:
         print("[INFO] Nenhum par subida/descida detectado para gerar plots em compare/.")
 
-    _plot_compare_iteracoes_bl_vs_adtv(out, root_plot_dir=PLOTS_DIR)
+    _plot_compare_iteracoes_bl_vs_adtv(plot_out, root_plot_dir=PLOTS_DIR)
 
     if kibox_files:
         print("[INFO] Kibox csv em raw/ detectado. (Histogramas KPEAK continuam fora do workflow por enquanto.)")
