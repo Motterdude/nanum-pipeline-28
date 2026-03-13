@@ -326,6 +326,7 @@ class ConfigRowDialog(QDialog):
         self._last_auto_sd = ""
         self._last_auto_filename = ""
         self._last_auto_title = ""
+        self._window_state_applied = False
 
         self.setWindowTitle(f"{section_title} helper")
         self.resize(640 if section_title == "Plots" else 560, 720 if section_title == "Plots" else 620)
@@ -362,6 +363,19 @@ class ConfigRowDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
         self._after_build()
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        if self._window_state_applied:
+            return
+        self._window_state_applied = True
+        try:
+            self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+        except Exception:
+            pass
 
     def _prepare_initial_values(self, values: Dict[str, Any]) -> Dict[str, Any]:
         prepared = dict(values or {})
@@ -628,6 +642,12 @@ class EditableTableSection(QWidget):
         self.btn_remove.clicked.connect(self.remove_selected_rows)
         self.table.cellDoubleClicked.connect(self._handle_cell_double_click)
 
+    def _auto_resize_columns(self) -> None:
+        self.table.resizeColumnsToContents()
+        for col_idx in range(self.table.columnCount()):
+            width = self.table.columnWidth(col_idx)
+            self.table.setColumnWidth(col_idx, width + 18)
+
     def _insert_row(self, values: Optional[Dict[str, Any]] = None) -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
@@ -635,6 +655,7 @@ class EditableTableSection(QWidget):
         for col_idx, column in enumerate(self.columns):
             text = "" if values.get(column) is None else str(values.get(column))
             self.table.setItem(row, col_idx, QTableWidgetItem(text))
+        self._auto_resize_columns()
 
     def _prompt_add_row(self) -> None:
         values: Optional[Dict[str, Any]] = None
@@ -648,6 +669,7 @@ class EditableTableSection(QWidget):
         self.table.setRowCount(0)
         for record in records:
             self._insert_row(record)
+        self._auto_resize_columns()
 
     def remove_selected_rows(self) -> None:
         rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
@@ -731,6 +753,7 @@ class Pipeline29ConfigEditor(QMainWindow):
             if state_variable_source
             else (self.base_dir / "out" / "lv_kpis_clean.xlsx").resolve()
         )
+        self._window_state_applied = False
 
         self.setWindowTitle("Pipeline 29 Config Editor")
         self.resize(1700, 980)
@@ -1164,6 +1187,19 @@ class Pipeline29ConfigEditor(QMainWindow):
             default_gui_state_path(),
         )
         super().closeEvent(event)
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        if self._window_state_applied:
+            return
+        self._window_state_applied = True
+        try:
+            self.setWindowState((self.windowState() & ~Qt.WindowMinimized) | Qt.WindowMaximized)
+            self.showMaximized()
+            self.raise_()
+            self.activateWindow()
+        except Exception:
+            pass
 
 
 def launch_config_gui(*, base_dir: Path, config_dir: Optional[Path] = None, excel_path: Optional[Path] = None) -> int:
