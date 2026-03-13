@@ -1548,3 +1548,133 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
     - `Custo_R_h = Consumo_L_h * custo_R_L`;
     - economias negativas vs diesel para os blends etanolicos;
   - os plots de cenario foram regenerados localmente apos a correcao dos parametros das maquinas.
+
+## 2026-03-13 - Fechamento do dia no `pipeline29`
+
+- Escopo consolidado hoje:
+  - congelamento do `pipeline28` e abertura do `pipeline29`;
+  - migracao da configuracao principal do Excel para backend textual + GUI;
+  - refinamentos extensivos da GUI de configuracao;
+  - migracao do legado de `lhv.csv` para `fuel_properties.toml`;
+  - persistencia do filtro de pontos para plots;
+  - implementacao de `ETA_V_pct`.
+
+- Commits produzidos hoje antes do fechamento final:
+  - `37f873a` `Freeze pipeline 28 and branch pipeline 29`
+  - `4da935c` `Add text config backend and GUI for pipeline 29`
+  - `e7e8dfc` `Improve pipeline 29 config launch flow and editor`
+  - `cc1318a` `Normalize text config keys for pipeline 29`
+  - `ce1ba28` `Add vertical helpers for pipeline 29 config rows`
+  - `d7d37cf` `Refine pipeline 29 config helper defaults`
+  - `86e8a2c` `Fix pipeline 29 window state and column sizing`
+  - `99963ce` `Improve pipeline 29 plot helper defaults`
+  - `5dc66c8` `Refine pipeline 29 plot axis preview`
+  - `88f48de` `Support unit-aware plot y steps`
+  - `aa9ceb2` `Snap auto y axis to manual step`
+  - `843f9ab` `Ignore LabVIEW -1000 pressure sentinels`
+  - `3badf33` `Respect manual y axis bounds in plot helper`
+  - `1efcbcc` `Add helper row editing and Save & Run to pipeline 29`
+  - `e533873` `Migrate fuel LHV config into pipeline 29 text backend`
+
+- Estado final esperado apos este handoff:
+  - `pipeline29` usa `config/pipeline29_text/` como fonte principal de configuracao;
+  - a GUI cobre:
+    - `Defaults`
+    - `Data Quality`
+    - `Mappings`
+    - `Instruments`
+    - `Reporting`
+    - `Fuel Properties`
+    - `Plots`
+  - o Excel `config_incertezas_rev3.xlsx` fica como importador legado/bootstrap;
+  - `config/lhv.csv` tambem vira legado/fallback, porque a fonte editavel principal passa a ser `config/pipeline29_text/fuel_properties.toml`.
+
+- `Fuel Properties`:
+  - arquivo novo versionado:
+    - `config/pipeline29_text/fuel_properties.toml`
+  - conteudo atual:
+    - `D85B15`
+    - `E94H6`
+    - `E75H25`
+    - `E65H35`
+  - campos tratados:
+    - composicao
+    - `LHV_kJ_kg` / PCI
+    - densidade
+    - custo
+    - referencia
+    - notas
+  - fallback:
+    - se `fuel_properties.toml` faltar ou vier vazio, o runtime ainda tenta `config/lhv.csv`.
+
+- Filtro de pontos para plots:
+  - o estado do ultimo filtro agora fica salvo localmente em:
+    - `LOCALAPPDATA\\nanum_pipeline_29\\plot_point_filter_last.json`
+  - comportamento:
+    - ao abrir, a ultima selecao compativel e carregada por padrao;
+    - pontos novos que nao existiam antes entram marcados;
+    - a janela deixa isso visivel e ainda permite revisar antes de rodar;
+    - botoes:
+      - `Selecionar tudo`
+      - `Limpar tudo`
+      - `Carregar ultima`
+      - `Salvar atual`
+  - importante:
+    - esse estado local nao e versionado no git.
+
+- Eficiencia volumetrica:
+  - colunas novas geradas em runtime:
+    - `VOL_EFF_AIR_kg_h_USED`
+    - `VOL_EFF_THEORETICAL_AIR_kg_h`
+    - `VOL_EFF_RHO_REF_kg_m3`
+    - `VOL_EFF_RPM_USED`
+    - `VOL_EFF_AIR_SOURCE`
+    - `ETA_V`
+    - `ETA_V_pct`
+  - defaults atuais em `config/pipeline29_text/defaults.toml`:
+    - `ENGINE_DISPLACEMENT_L = 3.992`
+    - `VOL_EFF_REF_PRESSURE_kPa = 101.3`
+    - `VOL_EFF_RPM_COL = Rotação_mean_of_windows`
+    - `VOL_EFF_DIESEL_MAF_COL = MAF_mean_of_windows`
+    - `VOL_EFF_DIESEL_MAF_MIN_KGH = 0`
+    - `VOL_EFF_DIESEL_MAF_MAX_KGH = 300`
+  - regra especial do diesel:
+    - para `D85B15`, usar `MAF_mean_of_windows`;
+    - se `MAF` estiver estatico ou fora de `0..300 kg/h`, cancelar `ETA_V` no diesel;
+    - para os demais combustiveis, usar a coluna de ar derivada pelo pipeline.
+  - plot novo textual:
+    - `eta_v_pct_vs_power_all.png`
+  - mapping novo:
+    - `ETA_V_pct`
+
+- Salvar/rodar na GUI:
+  - `Save` sobrescreve a config ativa;
+  - `Save As` troca a pasta de config ativa;
+  - `Save & Run` salva e fecha a GUI, retornando para o `pipeline29` continuar o processamento.
+
+- Edicao de linha na GUI:
+  - duplo clique em linha preenchida de:
+    - `Mappings`
+    - `Instruments`
+    - `Plots`
+    abre o helper vertical de edicao, sem precisar editar celula por celula na grade.
+
+- Observacao sobre os TOMLs atuais:
+  - a GUI atual salva muitos campos como string, inclusive numeros;
+  - placeholders vazios podem aparecer como `"nan"` em `plots.toml`, `instruments.toml` e `reporting_rounding.toml`;
+  - isso esta compatibilizado com o parser atual, mas e um ponto claro para limpeza futura se quiser um texto mais bonito/manual.
+
+- Validacao realizada para este fechamento:
+  - `.\.venv\Scripts\python.exe -m py_compile nanum_pipeline_29.py`
+  - `.\.venv\Scripts\python.exe -m py_compile pipeline29_config_backend.py`
+  - `.\.venv\Scripts\python.exe -m py_compile pipeline29_config_gui.py`
+  - smoke tests locais cobrindo:
+    - helper de edicao por duplo clique;
+    - `Save & Run`;
+    - bundle textual com `Fuel Properties`;
+    - fallback para config sem `fuel_properties.toml`;
+    - persistencia do filtro de pontos;
+    - cancelamento de `ETA_V` no diesel com `MAF` estatico ou fora da faixa.
+
+- Ponto que nao foi revalidado end-to-end nesta ultima rodada:
+  - nao houve rerun completo do processamento real para regenerar `lv_kpis_clean.xlsx` e todos os plots apos o patch final de `ETA_V_pct` e do filtro persistente.

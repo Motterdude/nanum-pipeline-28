@@ -180,6 +180,7 @@ MACHINE_SCENARIO_SPECS = [
 AFR_STOICH_E94H6 = 8.4
 ETHANOL_FRAC_E94H6 = 0.94
 LAMBDA_DEFAULT = 1.0
+R_AIR_DRY_J_KG_K = 287.058
 
 
 # =========================
@@ -894,6 +895,111 @@ def add_airflow_channels_inplace(df: pd.DataFrame, lambda_col: str | None = None
     out["Air_kg_s"] = out["Air_kg_h"] / 3600.0
     out["Air_g_s"] = out["Air_kg_s"] * 1000.0
 
+    return out
+
+
+def _resolve_existing_column(df: pd.DataFrame, preferred_name: str, fallback_tokens: List[str]) -> Optional[str]:
+    preferred = str(preferred_name or "").strip()
+    if preferred and preferred in df.columns:
+        return preferred
+    return _find_first_col_by_substrings(df, fallback_tokens)
+
+
+def _series_is_static(values: pd.Series, tol: float = 1e-9) -> bool:
+    numeric = pd.to_numeric(values, errors="coerce").dropna()
+    if numeric.empty:
+        return False
+    if numeric.nunique(dropna=True) <= 1:
+        return True
+    try:
+        return float(numeric.max() - numeric.min()) <= tol
+    except Exception:
+        return False
+
+
+def add_volumetric_efficiency_channels_inplace(df: pd.DataFrame, defaults_cfg: Dict[str, str]) -> pd.DataFrame:
+    out = df.copy()
+
+    displacement_l = _to_float(defaults_cfg.get(norm_key("ENGINE_DISPLACEMENT_L"), ""), default=3.992)
+    ref_pressure_kpa = _to_float(defaults_cfg.get(norm_key("VOL_EFF_REF_PRESSURE_kPa"), ""), default=101.3)
+    rpm_col_name = _to_str_or_empty(defaults_cfg.get(norm_key("VOL_EFF_RPM_COL"), "")) or "Rotação_mean_of_windows"
+    maf_col_name = _to_str_or_empty(defaults_cfg.get(norm_key("VOL_EFF_DIESEL_MAF_COL"), "")) or "MAF_mean_of_windows"
+    maf_min_kgh = _to_float(defaults_cfg.get(norm_key("VOL_EFF_DIESEL_MAF_MIN_KGH"), ""), default=0.0)
+    maf_max_kgh = _to_float(defaults_cfg.get(norm_key("VOL_EFF_DIESEL_MAF_MAX_KGH"), ""), default=300.0)
+
+    for column in (
+        "VOL_EFF_AIR_kg_h_USED",
+        "VOL_EFF_THEORETICAL_AIR_kg_h",
+        "VOL_EFF_RHO_REF_kg_m3",
+        "VOL_EFF_RPM_USED",
+        "ETA_V",
+        "ETA_V_pct",
+    ):
+        if column not in out.columns:
+            out[column] = pd.NA
+    out["VOL_EFF_AIR_SOURCE"] = pd.Series(pd.NA, index=out.index, dtype="object")
+    out["VOL_EFF_REF_PRESSURE_kPa"] = ref_pressure_kpa if np.isfinite(ref_pressure_kpa) else pd.NA
+
+    if not np.isfinite(displacement_l) or displacement_l <= 0:
+        print("[WARN] ENGINE_DISPLACEMENT_L invalida; nao calculei eficiencia volumetrica.")
+        return out
+    if not np.isfinite(ref_pressure_kpa) or ref_pressure_kpa <= 0:
+        print("[WARN] VOL_EFF_REF_PRESSURE_kPa invalida; nao calculei eficiencia volumetrica.")
+        return out
+
+    t_col = _resolve_existing_column(out, "T_ADMISSAO_mean_of_windows", ["t", "admiss"])
+    rpm_col = _resolve_existing_column(out, rpm_col_name, ["rotação", "rotacao", "rpm motor", "rpm"])
+    if t_col is None or rpm_col is None:
+        print(f"[WARN] Nao calculei eficiencia volumetrica: t_col={t_col}, rpm_col={rpm_col}.")
+        return out
+
+    displacement_m3 = displacement_l / 1000.0
+    intake_t_k = pd.to_numeric(out[t_col], errors="coerce") + 273.15
+    rpm = pd.to_numeric(out[rpm_col], errors="coerce")
+    rho_ref = (ref_pressure_kpa * 1000.0) / (R_AIR_DRY_J_KG_K * intake_t_k)
+    theoretical_air_kg_h = rho_ref * displacement_m3 * (rpm / 2.0) * 60.0
+
+    out["VOL_EFF_RHO_REF_kg_m3"] = rho_ref
+    out["VOL_EFF_THEORETICAL_AIR_kg_h"] = theoretical_air_kg_h
+    out["VOL_EFF_RPM_USED"] = rpm
+
+    fuel_labels = out.get("Fuel_Label", pd.Series(pd.NA, index=out.index, dtype="object"))
+    fuel_labels = fuel_labels.where(fuel_labels.notna(), _fuel_blend_labels(out))
+    diesel_mask = fuel_labels.eq("D85B15")
+
+    air_used = pd.to_numeric(out.get("Air_kg_h", pd.NA), errors="coerce")
+    out.loc[air_used.gt(0), "VOL_EFF_AIR_SOURCE"] = "Air_kg_h"
+
+    maf_col = _resolve_existing_column(out, maf_col_name, ["maf"])
+    if maf_col is not None and bool(diesel_mask.any()):
+        maf = pd.to_numeric(out[maf_col], errors="coerce")
+        diesel_maf = maf.where(diesel_mask)
+        if _series_is_static(diesel_maf):
+            print("[WARN] MAF do diesel ficou estatico; cancelei eficiencia volumetrica para D85B15.")
+            air_used.loc[diesel_mask] = pd.NA
+            out.loc[diesel_mask, "VOL_EFF_AIR_SOURCE"] = pd.NA
+        else:
+            diesel_maf_valid = diesel_maf.between(maf_min_kgh, maf_max_kgh, inclusive="both") & diesel_maf.gt(0)
+            invalid_diesel_maf = diesel_mask & diesel_maf.notna() & ~diesel_maf_valid
+            if bool(invalid_diesel_maf.any()):
+                print(
+                    f"[WARN] {int(invalid_diesel_maf.sum())} ponto(s) diesel com MAF fora de {maf_min_kgh:g}..{maf_max_kgh:g} kg/h; cancelei eficiencia volumetrica nesses pontos."
+                )
+            air_used.loc[diesel_mask] = pd.NA
+            air_used.loc[diesel_mask & diesel_maf_valid] = diesel_maf.loc[diesel_mask & diesel_maf_valid]
+            out.loc[diesel_mask, "VOL_EFF_AIR_SOURCE"] = pd.NA
+            out.loc[diesel_mask & diesel_maf_valid, "VOL_EFF_AIR_SOURCE"] = "MAF"
+    elif bool(diesel_mask.any()):
+        print("[WARN] Nao achei coluna de MAF para diesel; cancelei eficiencia volumetrica para D85B15.")
+        air_used.loc[diesel_mask] = pd.NA
+        out.loc[diesel_mask, "VOL_EFF_AIR_SOURCE"] = pd.NA
+
+    valid = air_used.gt(0) & theoretical_air_kg_h.gt(0) & intake_t_k.gt(0) & rpm.gt(0)
+    eta_v = (air_used / theoretical_air_kg_h).where(valid, pd.NA)
+
+    out["VOL_EFF_AIR_kg_h_USED"] = air_used
+    out["ETA_V"] = eta_v
+    out["ETA_V_pct"] = eta_v * 100.0
     return out
 
 
@@ -2505,6 +2611,99 @@ def _plot_point_fuel_labels(df: pd.DataFrame) -> pd.Series:
     return labels
 
 
+PLOT_POINT_FILTER_STATE_PATH = RUNTIME_SETTINGS_DIR / "plot_point_filter_last.json"
+
+
+def _normalize_plot_point_key(fuel_label: object, load_kw: object) -> Optional[Tuple[str, float]]:
+    label = str(fuel_label or "").strip()
+    if not label:
+        return None
+    try:
+        load = round(float(load_kw), 6)
+    except Exception:
+        return None
+    if not np.isfinite(load):
+        return None
+    return (label, load)
+
+
+def _plot_point_keys_to_jsonable(points: set[Tuple[str, float]]) -> List[Dict[str, object]]:
+    out: List[Dict[str, object]] = []
+    for fuel_label, load_kw in sorted(points, key=lambda item: (_canon_name(item[0]), item[1])):
+        out.append({"fuel_label": fuel_label, "load_kw": round(float(load_kw), 6)})
+    return out
+
+
+def _load_plot_point_filter_state() -> Optional[Dict[str, object]]:
+    try:
+        if not PLOT_POINT_FILTER_STATE_PATH.exists():
+            return None
+        payload = json.loads(PLOT_POINT_FILTER_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    selected_points: set[Tuple[str, float]] = set()
+    for row in payload.get("selected_points", []) or []:
+        if not isinstance(row, dict):
+            continue
+        key = _normalize_plot_point_key(row.get("fuel_label", ""), row.get("load_kw", None))
+        if key is not None:
+            selected_points.add(key)
+
+    available_points: set[Tuple[str, float]] = set()
+    for row in payload.get("available_points", []) or []:
+        if not isinstance(row, dict):
+            continue
+        key = _normalize_plot_point_key(row.get("fuel_label", ""), row.get("load_kw", None))
+        if key is not None:
+            available_points.add(key)
+
+    return {
+        "selected_points": selected_points,
+        "available_points": available_points,
+        "saved_at": str(payload.get("saved_at", "")).strip(),
+    }
+
+
+def _save_plot_point_filter_state(selected_points: set[Tuple[str, float]], available_points: set[Tuple[str, float]]) -> None:
+    try:
+        RUNTIME_SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+            "selected_points": _plot_point_keys_to_jsonable(selected_points),
+            "available_points": _plot_point_keys_to_jsonable(available_points),
+        }
+        PLOT_POINT_FILTER_STATE_PATH.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:
+        print(f"[WARN] Nao consegui salvar a ultima selecao do filtro de plots: {exc}")
+
+
+def _resolve_plot_point_initial_selection(
+    available_points: set[Tuple[str, float]],
+) -> Tuple[Dict[Tuple[str, float], bool], str]:
+    defaults = {key: True for key in available_points}
+    state = _load_plot_point_filter_state()
+    if state is None:
+        return defaults, "Sem ultima selecao salva. Todos os pontos vieram marcados."
+
+    saved_available = set(state.get("available_points", set()) or set())
+    saved_selected = set(state.get("selected_points", set()) or set())
+    matched_known_points = 0
+    for key in sorted(available_points):
+        if key in saved_available:
+            defaults[key] = key in saved_selected
+            matched_known_points += 1
+    if matched_known_points == 0:
+        return defaults, "Ultima selecao salva nao combinou com este conjunto. Todos os pontos vieram marcados."
+
+    new_points = available_points - saved_available
+    selected_count = sum(1 for selected in defaults.values() if selected)
+    message = f"Ultima selecao carregada automaticamente: {selected_count} / {len(available_points)} ponto(s) marcados."
+    if new_points:
+        message += f" {len(new_points)} ponto(s) novo(s) ficaram selecionados por padrao."
+    return defaults, message
+
+
 def _normalized_plot_point_loads(df: pd.DataFrame) -> pd.Series:
     loads = pd.to_numeric(df.get("Load_kW", pd.Series(pd.NA, index=df.index)), errors="coerce")
     return loads.round(6)
@@ -2632,20 +2831,32 @@ def _prompt_plot_point_filter_catalog_via_qt(
     main_layout.addWidget(title)
     main_layout.addWidget(subtitle)
 
+    available_points = {key for key, count in counts.items() if count > 0}
+    initial_selection, initial_message = _resolve_plot_point_initial_selection(available_points)
+
     toolbar = QHBoxLayout()
     btn_select_all = QPushButton("Selecionar tudo")
     btn_clear_all = QPushButton("Limpar tudo")
+    btn_load_last = QPushButton("Carregar ultima")
+    btn_save_last = QPushButton("Salvar atual")
     info_label = QLabel("Numero pequeno = quantidade de linhas/iteracoes do ponto.")
     info_label.setStyleSheet("color: #5f6b76;")
     status_label = QLabel()
     status_label.setStyleSheet("font-weight: 600;")
     toolbar.addWidget(btn_select_all)
     toolbar.addWidget(btn_clear_all)
+    toolbar.addWidget(btn_load_last)
+    toolbar.addWidget(btn_save_last)
     toolbar.addSpacing(8)
     toolbar.addWidget(info_label)
     toolbar.addStretch(1)
     toolbar.addWidget(status_label)
     main_layout.addLayout(toolbar)
+
+    selection_info_label = QLabel(initial_message)
+    selection_info_label.setWordWrap(True)
+    selection_info_label.setStyleSheet("color: #5f6b76;")
+    main_layout.addWidget(selection_info_label)
 
     table = QTableWidget(len(load_values), len(fuel_labels))
     table.setHorizontalHeaderLabels(fuel_labels)
@@ -2689,6 +2900,23 @@ def _prompt_plot_point_filter_catalog_via_qt(
             checkbox.setChecked(value)
         refresh_status()
 
+    def selected_points_now() -> set[Tuple[str, float]]:
+        return {key for key, checkbox in checkbox_map.items() if bool(checkbox.isChecked())}
+
+    def load_last_selection() -> None:
+        defaults, message = _resolve_plot_point_initial_selection(available_points)
+        for key, checkbox in checkbox_map.items():
+            checkbox.setChecked(bool(defaults.get(key, True)))
+        refresh_status()
+        selection_info_label.setText(message)
+
+    def save_current_selection() -> None:
+        selected = selected_points_now()
+        _save_plot_point_filter_state(selected, available_points)
+        selection_info_label.setText(
+            f"Selecao atual salva como ultima: {len(selected)} / {len(available_points)} ponto(s) marcados."
+        )
+
     for row_idx, load_kw in enumerate(load_values):
         for col_idx, fuel_label in enumerate(fuel_labels):
             key = (fuel_label, float(load_kw))
@@ -2701,7 +2929,7 @@ def _prompt_plot_point_filter_catalog_via_qt(
                 continue
 
             checkbox = QCheckBox()
-            checkbox.setChecked(True)
+            checkbox.setChecked(bool(initial_selection.get(key, True)))
             checkbox.setStyleSheet("QCheckBox::indicator { width: 14px; height: 14px; }")
             checkbox.stateChanged.connect(lambda _state, _refresh=refresh_status: _refresh())
             count_label = QLabel("" if count == 1 else f"{count}x")
@@ -2731,14 +2959,17 @@ def _prompt_plot_point_filter_catalog_via_qt(
 
     btn_select_all.clicked.connect(lambda: set_all(True))
     btn_clear_all.clicked.connect(lambda: set_all(False))
+    btn_load_last.clicked.connect(load_last_selection)
+    btn_save_last.clicked.connect(save_current_selection)
 
     selected_result: dict[str, object] = {"selected": None}
 
     def accept_selection() -> None:
-        selected = {key for key, checkbox in checkbox_map.items() if bool(checkbox.isChecked())}
+        selected = selected_points_now()
         if not selected:
             QMessageBox.critical(dialog, "Pipeline 29", "Selecione pelo menos um ponto para gerar os graficos.")
             return
+        _save_plot_point_filter_state(selected, available_points)
         selected_result["selected"] = selected
         dialog.accept()
 
@@ -2765,6 +2996,8 @@ def _prompt_plot_point_filter_catalog_via_tk(
         return None
 
     result: dict[str, object] = {"selected": None}
+    available_points = {key for key, count in counts.items() if count > 0}
+    initial_selection, initial_message = _resolve_plot_point_initial_selection(available_points)
     root = tk.Tk()
     root.title("Pipeline 29 - filtro de pontos para plots")
     root.withdraw()
@@ -2781,15 +3014,22 @@ def _prompt_plot_point_filter_catalog_via_tk(
         root,
         text="Colunas = combustiveis | Linhas = cargas nominais. Tudo vem selecionado por padrao.",
     ).grid(row=1, column=0, columnspan=3, sticky="w", padx=12, pady=(0, 8))
+    selection_info_var = tk.StringVar(master=root, value=initial_message)
+    ttk.Label(
+        root,
+        textvariable=selection_info_var,
+        wraplength=1100,
+        justify="left",
+    ).grid(row=2, column=0, columnspan=3, sticky="w", padx=12, pady=(0, 8))
 
     toolbar = ttk.Frame(root)
-    toolbar.grid(row=2, column=0, columnspan=3, sticky="we", padx=12, pady=(0, 8))
-    toolbar.columnconfigure(3, weight=1)
+    toolbar.grid(row=3, column=0, columnspan=3, sticky="we", padx=12, pady=(0, 8))
+    toolbar.columnconfigure(5, weight=1)
 
     body = ttk.Frame(root)
-    body.grid(row=3, column=0, columnspan=3, sticky="nsew", padx=12, pady=0)
+    body.grid(row=4, column=0, columnspan=3, sticky="nsew", padx=12, pady=0)
     root.columnconfigure(0, weight=1)
-    root.rowconfigure(3, weight=1)
+    root.rowconfigure(4, weight=1)
     body.columnconfigure(0, weight=1)
     body.rowconfigure(0, weight=1)
 
@@ -2848,6 +3088,7 @@ def _prompt_plot_point_filter_catalog_via_tk(
                 continue
 
             var = tk.BooleanVar(value=True)
+            var.set(bool(initial_selection.get(key, True)))
             cell_vars[key] = var
             point_cell = make_cell(row_idx, col_idx)
             inner = ttk.Frame(point_cell)
@@ -2868,11 +3109,25 @@ def _prompt_plot_point_filter_catalog_via_tk(
         for var in cell_vars.values():
             var.set(value)
 
+    def load_last_selection() -> None:
+        defaults, message = _resolve_plot_point_initial_selection(available_points)
+        for key, var in cell_vars.items():
+            var.set(bool(defaults.get(key, True)))
+        selection_info_var.set(message)
+
+    def save_current_selection() -> None:
+        selected = {key for key, var in cell_vars.items() if bool(var.get())}
+        _save_plot_point_filter_state(selected, available_points)
+        selection_info_var.set(
+            f"Selecao atual salva como ultima: {len(selected)} / {len(available_points)} ponto(s) marcados."
+        )
+
     def confirm() -> None:
         selected = {key for key, var in cell_vars.items() if bool(var.get())}
         if not selected:
             messagebox.showerror("Pipeline 29", "Selecione pelo menos um ponto para gerar os graficos.", parent=root)
             return
+        _save_plot_point_filter_state(selected, available_points)
         result["selected"] = selected
         root.destroy()
 
@@ -2881,16 +3136,18 @@ def _prompt_plot_point_filter_catalog_via_tk(
 
     ttk.Button(toolbar, text="Selecionar tudo", command=lambda: set_all(True)).grid(row=0, column=0, padx=(0, 8), pady=0)
     ttk.Button(toolbar, text="Limpar tudo", command=lambda: set_all(False)).grid(row=0, column=1, padx=(0, 8), pady=0)
+    ttk.Button(toolbar, text="Carregar ultima", command=load_last_selection).grid(row=0, column=2, padx=(0, 8), pady=0)
+    ttk.Button(toolbar, text="Salvar atual", command=save_current_selection).grid(row=0, column=3, padx=(0, 8), pady=0)
     ttk.Label(toolbar, text="Numero no checkbox = quantidade de linhas/iteracoes para o ponto.").grid(
         row=0,
-        column=2,
+        column=4,
         sticky="w",
     )
-    ttk.Label(toolbar, textvariable=status_var).grid(row=0, column=3, sticky="e")
+    ttk.Label(toolbar, textvariable=status_var).grid(row=0, column=5, sticky="e")
     refresh_status()
 
     buttons = ttk.Frame(root)
-    buttons.grid(row=4, column=0, columnspan=3, sticky="e", padx=12, pady=(8, 12))
+    buttons.grid(row=5, column=0, columnspan=3, sticky="e", padx=12, pady=(8, 12))
     ttk.Button(buttons, text="Cancelar", command=cancel).pack(side="right")
     ttk.Button(buttons, text="Gerar graficos", command=confirm).pack(side="right", padx=(0, 8))
 
@@ -4617,6 +4874,8 @@ def build_final_table(
         df["Q_EVAP_NET_kW"] = mdot_air * cp_used * dT
     else:
         df["Q_EVAP_NET_kW"] = pd.NA
+
+    df = add_volumetric_efficiency_channels_inplace(df, defaults_cfg)
 
     # ECT control error sign convention:
     # positive error => coolant outlet temperature hotter than commanded setpoint.

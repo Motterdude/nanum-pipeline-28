@@ -3,6 +3,7 @@ schema_version = 1
 [mappings."power_kw"]
 "mean" = "Potência Total_mean_of_windows"
 "sd" = "Potência Total_sd_of_windows"
+"notes" = "edited via helper"
 
 [mappings."fuel_kgh"]
 "mean" = "Consumo_kg_h_mean_of_windows"
@@ -106,3 +107,13 @@ schema_version = 1
 "sd" = "P_S_COMP_RAW_sd_of_windows"
 "unit" = "kPa"
 "notes" = "Pressure sensor equipment uncertainty entered as +/-2.93 kPa via Instruments sheet."
+
+[mappings."P_E_COMP_RAW_mBar"]
+"mean" = "P_E_COMP_RAW_mean_of_windows"
+"sd" = "P_E_COMP_RAW_sd_of_windows"
+"unit" = "mBar"
+
+[mappings."ETA_V_pct"]
+"mean" = "ETA_V_pct"
+"unit" = "%"
+"notes" = "Volumetric efficiency using T_ADMISSAO, 101.3 kPa reference pressure, Rotação_mean_of_windows and 3.992 L displacement. Diesel uses MAF when valid."

@@ -88,6 +88,83 @@ Todas as mudancas relevantes deste repositorio devem ser registradas aqui.
   - `P_COLETOR_RAW`
   - `P_S_COMP_RAW`
 
+## 2026-03-13 - Pipeline 29 follow-up: helper editing, fuel properties, plot state and volumetric efficiency
+
+### Added
+
+- `pipeline29_config_gui.py`:
+  - duplo clique em linha preenchida de `Mappings`, `Instruments` e `Plots` agora abre o helper vertical para editar a propria linha;
+  - botao `Save & Run` para salvar a config textual atual e seguir direto para o processamento do `pipeline29`.
+- `pipeline29` passou a usar `config/pipeline29_text/fuel_properties.toml` como fonte textual editavel de:
+  - `Fuel_Label`
+  - `DIES_pct`
+  - `BIOD_pct`
+  - `EtOH_pct`
+  - `H2O_pct`
+  - `LHV_kJ_kg` / PCI
+  - `Fuel_Density_kg_m3`
+  - `Fuel_Cost_R_L`
+- Nova aba `Fuel Properties` na GUI do `pipeline29`.
+- Persistencia da ultima selecao do filtro de pontos para plots em:
+  - `LOCALAPPDATA\\nanum_pipeline_29\\plot_point_filter_last.json`
+- Nova grandeza derivada no `pipeline29`:
+  - `ETA_V`
+  - `ETA_V_pct`
+- Novo plot textual default:
+  - `eta_v_pct_vs_power_all.png`
+
+### Changed
+
+- `nanum_pipeline_29.py` agora entende o retorno especial da GUI para `Save & Run`, inclusive quando a config ativa mudou via `Save As`.
+- `pipeline29_config_backend.py` passou a carregar/salvar `fuel_properties.toml`, incluindo suporte em presets e fallback para configs antigas sem esse arquivo.
+- O bootstrap do texto a partir do legado agora importa tambem o conteudo de `config/lhv.csv` para `fuel_properties.toml`.
+- O runtime do `pipeline29` passou a preferir `fuel_properties.toml` e usar `lhv.csv` apenas como fallback legado.
+- `build_final_table()` agora usa `Fuel Properties` como fonte principal de:
+  - `LHV_kJ_kg`
+  - densidade
+  - custo
+  - `LHV_E94H6_kJ_kg`
+- O filtro de pontos para plots, em Qt e Tk, agora:
+  - abre carregando automaticamente a ultima selecao salva quando houver compatibilidade com o conjunto atual de pontos;
+  - mostra esse estado na propria janela;
+  - permite `Carregar ultima` e `Salvar atual`.
+- A eficiencia volumetrica foi implementada com:
+  - `Rotação_mean_of_windows` como rotacao do motor;
+  - cilindrada `3.992 L` via `Defaults`;
+  - pressao de referencia fixa de `101.3 kPa` via `Defaults`;
+  - temperatura de admissao para calcular a densidade de referencia;
+  - `MAF_mean_of_windows` para o diesel `D85B15`;
+  - cancelamento do calculo no diesel quando `MAF` estiver estatico ou fora de `0..300 kg/h`.
+- A config textual salva pela GUI foi novamente consolidada como fonte da verdade; por isso varios TOMLs foram regravados com os placeholders atuais do editor (`"nan"`, strings numericas, campos `setting_param/setting_value`).
+
+### Config
+
+- `config/pipeline29_text/defaults.toml` ganhou:
+  - `ENGINE_DISPLACEMENT_L = 3.992`
+  - `VOL_EFF_REF_PRESSURE_kPa = 101.3`
+  - `VOL_EFF_RPM_COL = Rotação_mean_of_windows`
+  - `VOL_EFF_DIESEL_MAF_COL = MAF_mean_of_windows`
+  - `VOL_EFF_DIESEL_MAF_MIN_KGH = 0`
+  - `VOL_EFF_DIESEL_MAF_MAX_KGH = 300`
+- `config/pipeline29_text/mappings.toml` ganhou o mapping:
+  - `ETA_V_pct -> ETA_V_pct`
+- `config/pipeline29_text/plots.toml` ganhou o plot:
+  - `eta_v_pct_vs_power_all.png`
+- `config/pipeline29_text/fuel_properties.toml` ficou como arquivo versionado da configuracao de PCI/LHV, densidade e custo por blend.
+
+### Validation
+
+- `.\.venv\Scripts\python.exe -m py_compile nanum_pipeline_29.py`
+- `.\.venv\Scripts\python.exe -m py_compile pipeline29_config_backend.py`
+- `.\.venv\Scripts\python.exe -m py_compile pipeline29_config_gui.py`
+- Smoke test da persistencia do filtro:
+  - salva ultima selecao;
+  - recarrega selecao compatibilizando pontos novos.
+- Smoke test da eficiencia volumetrica:
+  - diesel valido usando `MAF`;
+  - diesel invalido cancelado quando `MAF > 300 kg/h`;
+  - diesel cancelado quando `MAF` fica estatico.
+
 ## 2026-03-12
 
 ### Added

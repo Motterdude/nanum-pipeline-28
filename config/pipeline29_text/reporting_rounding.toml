@@ -9,12 +9,21 @@ schema_version = 1
 
 [[reporting]]
 "key" = "power_kw"
+"report_resolution" = "nan"
+"report_digits" = "nan"
 "rule" = "round_half_up"
+"notes" = "nan"
 
 [[reporting]]
 "key" = "fuel_kgh"
+"report_resolution" = "nan"
+"report_digits" = "nan"
 "rule" = "round_half_up"
+"notes" = "nan"
 
 [[reporting]]
 "key" = "LHV_kJ_kg"
+"report_resolution" = "nan"
+"report_digits" = "nan"
 "rule" = "round_half_up"
+"notes" = "nan"
