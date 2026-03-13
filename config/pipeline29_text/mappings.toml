@@ -1,0 +1,108 @@
+schema_version = 1
+
+[mappings."power_kw"]
+"mean" = "Potência Total_mean_of_windows"
+"sd" = "Potência Total_sd_of_windows"
+
+[mappings."fuel_kgh"]
+"mean" = "Consumo_kg_h_mean_of_windows"
+"sd" = "Consumo_kg_h_sd_of_windows"
+
+[mappings."LHV_kJ_kg"]
+"mean" = "LHV_kJ_kg"
+
+[mappings."T_S_CIL_1_C"]
+"mean" = "T_S_CIL_1_mean_of_windows"
+"sd" = "T_S_CIL_1_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type K + NI9213 selected mode."
+
+[mappings."T_S_CIL_2_C"]
+"mean" = "T_S_CIL_2_mean_of_windows"
+"sd" = "T_S_CIL_2_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type K + NI9213 selected mode."
+
+[mappings."T_S_CIL_3_C"]
+"mean" = "T_S_CIL_3_mean_of_windows"
+"sd" = "T_S_CIL_3_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type K + NI9213 selected mode."
+
+[mappings."T_S_CIL_4_C"]
+"mean" = "T_S_CIL_4_mean_of_windows"
+"sd" = "T_S_CIL_4_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type K + NI9213 selected mode."
+
+[mappings."T_CARTER_C"]
+"mean" = "T_CARTER_mean_of_windows"
+"sd" = "T_CARTER_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type K + NI9213 selected mode."
+
+[mappings."T_AMBIENTE_C"]
+"mean" = "T_AMBIENTE_mean_of_windows"
+"sd" = "T_AMBIENTE_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type T + NI9213 selected mode."
+
+[mappings."T_RADIADOR_C"]
+"mean" = "T_RADIADOR_mean_of_windows"
+"sd" = "T_RADIADOR_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type K + NI9213 selected mode."
+
+[mappings."T_S_AGUA_C"]
+"mean" = "T_S_AGUA_mean_of_windows"
+"sd" = "T_S_AGUA_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type K + NI9213 selected mode."
+
+[mappings."T_WATERCOOLER_C"]
+"mean" = "T_WATERCOOLER_mean_of_windows"
+"sd" = "T_WATERCOOLER_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type T + NI9213 selected mode."
+
+[mappings."T_ADMISSAO_C"]
+"mean" = "T_ADMISSAO_mean_of_windows"
+"sd" = "T_ADMISSAO_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type K + NI9213 selected mode."
+
+[mappings."T_E_TURB_C"]
+"mean" = "T_E_TURB_mean_of_windows"
+"sd" = "T_E_TURB_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type K + NI9213 selected mode."
+
+[mappings."T_S_TURB_C"]
+"mean" = "T_S_TURB_mean_of_windows"
+"sd" = "T_S_TURB_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type K + NI9213 selected mode."
+
+[mappings."P_E_TURB_RAW_kPa"]
+"mean" = "P_E_TURB_RAW_mean_of_windows"
+"sd" = "P_E_TURB_RAW_sd_of_windows"
+"unit" = "kPa"
+"notes" = "Pressure sensor equipment uncertainty entered as +/-2.93 kPa via Instruments sheet."
+
+[mappings."P_S_TURB_RAW_kPa"]
+"mean" = "P_S_TURB_RAW_mean_of_windows"
+"sd" = "P_S_TURB_RAW_sd_of_windows"
+"unit" = "kPa"
+"notes" = "Pressure sensor equipment uncertainty entered as +/-2.93 kPa via Instruments sheet."
+
+[mappings."P_COLETOR_RAW_kPa"]
+"mean" = "P_COLETOR_RAW_mean_of_windows"
+"sd" = "P_COLETOR_RAW_sd_of_windows"
+"unit" = "kPa"
+"notes" = "Pressure sensor equipment uncertainty entered as +/-2.93 kPa via Instruments sheet."
+
+[mappings."P_S_COMP_RAW_kPa"]
+"mean" = "P_S_COMP_RAW_mean_of_windows"
+"sd" = "P_S_COMP_RAW_sd_of_windows"
+"unit" = "kPa"
+"notes" = "Pressure sensor equipment uncertainty entered as +/-2.93 kPa via Instruments sheet."

@@ -59,6 +59,66 @@ Arquivos de referencia:
   - `nanum_pipeline_28.py` passa a ser o rollback congelado deste snapshot;
   - novas mudancas estruturais devem partir de `nanum_pipeline_29.py`.
 
+## Migracao inicial de configuracao para texto + GUI no pipeline 29 - 2026-03-13
+- Objetivo:
+  - retirar do `pipeline29` a dependencia operacional da planilha como fonte principal de configuracao;
+  - preparar a base para uma GUI de configuracao equivalente ao Excel, mas versionavel e menos fragil.
+- Arquitetura aplicada:
+  - backend compartilhado em `pipeline29_config_backend.py`;
+  - editor grafico em `pipeline29_config_gui.py`;
+  - configuracao textual versionada em `config/pipeline29_text/`.
+- Formato adotado:
+  - TOML versionado para a configuracao base:
+    - `defaults.toml`
+    - `data_quality.toml`
+    - `mappings.toml`
+    - `instruments.toml`
+    - `reporting_rounding.toml`
+    - `plots.toml`
+  - JSON local para presets/estado da GUI em `%LOCALAPPDATA%\nanum_pipeline_29\`.
+- Fluxo atual do `pipeline29`:
+  - `--config-source auto`:
+    - usa `config/pipeline29_text/` se existir;
+    - se nao existir, bootstrapa a partir de `config/config_incertezas_rev3.xlsx`.
+  - `--config-source text`:
+    - exige a pasta textual.
+  - `--config-source excel`:
+    - usa a planilha diretamente como fallback.
+- GUI entregue nesta rodada:
+  - abas para:
+    - `Defaults`
+    - `Data Quality`
+    - `Mappings`
+    - `Instruments`
+    - `Reporting`
+    - `Plots`
+  - botoes de:
+    - adicionar linha
+    - duplicar selecionadas
+    - remover selecionadas
+    - recarregar texto
+    - importar Excel -> texto
+    - salvar config textual
+    - validar
+    - salvar preset
+    - carregar preset
+- Plot com/sem incerteza:
+  - nova chave `show_uncertainty` por linha em `plots.toml`;
+  - valores suportados:
+    - `auto`
+    - `on`
+    - `off`
+  - `off` suprime as barras de erro mesmo que `yerr_col` exista;
+  - `auto/on` permitem usar `yerr_col` explicito ou fallback automatico por `U_*`.
+- Validacao feita:
+  - compilacao de:
+    - `nanum_pipeline_29.py`
+    - `pipeline29_config_backend.py`
+    - `pipeline29_config_gui.py`
+  - bootstrap real da `rev3` para `config/pipeline29_text/`;
+  - carregamento do bundle textual pelo proprio `nanum_pipeline_29.py`;
+  - smoke test da GUI em `offscreen` dentro da `.venv` do repo.
+
 ## Registro global de mudancas - 2026-03-08
 - Origem importada: `D:\Drive\Faculdade\PUC\Mestrado\Dados_Ensaios\Processamento Pyton 28`
 - Destino Git: branch `import/notebook-pipeline28-2026-03-08` a partir de `main`

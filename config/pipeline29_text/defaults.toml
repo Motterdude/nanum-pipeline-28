@@ -1,0 +1,23 @@
+schema_version = 1
+
+[defaults]
+"default_dist" = "rect"
+"default_k" = "2"
+"default_resolution_blank_is_zero" = "1"
+"RAW_INPUT_DIR" = "C:\\Users\\SC61730\\Downloads\\raw_mestrado"
+"OUT_DIR" = "C:\\Users\\SC61730\\Downloads\\out_mestrado"
+"FUEL_DENSITY_KG_M3_D85B15" = "853"
+"FUEL_DENSITY_KG_M3_E94H6" = "809"
+"FUEL_DENSITY_KG_M3_E75H25" = "873"
+"FUEL_DENSITY_KG_M3_E65H35" = "897"
+"FUEL_COST_R_L_D85B15" = "5.4"
+"FUEL_COST_R_L_E94H6" = "2.1"
+"FUEL_COST_R_L_E75H25" = "2.1"
+"FUEL_COST_R_L_E65H35" = "2.1"
+"MACHINE_HOURS_PER_YEAR_COLHEITADEIRA" = "3150"
+"MACHINE_DIESEL_L_H_COLHEITADEIRA" = "34"
+"MACHINE_HOURS_PER_YEAR_TRATOR_TRANSBORDO" = "1675"
+"MACHINE_DIESEL_L_H_TRATOR_TRANSBORDO" = "12.1"
+"MACHINE_HOURS_PER_YEAR_CAMINHAO" = "4800"
+"MACHINE_DIESEL_L_H_CAMINHAO" = "41"
+"NI9213_TC_MODE" = "high_speed"

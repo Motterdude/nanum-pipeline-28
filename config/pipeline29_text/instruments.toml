@@ -1,0 +1,2288 @@
+schema_version = 1
+
+[[instruments]]
+"key" = "Same logical key used in Mappings. Repeat key to stack components (RSS)."
+"component" = "Component name.\nExample: TC_K_Class2, NI9213_CJC, transmitter, etc."
+"dist" = "Distribution of the limit:\nrect = uniform ±limit; normal = 1σ.\nRecommended: rect."
+"range_min" = "Optional: apply component only if x >= range_min (in engineering unit)."
+"range_max" = "Optional: apply component only if x <= range_max (in engineering unit)."
+"acc_abs" = "± absolute accuracy limit in engineering unit.\nExample: ±2.5 °C -> 2.5."
+"acc_pct" = "± percent-of-reading as FRACTION.\nExample: ±0.75% -> 0.0075."
+"digits" = "± digits term (datasheet style). Use with lsd.\nExample: ±2 digits -> 2."
+"lsd" = "Least significant digit value in engineering unit.\nExample: 0.1 °C per digit -> 0.1."
+"resolution" = "Quantization step in engineering unit (optional).\nUsed as u_res = resolution/sqrt(12)."
+"source" = "Norm / datasheet reference (optional)."
+"notes" = "Free notes. Use to document original datasheet wording."
+
+[[instruments]]
+"key" = "power_kw"
+"component" = "power_kw_spec"
+"dist" = "rect"
+"acc_abs" = 0
+"acc_pct" = 0.01
+"digits" = 2
+"lsd" = 0.01
+"resolution" = 0
+"notes" = "migrated_from_model=percent_plus_digits"
+
+[[instruments]]
+"key" = "balance_kg"
+"component" = "balance_kg_spec"
+"dist" = "rect"
+"acc_abs" = 0
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0.001
+"notes" = "migrated_from_model=resolution_only"
+
+[[instruments]]
+"key" = "lhv_kj_kg"
+"component" = "lhv_kj_kg_spec"
+"dist" = "rect"
+"acc_abs" = 0
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"notes" = "migrated_from_model=direct"
+
+[[instruments]]
+"key" = "T_S_CIL_1_C"
+"component" = "TC_K_ASTM_std_subzero"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 2.2
+"acc_pct" = 0.02
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?2% below 0?C."
+
+[[instruments]]
+"key" = "T_S_CIL_1_C"
+"component" = "TC_K_ASTM_std_positive"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 1372
+"acc_abs" = 2.2
+"acc_pct" = 0.0075
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?0.75% above 0?C."
+
+[[instruments]]
+"key" = "T_S_CIL_1_C"
+"component" = "NI9213_K_HS_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_1_C"
+"component" = "NI9213_K_HS_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_1_C"
+"component" = "NI9213_K_HS_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 3
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_1_C"
+"component" = "NI9213_K_HS_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_1_C"
+"component" = "NI9213_K_HS_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_1_C"
+"component" = "NI9213_K_HR_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_1_C"
+"component" = "NI9213_K_HR_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_1_C"
+"component" = "NI9213_K_HR_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 2.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_1_C"
+"component" = "NI9213_K_HR_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 3.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_1_C"
+"component" = "NI9213_K_HR_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_2_C"
+"component" = "TC_K_ASTM_std_subzero"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 2.2
+"acc_pct" = 0.02
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?2% below 0?C."
+
+[[instruments]]
+"key" = "T_S_CIL_2_C"
+"component" = "TC_K_ASTM_std_positive"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 1372
+"acc_abs" = 2.2
+"acc_pct" = 0.0075
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?0.75% above 0?C."
+
+[[instruments]]
+"key" = "T_S_CIL_2_C"
+"component" = "NI9213_K_HS_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_2_C"
+"component" = "NI9213_K_HS_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_2_C"
+"component" = "NI9213_K_HS_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 3
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_2_C"
+"component" = "NI9213_K_HS_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_2_C"
+"component" = "NI9213_K_HS_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_2_C"
+"component" = "NI9213_K_HR_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_2_C"
+"component" = "NI9213_K_HR_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_2_C"
+"component" = "NI9213_K_HR_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 2.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_2_C"
+"component" = "NI9213_K_HR_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 3.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_2_C"
+"component" = "NI9213_K_HR_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_3_C"
+"component" = "TC_K_ASTM_std_subzero"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 2.2
+"acc_pct" = 0.02
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?2% below 0?C."
+
+[[instruments]]
+"key" = "T_S_CIL_3_C"
+"component" = "TC_K_ASTM_std_positive"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 1372
+"acc_abs" = 2.2
+"acc_pct" = 0.0075
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?0.75% above 0?C."
+
+[[instruments]]
+"key" = "T_S_CIL_3_C"
+"component" = "NI9213_K_HS_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_3_C"
+"component" = "NI9213_K_HS_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_3_C"
+"component" = "NI9213_K_HS_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 3
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_3_C"
+"component" = "NI9213_K_HS_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_3_C"
+"component" = "NI9213_K_HS_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_3_C"
+"component" = "NI9213_K_HR_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_3_C"
+"component" = "NI9213_K_HR_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_3_C"
+"component" = "NI9213_K_HR_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 2.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_3_C"
+"component" = "NI9213_K_HR_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 3.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_3_C"
+"component" = "NI9213_K_HR_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_4_C"
+"component" = "TC_K_ASTM_std_subzero"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 2.2
+"acc_pct" = 0.02
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?2% below 0?C."
+
+[[instruments]]
+"key" = "T_S_CIL_4_C"
+"component" = "TC_K_ASTM_std_positive"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 1372
+"acc_abs" = 2.2
+"acc_pct" = 0.0075
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?0.75% above 0?C."
+
+[[instruments]]
+"key" = "T_S_CIL_4_C"
+"component" = "NI9213_K_HS_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_4_C"
+"component" = "NI9213_K_HS_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_4_C"
+"component" = "NI9213_K_HS_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 3
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_4_C"
+"component" = "NI9213_K_HS_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_4_C"
+"component" = "NI9213_K_HS_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_CIL_4_C"
+"component" = "NI9213_K_HR_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_4_C"
+"component" = "NI9213_K_HR_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_4_C"
+"component" = "NI9213_K_HR_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 2.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_4_C"
+"component" = "NI9213_K_HR_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 3.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_CIL_4_C"
+"component" = "NI9213_K_HR_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_CARTER_C"
+"component" = "TC_K_ASTM_std_subzero"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 2.2
+"acc_pct" = 0.02
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?2% below 0?C."
+
+[[instruments]]
+"key" = "T_CARTER_C"
+"component" = "TC_K_ASTM_std_positive"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 1372
+"acc_abs" = 2.2
+"acc_pct" = 0.0075
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?0.75% above 0?C."
+
+[[instruments]]
+"key" = "T_CARTER_C"
+"component" = "NI9213_K_HS_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_CARTER_C"
+"component" = "NI9213_K_HS_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_CARTER_C"
+"component" = "NI9213_K_HS_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 3
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_CARTER_C"
+"component" = "NI9213_K_HS_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_CARTER_C"
+"component" = "NI9213_K_HS_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_CARTER_C"
+"component" = "NI9213_K_HR_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_CARTER_C"
+"component" = "NI9213_K_HR_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_CARTER_C"
+"component" = "NI9213_K_HR_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 2.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_CARTER_C"
+"component" = "NI9213_K_HR_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 3.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_CARTER_C"
+"component" = "NI9213_K_HR_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_RADIADOR_C"
+"component" = "TC_K_ASTM_std_subzero"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 2.2
+"acc_pct" = 0.02
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?2% below 0?C."
+
+[[instruments]]
+"key" = "T_RADIADOR_C"
+"component" = "TC_K_ASTM_std_positive"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 1372
+"acc_abs" = 2.2
+"acc_pct" = 0.0075
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?0.75% above 0?C."
+
+[[instruments]]
+"key" = "T_RADIADOR_C"
+"component" = "NI9213_K_HS_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_RADIADOR_C"
+"component" = "NI9213_K_HS_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_RADIADOR_C"
+"component" = "NI9213_K_HS_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 3
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_RADIADOR_C"
+"component" = "NI9213_K_HS_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_RADIADOR_C"
+"component" = "NI9213_K_HS_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_RADIADOR_C"
+"component" = "NI9213_K_HR_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_RADIADOR_C"
+"component" = "NI9213_K_HR_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_RADIADOR_C"
+"component" = "NI9213_K_HR_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 2.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_RADIADOR_C"
+"component" = "NI9213_K_HR_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 3.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_RADIADOR_C"
+"component" = "NI9213_K_HR_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_AGUA_C"
+"component" = "TC_K_ASTM_std_subzero"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 2.2
+"acc_pct" = 0.02
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?2% below 0?C."
+
+[[instruments]]
+"key" = "T_S_AGUA_C"
+"component" = "TC_K_ASTM_std_positive"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 1372
+"acc_abs" = 2.2
+"acc_pct" = 0.0075
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?0.75% above 0?C."
+
+[[instruments]]
+"key" = "T_S_AGUA_C"
+"component" = "NI9213_K_HS_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_AGUA_C"
+"component" = "NI9213_K_HS_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_AGUA_C"
+"component" = "NI9213_K_HS_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 3
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_AGUA_C"
+"component" = "NI9213_K_HS_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_AGUA_C"
+"component" = "NI9213_K_HS_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_AGUA_C"
+"component" = "NI9213_K_HR_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_AGUA_C"
+"component" = "NI9213_K_HR_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_AGUA_C"
+"component" = "NI9213_K_HR_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 2.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_AGUA_C"
+"component" = "NI9213_K_HR_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 3.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_AGUA_C"
+"component" = "NI9213_K_HR_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_ADMISSAO_C"
+"component" = "TC_K_ASTM_std_subzero"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 2.2
+"acc_pct" = 0.02
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?2% below 0?C."
+
+[[instruments]]
+"key" = "T_ADMISSAO_C"
+"component" = "TC_K_ASTM_std_positive"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 1372
+"acc_abs" = 2.2
+"acc_pct" = 0.0075
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?0.75% above 0?C."
+
+[[instruments]]
+"key" = "T_ADMISSAO_C"
+"component" = "NI9213_K_HS_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_ADMISSAO_C"
+"component" = "NI9213_K_HS_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_ADMISSAO_C"
+"component" = "NI9213_K_HS_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 3
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_ADMISSAO_C"
+"component" = "NI9213_K_HS_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_ADMISSAO_C"
+"component" = "NI9213_K_HS_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_ADMISSAO_C"
+"component" = "NI9213_K_HR_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_ADMISSAO_C"
+"component" = "NI9213_K_HR_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_ADMISSAO_C"
+"component" = "NI9213_K_HR_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 2.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_ADMISSAO_C"
+"component" = "NI9213_K_HR_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 3.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_ADMISSAO_C"
+"component" = "NI9213_K_HR_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_E_TURB_C"
+"component" = "TC_K_ASTM_std_subzero"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 2.2
+"acc_pct" = 0.02
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?2% below 0?C."
+
+[[instruments]]
+"key" = "T_E_TURB_C"
+"component" = "TC_K_ASTM_std_positive"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 1372
+"acc_abs" = 2.2
+"acc_pct" = 0.0075
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?0.75% above 0?C."
+
+[[instruments]]
+"key" = "T_E_TURB_C"
+"component" = "NI9213_K_HS_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_E_TURB_C"
+"component" = "NI9213_K_HS_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_E_TURB_C"
+"component" = "NI9213_K_HS_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 3
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_E_TURB_C"
+"component" = "NI9213_K_HS_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_E_TURB_C"
+"component" = "NI9213_K_HS_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_E_TURB_C"
+"component" = "NI9213_K_HR_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_E_TURB_C"
+"component" = "NI9213_K_HR_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_E_TURB_C"
+"component" = "NI9213_K_HR_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 2.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_E_TURB_C"
+"component" = "NI9213_K_HR_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 3.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_E_TURB_C"
+"component" = "NI9213_K_HR_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_TURB_C"
+"component" = "TC_K_ASTM_std_subzero"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 2.2
+"acc_pct" = 0.02
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?2% below 0?C."
+
+[[instruments]]
+"key" = "T_S_TURB_C"
+"component" = "TC_K_ASTM_std_positive"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 1372
+"acc_abs" = 2.2
+"acc_pct" = 0.0075
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type K: greater of ?2.2?C or ?0.75% above 0?C."
+
+[[instruments]]
+"key" = "T_S_TURB_C"
+"component" = "NI9213_K_HS_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_TURB_C"
+"component" = "NI9213_K_HS_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_TURB_C"
+"component" = "NI9213_K_HS_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 3
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_TURB_C"
+"component" = "NI9213_K_HS_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_TURB_C"
+"component" = "NI9213_K_HS_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_S_TURB_C"
+"component" = "NI9213_K_HR_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_TURB_C"
+"component" = "NI9213_K_HR_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 150
+"acc_abs" = 2.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_TURB_C"
+"component" = "NI9213_K_HR_3"
+"dist" = "rect"
+"range_min" = 150
+"range_max" = 500
+"acc_abs" = 2.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_TURB_C"
+"component" = "NI9213_K_HR_4"
+"dist" = "rect"
+"range_min" = 500
+"range_max" = 900
+"acc_abs" = 3.5
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_S_TURB_C"
+"component" = "NI9213_K_HR_5"
+"dist" = "rect"
+"range_min" = 900
+"range_max" = 1400
+"acc_abs" = 4.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 3 (approx.)"
+"notes" = "Approx. max module error for Type K, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_AMBIENTE_C"
+"component" = "TC_T_ASTM_std_subzero"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 1
+"acc_pct" = 0.015
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type T: greater of ?1.0?C or ?1.5% below 0?C."
+
+[[instruments]]
+"key" = "T_AMBIENTE_C"
+"component" = "TC_T_ASTM_std_positive"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 400
+"acc_abs" = 1
+"acc_pct" = 0.0075
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type T: greater of ?1.0?C or ?0.75% above 0?C."
+
+[[instruments]]
+"key" = "T_AMBIENTE_C"
+"component" = "NI9213_T_HS_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_AMBIENTE_C"
+"component" = "NI9213_T_HS_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 200
+"acc_abs" = 2.1
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_AMBIENTE_C"
+"component" = "NI9213_T_HS_3"
+"dist" = "rect"
+"range_min" = 200
+"range_max" = 600
+"acc_abs" = 2.4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_AMBIENTE_C"
+"component" = "NI9213_T_HS_4"
+"dist" = "rect"
+"range_min" = 600
+"range_max" = 1000
+"acc_abs" = 3.4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_AMBIENTE_C"
+"component" = "NI9213_T_HR_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 3.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_AMBIENTE_C"
+"component" = "NI9213_T_HR_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 200
+"acc_abs" = 1.9
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_AMBIENTE_C"
+"component" = "NI9213_T_HR_3"
+"dist" = "rect"
+"range_min" = 200
+"range_max" = 600
+"acc_abs" = 2.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_AMBIENTE_C"
+"component" = "NI9213_T_HR_4"
+"dist" = "rect"
+"range_min" = 600
+"range_max" = 1000
+"acc_abs" = 3.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_WATERCOOLER_C"
+"component" = "TC_T_ASTM_std_subzero"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 1
+"acc_pct" = 0.015
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type T: greater of ?1.0?C or ?1.5% below 0?C."
+
+[[instruments]]
+"key" = "T_WATERCOOLER_C"
+"component" = "TC_T_ASTM_std_positive"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 400
+"acc_abs" = 1
+"acc_pct" = 0.0075
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "ASTM E230 / ANSI MC96.1 summary"
+"notes" = "Standard grade Type T: greater of ?1.0?C or ?0.75% above 0?C."
+
+[[instruments]]
+"key" = "T_WATERCOOLER_C"
+"component" = "NI9213_T_HS_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_WATERCOOLER_C"
+"component" = "NI9213_T_HS_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 200
+"acc_abs" = 2.1
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_WATERCOOLER_C"
+"component" = "NI9213_T_HS_3"
+"dist" = "rect"
+"range_min" = 200
+"range_max" = 600
+"acc_abs" = 2.4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_WATERCOOLER_C"
+"component" = "NI9213_T_HS_4"
+"dist" = "rect"
+"range_min" = 600
+"range_max" = 1000
+"acc_abs" = 3.4
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-speed, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_speed"
+
+[[instruments]]
+"key" = "T_WATERCOOLER_C"
+"component" = "NI9213_T_HR_1"
+"dist" = "rect"
+"range_min" = -200
+"range_max" = 0
+"acc_abs" = 3.8
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_WATERCOOLER_C"
+"component" = "NI9213_T_HR_2"
+"dist" = "rect"
+"range_min" = 0
+"range_max" = 200
+"acc_abs" = 1.9
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_WATERCOOLER_C"
+"component" = "NI9213_T_HR_3"
+"dist" = "rect"
+"range_min" = 200
+"range_max" = 600
+"acc_abs" = 2.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "T_WATERCOOLER_C"
+"component" = "NI9213_T_HR_4"
+"dist" = "rect"
+"range_min" = 600
+"range_max" = 1000
+"acc_abs" = 3.2
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "NI 9213 datasheet Fig. 4 (approx.)"
+"notes" = "Approx. max module error for Type T, high-resolution, -40..70?C ambient. Includes CJC and module effects."
+"setting_param" = "NI9213_TC_MODE"
+"setting_value" = "high_resolution"
+
+[[instruments]]
+"key" = "P_E_TURB_RAW_kPa"
+"component" = "PRESSURE_SENSOR_ABS_2p93_kPa"
+"dist" = "rect"
+"acc_abs" = 2.93
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "User input"
+"notes" = "Sensor accuracy limit treated as rectangular distribution: +/-2.93 kPa."
+
+[[instruments]]
+"key" = "P_S_TURB_RAW_kPa"
+"component" = "PRESSURE_SENSOR_ABS_2p93_kPa"
+"dist" = "rect"
+"acc_abs" = 2.93
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "User input"
+"notes" = "Sensor accuracy limit treated as rectangular distribution: +/-2.93 kPa."
+
+[[instruments]]
+"key" = "P_COLETOR_RAW_kPa"
+"component" = "PRESSURE_SENSOR_ABS_2p93_kPa"
+"dist" = "rect"
+"acc_abs" = 2.93
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "User input"
+"notes" = "Sensor accuracy limit treated as rectangular distribution: +/-2.93 kPa."
+
+[[instruments]]
+"key" = "P_S_COMP_RAW_kPa"
+"component" = "PRESSURE_SENSOR_ABS_2p93_kPa"
+"dist" = "rect"
+"acc_abs" = 2.93
+"acc_pct" = 0
+"digits" = 0
+"lsd" = 0
+"resolution" = 0
+"source" = "User input"
+"notes" = "Sensor accuracy limit treated as rectangular distribution: +/-2.93 kPa."

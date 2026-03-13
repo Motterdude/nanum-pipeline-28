@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import os
@@ -18,6 +19,14 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
+
+from pipeline29_config_backend import (
+    Pipeline29ConfigBundle,
+    bootstrap_text_config_from_excel,
+    default_text_config_dir,
+    load_text_config_bundle,
+    text_config_exists,
+)
 
 try:
     import tkinter as tk
@@ -1683,11 +1692,58 @@ def kibox_aggregate(kibox_files: List[FileMeta]) -> pd.DataFrame:
 # =========================
 # Config / LHV / Instruments rev3
 # =========================
+def _choose_text_config_dir(config_dir: Optional[Path] = None) -> Path:
+    if config_dir is None:
+        return default_text_config_dir(BASE_DIR)
+    return Path(config_dir).expanduser().resolve()
+
+
 def _choose_config_path() -> Path:
     p = CFG_DIR / "config_incertezas_rev3.xlsx"
     if p.exists():
         return p
     raise FileNotFoundError(f"Nao encontrei {p.name} em {CFG_DIR.resolve()}")
+
+
+def load_pipeline29_config_bundle(
+    *,
+    config_source: str = "auto",
+    text_config_dir: Optional[Path] = None,
+    rebuild_text_config: bool = False,
+) -> Pipeline29ConfigBundle:
+    source_mode = _to_str_or_empty(config_source).lower() or "auto"
+    if source_mode not in {"auto", "text", "excel"}:
+        raise ValueError(f"config_source invalido: {config_source}")
+
+    text_dir = _choose_text_config_dir(text_config_dir)
+
+    if source_mode in {"auto", "text"}:
+        if rebuild_text_config or not text_config_exists(text_dir):
+            excel_path = _choose_config_path()
+            print(f"[INFO] Gerando config textual do pipeline29 em: {text_dir}")
+            bootstrap_text_config_from_excel(excel_path, text_dir)
+        if text_config_exists(text_dir):
+            bundle = load_text_config_bundle(text_dir)
+            bundle.text_dir = text_dir
+            bundle.source_kind = "text"
+            bundle.source_path = text_dir
+            return bundle
+        if source_mode == "text":
+            raise FileNotFoundError(f"Nao encontrei config textual completa em {text_dir}")
+
+    excel_path = _choose_config_path()
+    mappings, instruments_df, reporting_df, plots_df, data_quality_cfg, defaults_cfg = load_config_excel(excel_path)
+    return Pipeline29ConfigBundle(
+        mappings=mappings,
+        instruments_df=instruments_df,
+        reporting_df=reporting_df,
+        plots_df=plots_df,
+        data_quality_cfg=data_quality_cfg,
+        defaults_cfg=defaults_cfg,
+        source_kind="excel",
+        source_path=excel_path,
+        text_dir=text_dir if text_config_exists(text_dir) else None,
+    )
 
 
 def _try_read_sheet(xlsx_path: Path, sheet: str) -> Optional[pd.DataFrame]:
@@ -2094,7 +2150,7 @@ def _write_runtime_dirs_to_defaults_excel(xlsx_path: Path, input_dir: Path, out_
     wb.save(xlsx_path)
 
 
-def _choose_runtime_dirs(defaults_cfg: Dict[str, str], xlsx_path: Path) -> Tuple[Path, Path]:
+def _choose_runtime_dirs(defaults_cfg: Dict[str, str]) -> Tuple[Path, Path]:
     saved_cfg = _load_runtime_path_settings()
 
     raw_cfg = saved_cfg.get("raw_input_dir") or defaults_cfg.get(norm_key("RAW_INPUT_DIR"), "")
@@ -2118,18 +2174,38 @@ def _choose_runtime_dirs(defaults_cfg: Dict[str, str], xlsx_path: Path) -> Tuple
     _save_runtime_path_settings(input_dir, out_dir)
     defaults_cfg[norm_key("RAW_INPUT_DIR")] = str(input_dir)
     defaults_cfg[norm_key("OUT_DIR")] = str(out_dir)
-    _write_runtime_dirs_to_defaults_excel(xlsx_path, input_dir, out_dir)
     print(f"[INFO] RAW_INPUT_DIR (GUI): {input_dir}")
     print(f"[INFO] OUT_DIR (GUI): {out_dir}")
     print(f"[INFO] Ultima selecao salva em: {RUNTIME_SETTINGS_PATH}")
-    print(f"[INFO] Aba Defaults sincronizada apenas para RAW_INPUT_DIR/OUT_DIR em: {xlsx_path}")
     return input_dir, out_dir
 
 
-def apply_runtime_path_overrides(defaults_cfg: Dict[str, str], xlsx_path: Path) -> None:
+def _sync_runtime_dirs_to_config_source(
+    config_bundle: Optional[Pipeline29ConfigBundle],
+    input_dir: Path,
+    out_dir: Path,
+) -> None:
+    if config_bundle is None:
+        return
+    if config_bundle.source_kind == "excel" and config_bundle.source_path is not None:
+        _write_runtime_dirs_to_defaults_excel(config_bundle.source_path, input_dir, out_dir)
+        print(f"[INFO] Aba Defaults sincronizada apenas para RAW_INPUT_DIR/OUT_DIR em: {config_bundle.source_path}")
+        return
+    if config_bundle.source_kind == "text" and config_bundle.source_path is not None:
+        print(
+            "[INFO] Runtime dirs do pipeline29 ficaram salvos localmente em "
+            f"{RUNTIME_SETTINGS_PATH}; a config textual em {config_bundle.source_path} nao foi alterada."
+        )
+
+
+def apply_runtime_path_overrides(
+    defaults_cfg: Dict[str, str],
+    config_bundle: Optional[Pipeline29ConfigBundle] = None,
+) -> None:
     global RAW_DIR, PROCESS_DIR, OUT_DIR, PLOTS_DIR
 
-    input_dir, out_dir = _choose_runtime_dirs(defaults_cfg, xlsx_path)
+    input_dir, out_dir = _choose_runtime_dirs(defaults_cfg)
+    _sync_runtime_dirs_to_config_source(config_bundle, input_dir, out_dir)
 
     if not input_dir.exists():
         raise FileNotFoundError(f"Nao encontrei o diretorio selecionado para RAW_INPUT_DIR: {input_dir}")
@@ -2790,6 +2866,7 @@ def load_config_excel(xlsx_path: Optional[Path] = None) -> Tuple[dict, pd.DataFr
                 "x_col",
                 "y_col",
                 "yerr_col",
+                "show_uncertainty",
                 "x_label",
                 "y_label",
                 "x_min",
@@ -2805,6 +2882,14 @@ def load_config_excel(xlsx_path: Optional[Path] = None) -> Tuple[dict, pd.DataFr
                 "notes",
             ]
         )
+    if "show_uncertainty" not in plots.columns:
+        plots["show_uncertainty"] = pd.NA
+    if "yerr_col" in plots.columns:
+        for idx, value in plots["show_uncertainty"].items():
+            if not _is_blank_cell(value):
+                continue
+            yerr_value = _to_str_or_empty(plots.at[idx, "yerr_col"])
+            plots.at[idx, "show_uncertainty"] = "off" if _yerr_disabled_token(yerr_value) else "auto"
 
     data_quality_cfg = _load_data_quality_config(p)
     defaults_cfg = _load_defaults_config(p)
@@ -5848,6 +5933,44 @@ def _yerr_disabled_token(s: str) -> bool:
     return t in {"none", "off", "disable", "disabled", "0", "na", "n/a"}
 
 
+def _plot_uncertainty_mode(v: object) -> str:
+    text = _to_str_or_empty(v).lower()
+    if not text or text in {"auto", "guess", "default"}:
+        return "auto"
+    if text in {"0", "false", "no", "off", "disable", "disabled", "none", "na", "n/a"}:
+        return "off"
+    return "on"
+
+
+def _resolve_plot_yerr_col(
+    out_df: pd.DataFrame,
+    row: pd.Series,
+    *,
+    y_col: str,
+    mappings: dict,
+    plot_label: str,
+) -> Optional[str]:
+    yerr_req = _to_str_or_empty(row.get("yerr_col", ""))
+    uncertainty_mode = _plot_uncertainty_mode(row.get("show_uncertainty", "auto"))
+    if uncertainty_mode == "off":
+        return None
+
+    if yerr_req and not _yerr_disabled_token(yerr_req):
+        try:
+            return resolve_col(out_df, yerr_req)
+        except Exception:
+            print(f"[INFO] Plot '{plot_label}': yerr_col '{yerr_req}' nao encontrado. Vou tentar fallback.")
+
+    guessed = _guess_plot_uncertainty_col(out_df, y_col, mappings)
+    if guessed:
+        print(f"[INFO] Plot '{plot_label}': usando '{guessed}' como incerteza final.")
+        return guessed
+
+    if yerr_req and not _yerr_disabled_token(yerr_req):
+        print(f"[INFO] Plot '{plot_label}': fallback sem yerr, porque '{yerr_req}' nao existe no output.")
+    return None
+
+
 def _derive_filename_for_expansion(template: str, y_col: str) -> str:
     t = (template or "").strip()
     if not t:
@@ -5942,7 +6065,6 @@ def make_plots_from_config(
 
         x_col_req = _to_str_or_empty(r.get("x_col", ""))
         y_col_req = _to_str_or_empty(r.get("y_col", ""))
-        yerr_req = _to_str_or_empty(r.get("yerr_col", ""))
 
         x_label = _to_str_or_empty(r.get("x_label", ""))
         y_label = _to_str_or_empty(r.get("y_label", ""))
@@ -6040,20 +6162,13 @@ def make_plots_from_config(
                 n_skip += 1
                 continue
 
-            yerr_col: Optional[str] = None
-            if yerr_req:
-                if _yerr_disabled_token(yerr_req):
-                    yerr_col = None
-                else:
-                    try:
-                        yerr_col = resolve_col(out_df, yerr_req)
-                    except Exception:
-                        yerr_col = None
-                        print(f"[INFO] Plot \'{filename or title}\': yerr_col \'{yerr_req}\' n?o encontrado. Vou plotar sem erro.")
-            else:
-                yerr_col = _guess_plot_uncertainty_col(out_df, y_col, mappings)
-                if yerr_col:
-                    print(f"[INFO] Plot '{filename or title}': usando '{yerr_col}' como incerteza final.")
+            yerr_col = _resolve_plot_yerr_col(
+                out_df,
+                r,
+                y_col=y_col,
+                mappings=mappings,
+                plot_label=filename or title or y_col,
+            )
 
             x_label = _runtime_plot_x_label(x_label, x_col_base, x_col, mestrado_x_override)
             if not y_label:
@@ -6105,20 +6220,13 @@ def make_plots_from_config(
                 n_skip += 1
                 continue
 
-            yerr_col = None
-            if yerr_req:
-                if _yerr_disabled_token(yerr_req):
-                    yerr_col = None
-                else:
-                    try:
-                        yerr_col = resolve_col(out_df, yerr_req)
-                    except Exception:
-                        yerr_col = None
-                        print(f"[INFO] Plot \'{filename or title}\': yerr_col \'{yerr_req}\' n?o encontrado. Vou plotar sem erro.")
-            else:
-                yerr_col = _guess_plot_uncertainty_col(out_df, y_col, mappings)
-                if yerr_col:
-                    print(f"[INFO] Plot '{filename or title}': usando '{yerr_col}' como incerteza final.")
+            yerr_col = _resolve_plot_yerr_col(
+                out_df,
+                r,
+                y_col=y_col,
+                mappings=mappings,
+                plot_label=filename or title or y_col,
+            )
 
             x_label = _runtime_plot_x_label(x_label, x_col_base, x_col, mestrado_x_override)
             if not y_label:
@@ -6207,12 +6315,42 @@ def make_plots_from_config(
 # =========================
 # Main
 # =========================
-def main() -> None:
+def _parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Pipeline 29 com configuracao textual e fallback para Excel.")
+    parser.add_argument("--config-source", choices=["auto", "text", "excel"], default="auto")
+    parser.add_argument("--config-dir", default="", help="Diretorio da configuracao textual do pipeline29.")
+    parser.add_argument("--rebuild-text-config", action="store_true", help="Regera a config textual a partir do Excel rev3.")
+    parser.add_argument("--config-gui", action="store_true", help="Abre o editor GUI da configuracao textual e sai.")
+    return parser.parse_args(argv)
+
+
+def main(argv: Optional[List[str]] = None) -> None:
+    args = _parse_cli_args(argv)
     print(f"[INFO] Base do script: {BASE_DIR}")
-    config_path = _choose_config_path()
-    mappings, instruments_df, reporting_df, plots_df, data_quality_cfg, defaults_cfg = load_config_excel(config_path)
-    apply_runtime_path_overrides(defaults_cfg, config_path)
-    print(f"[INFO] Config: {config_path}")
+    text_config_dir = _choose_text_config_dir(Path(args.config_dir) if args.config_dir else None)
+
+    if args.config_gui:
+        try:
+            from pipeline29_config_gui import launch_config_gui
+        except Exception as exc:
+            raise RuntimeError(f"Nao consegui abrir a GUI de configuracao do pipeline29: {exc}") from exc
+        launch_config_gui(base_dir=BASE_DIR, config_dir=text_config_dir, excel_path=_choose_config_path())
+        return
+
+    config_bundle = load_pipeline29_config_bundle(
+        config_source=args.config_source,
+        text_config_dir=text_config_dir,
+        rebuild_text_config=args.rebuild_text_config,
+    )
+    mappings = config_bundle.mappings
+    instruments_df = config_bundle.instruments_df
+    reporting_df = config_bundle.reporting_df
+    plots_df = config_bundle.plots_df
+    data_quality_cfg = config_bundle.data_quality_cfg
+    defaults_cfg = config_bundle.defaults_cfg
+    apply_runtime_path_overrides(defaults_cfg, config_bundle=config_bundle)
+    config_label = config_bundle.source_path if config_bundle.source_path is not None else text_config_dir
+    print(f"[INFO] Config ({config_bundle.source_kind}): {config_label}")
     print(f"[INFO] Entrada LabVIEW/Kibox: {PROCESS_DIR}")
     print(f"[INFO] Saida: {OUT_DIR}")
     clear_output_dir(OUT_DIR)

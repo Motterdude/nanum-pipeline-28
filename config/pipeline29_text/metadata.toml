@@ -1,0 +1,9 @@
+schema_version = 1
+
+[metadata]
+"format" = "pipeline29_text"
+"schema_version" = 1
+"updated_at_utc" = "2026-03-13T17:29:16+00:00"
+"bootstrapped_from" = "c:\\Users\\SC61730\\Downloads\\Processamento_mestrado_28\\Processamentos\\config\\config_incertezas_rev3.xlsx"
+"source_kind" = "excel"
+"source_path" = "c:\\Users\\SC61730\\Downloads\\Processamento_mestrado_28\\Processamentos\\config\\config_incertezas_rev3.xlsx"

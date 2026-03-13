@@ -1,0 +1,6 @@
+schema_version = 1
+
+[data_quality]
+"MAX_DELTA_BETWEEN_SAMPLES_ms" = 1200.0
+"MAX_ACT_CONTROL_ERROR" = 5.0
+"MAX_ECT_CONTROL_ERROR" = 2.0

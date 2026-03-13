@@ -1,0 +1,975 @@
+schema_version = 1
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "nth_vs_power_all.png"
+"title" = "n_th vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "n_th_pct"
+"yerr_col" = "U_n_th_pct"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Thermal efficiency (%)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_min" = 0.0
+"y_max" = 42.0
+"y_step" = 2.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: nth with error bars"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "consumo_vs_power_all.png"
+"title" = "Fuel consumption vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "Consumo_kg_h_mean_of_windows"
+"yerr_col" = "U_Consumo_kg_h"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Fuel consumption (kg/h)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: consumo with error bars"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "mfb_10_90_vs_power_all.png"
+"title" = "MFB_10_90 vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "MFB_10_90"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "MFB_10_90 (degCA)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: MFB_10_90"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "dt_admissao_to_t_e_cil_avg_vs_power_all.png"
+"title" = "Delta-T (T_E_CIL_AVG - T_ADMISSÃO) vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "DT_ADMISSAO_TO_T_E_CIL_AVG_C"
+"yerr_col" = "U_DT_ADMISSAO_TO_T_E_CIL_AVG_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Delta-T (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: Delta-T no labels"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_labels"
+"filename" = "dt_admissao_to_t_e_cil_avg_vs_power_all_labels_box.png"
+"title" = "Delta-T (T_E_CIL_AVG - T_ADMISSÃO) vs Power (labels: box)"
+"x_col" = "Load_kW"
+"y_col" = "DT_ADMISSAO_TO_T_E_CIL_AVG_C"
+"yerr_col" = "U_DT_ADMISSAO_TO_T_E_CIL_AVG_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Delta-T (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"label_variant" = "box"
+"notes" = "Legacy: labels box"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_labels"
+"filename" = "dt_admissao_to_t_e_cil_avg_vs_power_all_labels_tag.png"
+"title" = "Delta-T (T_E_CIL_AVG - T_ADMISSÃO) vs Power (labels: tag)"
+"x_col" = "Load_kW"
+"y_col" = "DT_ADMISSAO_TO_T_E_CIL_AVG_C"
+"yerr_col" = "U_DT_ADMISSAO_TO_T_E_CIL_AVG_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Delta-T (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"label_variant" = "tag"
+"notes" = "Legacy: labels tag"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_labels"
+"filename" = "dt_admissao_to_t_e_cil_avg_vs_power_all_labels_marker.png"
+"title" = "Delta-T (T_E_CIL_AVG - T_ADMISSÃO) vs Power (labels: marker)"
+"x_col" = "Load_kW"
+"y_col" = "DT_ADMISSAO_TO_T_E_CIL_AVG_C"
+"yerr_col" = "U_DT_ADMISSAO_TO_T_E_CIL_AVG_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Delta-T (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"label_variant" = "marker"
+"notes" = "Legacy: labels marker"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_labels"
+"filename" = "dt_admissao_to_t_e_cil_avg_vs_power_all_labels_badge.png"
+"title" = "Delta-T (T_E_CIL_AVG - T_ADMISSÃO) vs Power (labels: badge)"
+"x_col" = "Load_kW"
+"y_col" = "DT_ADMISSAO_TO_T_E_CIL_AVG_C"
+"yerr_col" = "U_DT_ADMISSAO_TO_T_E_CIL_AVG_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Delta-T (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"label_variant" = "badge"
+"notes" = "Legacy: labels badge"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "air_kg_h_vs_power_all.png"
+"title" = "Air mass flow vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "Air_kg_h"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Air (kg/h)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: Air_kg_h"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "air_g_s_vs_power_all.png"
+"title" = "Air mass flow vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "Air_g_s"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Air (g/s)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: Air_g_s"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "umidade_abs_g_m3_vs_power_all.png"
+"title" = "Absolute humidity vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "UMIDADE_ABS_g_m3"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Absolute humidity (g/m³)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: humidity"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "t_e_cil_avg_vs_power_all.png"
+"title" = "T_E_CIL_AVG vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_E_CIL_AVG_mean_of_windows"
+"yerr_col" = "U_T_E_CIL_AVG_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Temperature (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: T_E_CIL_AVG"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "q_evap_net_kw_vs_power_all.png"
+"title" = "Q_EVAP_NET vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "Q_EVAP_NET_kW"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Q_EVAP_NET (kW)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: Q_EVAP_NET vs power"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_xy"
+"filename" = "q_evap_net_kw_vs_air_kg_h_all.png"
+"title" = "Q_EVAP_NET vs Air mass flow (all fuels)"
+"x_col" = "Air_kg_h"
+"y_col" = "Q_EVAP_NET_kW"
+"show_uncertainty" = "auto"
+"x_label" = "Air (kg/h)"
+"y_label" = "Q_EVAP_NET (kW)"
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: Q_EVAP_NET vs Air_kg_h"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_xy"
+"filename" = "q_evap_net_kw_vs_p_coletor_raw_all.png"
+"title" = "Q_EVAP_NET vs P_COLETOR_RAW (all fuels)"
+"x_col" = "P_COLETOR_RAW_mean_of_windows"
+"y_col" = "Q_EVAP_NET_kW"
+"show_uncertainty" = "auto"
+"x_label" = "P_coletor (kPa abs)"
+"y_label" = "Q_EVAP_NET (kW)"
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: Q_EVAP_NET vs P_COLETOR (will skip if col missing)"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_P_E_TURB_RAW_mean_of_windows_vs_power_all.png"
+"title" = "P_E_TURB_RAW_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "P_E_TURB_RAW_mean_of_windows"
+"yerr_col" = "U_P_E_TURB_RAW_KPA"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Pressure (kPa)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_P_S_TURB_RAW_mean_of_windows_vs_power_all.png"
+"title" = "P_S_TURB_RAW_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "P_S_TURB_RAW_mean_of_windows"
+"yerr_col" = "U_P_S_TURB_RAW_KPA"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Pressure (kPa)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_P_E_COMP_RAW_mean_of_windows_vs_power_all.png"
+"title" = "P_E_COMP_RAW_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "P_E_COMP_RAW_mean_of_windows"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Pressure (kPa)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_P_S_COMP_RAW_mean_of_windows_vs_power_all.png"
+"title" = "P_S_COMP_RAW_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "P_S_COMP_RAW_mean_of_windows"
+"yerr_col" = "U_P_S_COMP_RAW_KPA"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Pressure (kPa)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_P_COLETOR_RAW_mean_of_windows_vs_power_all.png"
+"title" = "P_COLETOR_RAW_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "P_COLETOR_RAW_mean_of_windows"
+"yerr_col" = "U_P_COLETOR_RAW_KPA"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Pressure (kPa)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_T_ADMISS_O_mean_of_windows_vs_power_all.png"
+"title" = "T_ADMISSÃO_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_ADMISSAO_mean_of_windows"
+"yerr_col" = "U_T_ADMISSAO_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Temperature (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_T_E_TURB_mean_of_windows_vs_power_all.png"
+"title" = "T_E_TURB_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_E_TURB_mean_of_windows"
+"yerr_col" = "U_T_E_TURB_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Temperature (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_T_S_TURB_mean_of_windows_vs_power_all.png"
+"title" = "T_S_TURB_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_S_TURB_mean_of_windows"
+"yerr_col" = "U_T_S_TURB_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Temperature (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_T_E_COMP_mean_of_windows_vs_power_all.png"
+"title" = "T_E_COMP_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_E_COMP_mean_of_windows"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Temperature (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_T_S_COMP_mean_of_windows_vs_power_all.png"
+"title" = "T_S_COMP_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_S_COMP_mean_of_windows"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Temperature (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_T_E_CIL_1_mean_of_windows_vs_power_all.png"
+"title" = "T_E_CIL_1_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_S_CIL_1_mean_of_windows"
+"yerr_col" = "U_T_S_CIL_1_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Temperature (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_T_E_CIL_2_mean_of_windows_vs_power_all.png"
+"title" = "T_E_CIL_2_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_S_CIL_2_mean_of_windows"
+"yerr_col" = "U_T_S_CIL_2_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Temperature (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_T_E_CIL_3_mean_of_windows_vs_power_all.png"
+"title" = "T_E_CIL_3_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_S_CIL_3_mean_of_windows"
+"yerr_col" = "U_T_S_CIL_3_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Temperature (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "raw_T_E_CIL_4_mean_of_windows_vs_power_all.png"
+"title" = "T_E_CIL_4_mean_mean_of_windows vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_S_CIL_4_mean_of_windows"
+"yerr_col" = "U_T_S_CIL_4_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Temperature (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Legacy: raw requested list"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "kibox_all"
+"filename" = "kibox_{y}_vs_power_all.png"
+"title" = "{y} vs {x} (all fuels)"
+"x_col" = "Load_kW"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "AUTO: expand one plot per KIBOX_* column (except KIBOX_N_files)"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "nox_vs_power_all.png"
+"title" = "NOX vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "NOX_mean_of_windows"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "NOX"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Added: gas emissions via config (NOX)"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "co_vs_power_all.png"
+"title" = "CO vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "CO_mean_of_windows"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "CO"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Added: gas emissions via config (CO)"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "co2_vs_power_all.png"
+"title" = "CO2 vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "CO2_mean_of_windows"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "CO2"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Added: gas emissions via config (CO2)"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "o2_vs_power_all.png"
+"title" = "O2 vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "O2_mean_of_windows"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "O2"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Added: gas emissions via config (O2)"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "ect_ctrl_error_vs_power_all.png"
+"title" = "ECT control error (T_S_AGUA - DEM_TH2O) vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "ECT_CTRL_ERROR_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Control error (degC)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_min" = -10.0
+"y_max" = 10.0
+"y_step" = 1.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "ECT control stability with +/-2C tolerance"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "bsfc_vs_power_all.png"
+"title" = "Specific fuel consumption vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "BSFC_g_kWh"
+"yerr_col" = "U_BSFC_g_kWh"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Specific fuel consumption (g/kWh)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "BSFC from Consumo_kg_h and power with propagated uncertainty from fuel and power channels."
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "t_s_agua_vs_power_all.png"
+"title" = "Engine Coolant temperature vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_S_AGUA_mean_of_windows"
+"yerr_col" = "U_T_S_AGUA_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Temperature (°C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_min" = 80.0
+"y_max" = 100.0
+"y_step" = 1.0
+"y_tol_plus" = 83.0
+"y_tol_minus" = -87.0
+"filter_h2o_list" = "0,6,25,35"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "t_watercooler_vs_power_all.png"
+"title" = "T_WATERCOOLER vs Load (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_WATERCOOLER_mean_of_windows"
+"yerr_col" = "U_T_WATERCOOLER_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power command (kW)"
+"y_label" = "T_WATERCOOLER (degC)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Added by request: temperature vs Load_kW."
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "t_radiador_vs_power_all.png"
+"title" = "T_RADIADOR vs Load (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_RADIADOR_mean_of_windows"
+"yerr_col" = "U_T_RADIADOR_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power command (kW)"
+"y_label" = "T_RADIADOR (degC)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Added by request: temperature vs Load_kW."
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "t_carter_vs_power_all.png"
+"title" = "T_CARTER vs Load (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_CARTER_mean_of_windows"
+"yerr_col" = "U_T_CARTER_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power command (kW)"
+"y_label" = "T_CARTER (degC)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Added by request: temperature vs Load_kW with uncertainty."
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "t_ambiente_vs_power_all.png"
+"title" = "T_AMBIENTE vs Load (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_AMBIENTE_mean_of_windows"
+"yerr_col" = "U_T_AMBIENTE_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power command (kW)"
+"y_label" = "T_AMBIENTE (degC)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Added by request: temperature vs Load_kW with uncertainty."
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "motec_lambda_vs_power_all.png"
+"title" = "MoTeC lambda vs Load (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "Motec_Exhaust Lambda_mean_of_windows"
+"yerr_col" = "Motec_Exhaust Lambda_sd_of_windows"
+"show_uncertainty" = "auto"
+"x_label" = "Power command (kW)"
+"y_label" = "Lambda (-)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_min" = 0.9
+"y_max" = 1.1
+"y_step" = 0.02
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Added by request: MoTeC exhaust lambda vs Load_kW with SD-only uncertainty and fixed lambda scale 0.90..1.10 step 0.02."
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "motec_ignition_advance_vs_power_all.png"
+"title" = "MoTeC ignition advance vs Load (BTDC, all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "Motec_Ignition Timing_mean_of_windows"
+"yerr_col" = "Motec_Ignition Timing_sd_of_windows"
+"show_uncertainty" = "auto"
+"x_label" = "Power command (kW)"
+"y_label" = "Ignition advance (deg BTDC)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_step" = 1.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Added by request: MoTeC ignition advance vs Load_kW with SD-only uncertainty and autoscale on Y. Y ticks: 1 deg autoscale."
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "motec_fuel_closed_loop_trim_vs_power_all.png"
+"title" = "MoTeC fuel closed loop trim vs Load (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "Motec_Fuel Closed Loop Control Bank 1 Trim_mean_of_windows"
+"yerr_col" = "Motec_Fuel Closed Loop Control Bank 1 Trim_sd_of_windows"
+"show_uncertainty" = "auto"
+"x_label" = "Power command (kW)"
+"y_label" = "Fuel closed loop trim bank 1 (%Trim)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Added by request: MoTeC fuel closed loop control bank 1 trim vs Load_kW with SD-only uncertainty and autoscale on Y."
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "ignition_delay_vs_upd_power_all.png"
+"title" = "Ignition delay (abs) vs UPD measured power (all fuels)"
+"x_col" = "UPD_Power_Bin_kW"
+"y_col" = "Ignition_Delay_abs_degCA"
+"yerr_col" = "off"
+"show_uncertainty" = "off"
+"x_label" = "Potencia UPD medida (kW, bin 0.1)"
+"y_label" = "Ignition delay abs (deg CA)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_step" = 0.5
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"notes" = "Added by request: abs(KIBOX_AI05_1 + Motec_Ignition Timing_mean_of_windows) with UPD power on X. | Y step set to 0.5 deg and X scale aligned with kibox (0..55 step 5)."
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "consumo_l_h_vs_power_all.png"
+"title" = "Volumetric fuel flow vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "Consumo_L_h"
+"yerr_col" = "U_Consumo_L_h"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Fuel flow (L/h)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Fuel volumetric flow from kg/h and density in Defaults"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "custo_r_h_vs_power_all.png"
+"title" = "Fuel cost vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "Custo_R_h"
+"yerr_col" = "U_Custo_R_h"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Fuel cost (R$/h)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Fuel hourly cost from volumetric flow and cost in Defaults"
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "economia_pct_vs_diesel_power_all.png"
+"title" = "Hourly cost delta vs Diesel vs Power (negative = saving)"
+"x_col" = "Load_kW"
+"y_col" = "Economia_vs_Diesel_pct"
+"yerr_col" = "U_Economia_vs_Diesel_pct"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Cost delta vs Diesel (%)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Signed hourly cost delta relative to diesel baseline. Negative values mean savings."
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "economia_r_h_vs_diesel_power_all.png"
+"title" = "Hourly cost delta vs Diesel vs Power (negative = saving)"
+"x_col" = "Load_kW"
+"y_col" = "Economia_vs_Diesel_R_h"
+"yerr_col" = "U_Economia_vs_Diesel_R_h"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Cost delta vs Diesel (R$/h)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"y_tol_plus" = 0.0
+"y_tol_minus" = 0.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Signed hourly cost delta relative to diesel baseline. Negative values mean savings."
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "t_admissao_vs_power_all.png"
+"title" = "Intake Temperature vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_ADMISSAO_mean_of_windows"
+"yerr_col" = "U_T_ADMISSAO_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Intake temperature (?C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Dedicated plot with propagated uncertainty."
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "t_e_turb_vs_power_all.png"
+"title" = "Turbine Inlet Temperature vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_E_TURB_mean_of_windows"
+"yerr_col" = "U_T_E_TURB_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Turbine inlet temperature (?C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Dedicated plot with propagated uncertainty."
+
+[[plots]]
+"enabled" = 1
+"plot_type" = "all_fuels_yx"
+"filename" = "t_s_turb_vs_power_all.png"
+"title" = "Turbine Outlet Temperature vs Power (all fuels)"
+"x_col" = "Load_kW"
+"y_col" = "T_S_TURB_mean_of_windows"
+"yerr_col" = "U_T_S_TURB_C"
+"show_uncertainty" = "auto"
+"x_label" = "Power (kW)"
+"y_label" = "Turbine outlet temperature (?C)"
+"x_min" = 0.0
+"x_max" = 55.0
+"x_step" = 5.0
+"filter_h2o_list" = "0,6,25,35"
+"notes" = "Dedicated plot with propagated uncertainty."

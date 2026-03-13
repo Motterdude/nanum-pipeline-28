@@ -7,6 +7,22 @@ Todas as mudancas relevantes deste repositorio devem ser registradas aqui.
 ### Added
 
 - `nanum_pipeline_29.py` criado como copia funcional do estado atual do `nanum_pipeline_28.py`, para a proxima linha de trabalho manter rollback simples no `28`.
+- Backend textual novo em `pipeline29_config_backend.py` para substituir a dependencia operacional da planilha `config_incertezas_rev3.xlsx`.
+- GUI nova em `pipeline29_config_gui.py` para editar:
+  - `Defaults`
+  - `data quality`
+  - `Mappings`
+  - `Instruments`
+  - `Reporting_Rounding`
+  - `Plots`
+- Nova pasta versionada `config/pipeline29_text/`, bootstrapada a partir da `rev3`, contendo:
+  - `metadata.toml`
+  - `defaults.toml`
+  - `data_quality.toml`
+  - `mappings.toml`
+  - `instruments.toml`
+  - `reporting_rounding.toml`
+  - `plots.toml`
 - Novos mapeamentos de incerteza para temperaturas:
   - `T_S_CIL_1..4`
   - `T_CARTER`
@@ -26,6 +42,14 @@ Todas as mudancas relevantes deste repositorio devem ser registradas aqui.
 ### Changed
 
 - `nanum_pipeline_28.py` passou a filtrar componentes da aba `Instruments` por seletor da aba `Defaults`, permitindo chavear o `NI9213_TC_MODE` entre modos do modulo.
+- `nanum_pipeline_29.py` agora pode carregar configuracao por:
+  - `text` (`config/pipeline29_text`)
+  - `excel` (`config_incertezas_rev3.xlsx`)
+  - `auto` com bootstrap automatico do Excel para texto
+- O dispatcher de plots do `pipeline29` ganhou a chave `show_uncertainty` por plot:
+  - `auto`
+  - `on`
+  - `off`
 - A propagacao de incerteza agora gera tambem:
   - `T_E_CIL_AVG`
   - `DT_ADMISSAO_TO_T_E_CIL_AVG_C`
@@ -40,6 +64,10 @@ Todas as mudancas relevantes deste repositorio devem ser registradas aqui.
 
 - `python -m py_compile nanum_pipeline_28.py`
 - `python -m py_compile nanum_pipeline_29.py`
+- `python -m py_compile pipeline29_config_backend.py`
+- `python -m py_compile pipeline29_config_gui.py`
+- Bootstrap real da `rev3` para `config/pipeline29_text/`
+- Smoke test da GUI em `.venv` com `QT_QPA_PLATFORM=offscreen`
 - Reprocessamento local confirmou colunas `uA/uB/uc/U` para temperaturas e para:
   - `P_S_TURB_RAW`
   - `P_E_TURB_RAW`

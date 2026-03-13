@@ -2,10 +2,13 @@
 
 ## O que precisa estar no Git
 - Codigo principal:
+  - `pipeline29_config_backend.py`
+  - `pipeline29_config_gui.py`
   - `nanum_pipeline_29.py`
   - `nanum_pipeline_28.py`
   - `standalone_kibox_cycle_viewer_fast.py`
 - Config obrigatoria:
+  - `config/pipeline29_text/`
   - `config/config_incertezas_rev3.xlsx`
   - `config/lhv.csv`
   - `config/rules_consumo.csv`
@@ -32,11 +35,21 @@ Esses itens ficam fora do versionamento para evitar conflito, excesso de tamanho
 Processamentos/
 |-- config/
 |   |-- config_incertezas_rev3.xlsx
+|   |-- pipeline29_text/
+|   |   |-- metadata.toml
+|   |   |-- defaults.toml
+|   |   |-- data_quality.toml
+|   |   |-- mappings.toml
+|   |   |-- instruments.toml
+|   |   |-- reporting_rounding.toml
+|   |   |-- plots.toml
 |   |-- lhv.csv
 |   |-- rules_consumo.csv
 |-- raw/
 |-- out/
 |-- out_validation/
+|-- pipeline29_config_backend.py
+|-- pipeline29_config_gui.py
 |-- nanum_pipeline_29.py
 |-- nanum_pipeline_28.py
 |-- standalone_kibox_cycle_viewer_fast.py
@@ -69,6 +82,7 @@ powershell -ExecutionPolicy Bypass -File .\setup_env.ps1 -WithGui -PythonExe "C:
 & ".\.venv\Scripts\python.exe" .\nanum_pipeline_29.py
 ```
 `nanum_pipeline_28.py` fica preservado como rollback do snapshot de 2026-03-13.
+Por padrao, o `pipeline29` usa `config/pipeline29_text/` e so cai para o Excel se voce pedir `--config-source excel`.
 2. Em toda execucao, o pipeline abre um popup Windows para selecionar:
    - `RAW_INPUT_DIR`
    - `OUT_DIR`
@@ -79,6 +93,27 @@ powershell -ExecutionPolicy Bypass -File .\setup_env.ps1 -WithGui -PythonExe "C:
 6. O restante do `config/config_incertezas_rev3.xlsx` continua sendo lido normalmente.
 7. Apenas `RAW_INPUT_DIR` e `OUT_DIR` sao sincronizados de volta na aba `Defaults`; o resto da planilha nao e alterado.
 8. Para rodar sem popup, use `PIPELINE29_USE_DEFAULT_RUNTIME_DIRS=1` antes de chamar o script. O `pipeline29` tambem aceita a variavel legada `PIPELINE28_USE_DEFAULT_RUNTIME_DIRS=1`.
+
+## Como editar a nova configuracao textual
+Abrir a GUI:
+```powershell
+& ".\.venv\Scripts\python.exe" .\pipeline29_config_gui.py
+```
+
+Abrir a GUI a partir do proprio pipeline:
+```powershell
+& ".\.venv\Scripts\python.exe" .\nanum_pipeline_29.py --config-gui
+```
+
+Regerar os TOMLs a partir da `rev3`:
+```powershell
+& ".\.venv\Scripts\python.exe" .\nanum_pipeline_29.py --rebuild-text-config --config-source text
+```
+
+Observacoes:
+- a GUI salva/carrega presets em JSON fora do repo, em `%LOCALAPPDATA%\nanum_pipeline_29\presets\`;
+- o ultimo estado da GUI fica em `%LOCALAPPDATA%\nanum_pipeline_29\config_gui_state.json`;
+- cada plot agora pode explicitar `show_uncertainty = auto | on | off` em `config/pipeline29_text/plots.toml`.
 
 ## Como rodar os utilitarios KIBOX
 Viewer rapido Qt:
