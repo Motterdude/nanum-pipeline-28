@@ -381,6 +381,16 @@ def _format_preview_axis_summary(
     if preview_max <= preview_min:
         preview_max = preview_min + preview_step
 
+    manual_min = str(current_y_min or "").strip().lower() not in {"", "auto", "nan", "none", "off", "n/a", "na"}
+    manual_max = str(current_y_max or "").strip().lower() not in {"", "auto", "nan", "none", "off", "n/a", "na"}
+    manual_step = str(current_y_step or "").strip().lower() not in {"", "auto", "nan", "none", "off", "n/a", "na"}
+    if manual_min or manual_max or manual_step:
+        return (
+            "Preview using current helper inputs: "
+            f"y_min[{preview_min:g}] y_max[{preview_max:g}] y_step[{preview_step:g}]. "
+            "These are the values that will be written if you save this plot."
+        )
+
     return (
         "Y axis autoscale is active by default. "
         f"Preview auto: y_min[{preview_min:g}] y_max[{preview_max:g}] y_step[{preview_step:g}]. "
@@ -878,7 +888,7 @@ class ConfigRowDialog(QDialog):
             suggested_value = "" if axis_suggestion is None else str(axis_suggestion.get(field_name, "")).strip()
             widget.setPlaceholderText(f"[{suggested_value}]" if suggested_value else "")
             current_value = widget.text().strip()
-            if force_if_empty or not current_value or current_value == self._last_auto_y_axis.get(field_name, ""):
+            if force_if_empty and (not current_value or current_value == self._last_auto_y_axis.get(field_name, "")):
                 widget.setText(PLOT_Y_AUTOSCALE_TOKEN)
                 self._last_auto_y_axis[field_name] = PLOT_Y_AUTOSCALE_TOKEN
 

@@ -811,6 +811,21 @@ def _parse_axis_spec(
     return (float(a), float(b), float(c))
 
 
+def _parse_axis_limits(
+    min_v: object,
+    max_v: object,
+    *,
+    target_unit: Optional[str] = None,
+) -> Optional[Tuple[float, float]]:
+    a = _parse_axis_value(min_v, target_unit=target_unit, default=np.nan)
+    b = _parse_axis_value(max_v, target_unit=target_unit, default=np.nan)
+    if not (np.isfinite(a) and np.isfinite(b)):
+        return None
+    if float(b) <= float(a):
+        return None
+    return (float(a), float(b))
+
+
 # =========================
 # Reporting rounding helpers (rev2 sheet Reporting_Rounding)
 # =========================
@@ -5517,6 +5532,7 @@ def plot_all_fuels(
     filename: str,
     y_label: str,
     fixed_y: Optional[Tuple[float, float, float]] = None,
+    fixed_y_limits: Optional[Tuple[float, float]] = None,
     y_tick_step: Optional[float] = None,
     fixed_x: Optional[Tuple[float, float, float]] = None,
     x_col: str = "Load_kW",
@@ -5587,6 +5603,9 @@ def plot_all_fuels(
             plt.yticks(ticks)
         except Exception:
             pass
+    elif fixed_y_limits is not None:
+        ymin, ymax = fixed_y_limits
+        plt.ylim(ymin, ymax)
 
     ax = plt.gca()
     guide_entries = _add_y_tolerance_guides(ax, y_tol_plus=y_tol_plus, y_tol_minus=y_tol_minus)
@@ -5617,6 +5636,7 @@ def plot_all_fuels_xy(
     x_label: str,
     y_label: str,
     fixed_y: Optional[Tuple[float, float, float]] = None,
+    fixed_y_limits: Optional[Tuple[float, float]] = None,
     y_tick_step: Optional[float] = None,
     fixed_x: Optional[Tuple[float, float, float]] = None,
     fuels_override: Optional[List[int]] = None,
@@ -5684,6 +5704,9 @@ def plot_all_fuels_xy(
             plt.yticks(ticks)
         except Exception:
             pass
+    elif fixed_y_limits is not None:
+        ymin, ymax = fixed_y_limits
+        plt.ylim(ymin, ymax)
 
     ax = plt.gca()
     guide_entries = _add_y_tolerance_guides(ax, y_tol_plus=y_tol_plus, y_tol_minus=y_tol_minus)
@@ -5734,6 +5757,7 @@ def plot_all_fuels_with_value_labels(
     y_label: str,
     label_variant: str = "box",
     fixed_y: Optional[Tuple[float, float, float]] = None,
+    fixed_y_limits: Optional[Tuple[float, float]] = None,
     y_tick_step: Optional[float] = None,
     fixed_x: Optional[Tuple[float, float, float]] = None,
     x_col: str = "Load_kW",
@@ -5796,6 +5820,9 @@ def plot_all_fuels_with_value_labels(
             ax.set_yticks(ticks)
         except Exception:
             pass
+    elif fixed_y_limits is not None:
+        ymin, ymax = fixed_y_limits
+        ax.set_ylim(ymin, ymax)
 
     guide_entries = _add_y_tolerance_guides(ax, y_tol_plus=y_tol_plus, y_tol_minus=y_tol_minus)
     if fixed_y is None:
@@ -6329,6 +6356,11 @@ def make_plots_from_config(
             r.get("y_step", pd.NA),
             target_unit=y_axis_unit,
         )
+        fixed_y_limits = _parse_axis_limits(
+            r.get("y_min", pd.NA),
+            r.get("y_max", pd.NA),
+            target_unit=y_axis_unit,
+        )
         y_tick_step = _parse_axis_value(r.get("y_step", pd.NA), target_unit=y_axis_unit, default=np.nan)
         if not np.isfinite(y_tick_step) or y_tick_step <= 0:
             y_tick_step = None
@@ -6380,13 +6412,14 @@ def make_plots_from_config(
                     out_df,
                     y_col=yc,
                     yerr_col=None,
-                    title=tt,
-                    filename=fn,
-                    y_label=ylab,
-                    fixed_y=fixed_y,
-                    y_tick_step=y_tick_step,
-                    fixed_x=fixed_x,
-                    x_col=x_col,
+                title=tt,
+                filename=fn,
+                y_label=ylab,
+                fixed_y=fixed_y,
+                fixed_y_limits=fixed_y_limits,
+                y_tick_step=y_tick_step,
+                fixed_x=fixed_x,
+                x_col=x_col,
                     x_label=xlab,
                     fuels_override=fuels_override,
                     series_col=series_col,
@@ -6444,6 +6477,7 @@ def make_plots_from_config(
                 filename=filename,
                 y_label=y_label,
                 fixed_y=fixed_y,
+                fixed_y_limits=fixed_y_limits,
                 y_tick_step=y_tick_step,
                 fixed_x=fixed_x,
                 x_col=x_col,
@@ -6504,6 +6538,7 @@ def make_plots_from_config(
                 x_label=x_label,
                 y_label=y_label,
                 fixed_y=fixed_y,
+                fixed_y_limits=fixed_y_limits,
                 y_tick_step=y_tick_step,
                 fixed_x=fixed_x,
                 fuels_override=fuels_override,
@@ -6551,6 +6586,7 @@ def make_plots_from_config(
                 y_label=y_label,
                 label_variant=label_variant,
                 fixed_y=fixed_y,
+                fixed_y_limits=fixed_y_limits,
                 y_tick_step=y_tick_step,
                 fixed_x=fixed_x,
                 x_col=x_col,
