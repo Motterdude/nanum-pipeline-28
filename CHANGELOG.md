@@ -52,6 +52,8 @@ Todas as mudancas relevantes deste repositorio devem ser registradas aqui.
   - `Save As` para gravar em outro diretorio de config;
   - `Variable source` separado para montar catalogo de variaveis via arquivo `.xlsx/.csv`;
   - seletor pesquisavel com wildcard para colunas de `Mappings` (`col_mean`, `col_sd`) e `Plots` (`x_col`, `y_col`, `yerr_col`).
+  - helper vertical de `Add row` para `Mappings`, `Instruments` e `Plots`;
+  - dropdown editavel de `Instruments.key` alimentado dinamicamente pelas `keys` atuais de `Mappings`, mesmo antes de salvar.
 - O dispatcher de plots do `pipeline29` ganhou a chave `show_uncertainty` por plot:
   - `auto`
   - `on`

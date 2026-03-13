@@ -107,6 +107,8 @@ Arquivos de referencia:
   - `Save As` passou a gravar em outro diretorio de config;
   - o editor ganhou `Variable source` dedicado para montar catalogo de colunas a partir de `.xlsx/.csv`;
   - colunas de variavel em `Mappings` e `Plots` agora podem ser preenchidas via seletor pesquisavel com wildcard, acionado por duplo clique.
+  - `Add row` de `Mappings`, `Instruments` e `Plots` passou a abrir helper vertical em dialog separado;
+  - o helper de `Instruments` recebeu dropdown editavel de `key`, alimentado pelas `keys` atuais do `Mappings` ainda nao salvas.
 - Fluxo de execucao refinado no `nanum_pipeline_29.py`:
   - no run normal, pergunta se a GUI deve ser aberta antes do processamento;
   - para automacao, pode pular essa pergunta com:

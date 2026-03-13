@@ -11,9 +11,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QHeaderView,
     QHBoxLayout,
     QInputDialog,
@@ -24,6 +26,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QStatusBar,
     QTabWidget,
     QTableWidget,
@@ -56,6 +59,55 @@ from pipeline29_config_backend import (
 SEARCHABLE_COLUMNS_BY_SECTION: Dict[str, set[str]] = {
     "Mappings": {"col_mean", "col_sd"},
     "Plots": {"x_col", "y_col", "yerr_col"},
+}
+
+DEFAULT_FIELD_SPECS_BY_SECTION: Dict[str, List[Dict[str, Any]]] = {
+    "Mappings": [
+        {"name": "key", "kind": "text"},
+        {"name": "col_mean", "kind": "variable"},
+        {"name": "col_sd", "kind": "variable"},
+        {"name": "unit", "kind": "text"},
+        {"name": "notes", "kind": "text"},
+    ],
+    "Instruments": [
+        {"name": "key", "kind": "mapping_key_combo"},
+        {"name": "component", "kind": "text"},
+        {"name": "dist", "kind": "combo", "options": ["rect", "normal", "triangular"]},
+        {"name": "range_min", "kind": "text"},
+        {"name": "range_max", "kind": "text"},
+        {"name": "acc_abs", "kind": "text"},
+        {"name": "acc_pct", "kind": "text"},
+        {"name": "digits", "kind": "text"},
+        {"name": "lsd", "kind": "text"},
+        {"name": "resolution", "kind": "text"},
+        {"name": "source", "kind": "text"},
+        {"name": "notes", "kind": "text"},
+        {"name": "setting_param", "kind": "text"},
+        {"name": "setting_value", "kind": "text"},
+    ],
+    "Plots": [
+        {"name": "enabled", "kind": "combo", "options": ["1", "0"]},
+        {"name": "plot_type", "kind": "combo", "options": ["all_fuels_yx", "all_fuels_xy", "all_fuels_labels", "kibox_all"]},
+        {"name": "filename", "kind": "text"},
+        {"name": "title", "kind": "text"},
+        {"name": "x_col", "kind": "variable"},
+        {"name": "y_col", "kind": "variable"},
+        {"name": "yerr_col", "kind": "variable"},
+        {"name": "show_uncertainty", "kind": "combo", "options": ["auto", "on", "off"]},
+        {"name": "x_label", "kind": "text"},
+        {"name": "y_label", "kind": "text"},
+        {"name": "x_min", "kind": "text"},
+        {"name": "x_max", "kind": "text"},
+        {"name": "x_step", "kind": "text"},
+        {"name": "y_min", "kind": "text"},
+        {"name": "y_max", "kind": "text"},
+        {"name": "y_step", "kind": "text"},
+        {"name": "y_tol_plus", "kind": "text"},
+        {"name": "y_tol_minus", "kind": "text"},
+        {"name": "filter_h2o_list", "kind": "text"},
+        {"name": "label_variant", "kind": "combo", "options": ["box", "inline", "none"]},
+        {"name": "notes", "kind": "text"},
+    ],
 }
 
 
@@ -169,6 +221,135 @@ class VariableSelectorDialog(QDialog):
         QMessageBox.warning(self, "Pipeline 29", "Select one variable or type a value.")
 
 
+class ConfigRowDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        section_title: str,
+        field_specs: List[Dict[str, Any]],
+        initial_values: Optional[Dict[str, Any]] = None,
+        variable_catalog_provider: Optional[Callable[[], List[str]]] = None,
+        mapping_key_provider: Optional[Callable[[], List[str]]] = None,
+        status_callback: Optional[Callable[[str], None]] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.section_title = section_title
+        self.field_specs = field_specs
+        self.initial_values = initial_values or {}
+        self.variable_catalog_provider = variable_catalog_provider
+        self.mapping_key_provider = mapping_key_provider
+        self.status_callback = status_callback
+        self.widgets: Dict[str, Any] = {}
+
+        self.setWindowTitle(f"{section_title} helper")
+        self.resize(820, 760 if section_title == "Plots" else 640)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(10)
+
+        root.addWidget(QLabel(f"Configure a new row for {section_title}"))
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        root.addWidget(scroll, 1)
+
+        content = QWidget(self)
+        scroll.setWidget(content)
+        form = QFormLayout(content)
+        form.setContentsMargins(8, 8, 8, 8)
+        form.setSpacing(10)
+
+        for spec in field_specs:
+            field_name = spec["name"]
+            label = QLabel(field_name)
+            editor = self._build_editor(spec, self.initial_values.get(field_name, ""))
+            form.addRow(label, editor)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def _build_editor(self, spec: Dict[str, Any], value: Any) -> QWidget:
+        kind = str(spec.get("kind", "text"))
+        field_name = str(spec.get("name", ""))
+        value_text = "" if value is None else str(value)
+
+        if kind == "combo":
+            combo = QComboBox(self)
+            combo.setEditable(True)
+            options = [str(option) for option in spec.get("options", [])]
+            if value_text and value_text not in options:
+                options = options + [value_text]
+            combo.addItems(options)
+            combo.setCurrentText(value_text)
+            self.widgets[field_name] = combo
+            return combo
+
+        if kind == "mapping_key_combo":
+            combo = QComboBox(self)
+            combo.setEditable(True)
+            options = self.mapping_key_provider() if self.mapping_key_provider is not None else []
+            options = [str(option) for option in options if str(option).strip()]
+            options = sorted(dict.fromkeys(options), key=str.lower)
+            if value_text and value_text not in options:
+                options.append(value_text)
+            combo.addItems(options)
+            combo.setCurrentText(value_text)
+            self.widgets[field_name] = combo
+            return combo
+
+        if kind == "variable":
+            container = QWidget(self)
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(6)
+            line_edit = QLineEdit(value_text, container)
+            pick_button = QPushButton("Pick", container)
+            pick_button.clicked.connect(lambda _checked=False, target=line_edit, field=field_name: self._pick_variable(field, target))
+            layout.addWidget(line_edit, 1)
+            layout.addWidget(pick_button)
+            self.widgets[field_name] = line_edit
+            return container
+
+        line_edit = QLineEdit(value_text, self)
+        self.widgets[field_name] = line_edit
+        return line_edit
+
+    def _pick_variable(self, field_name: str, target: QLineEdit) -> None:
+        variable_names = self.variable_catalog_provider() if self.variable_catalog_provider is not None else []
+        if not variable_names:
+            if self.status_callback is not None:
+                self.status_callback("No variable catalog loaded. Choose a source file first.")
+            QMessageBox.warning(
+                self,
+                "Pipeline 29",
+                "No variable catalog loaded.\nChoose a variable source file first.",
+            )
+            return
+        dialog = VariableSelectorDialog(
+            title=f"{self.section_title} - select {field_name}",
+            variable_names=variable_names,
+            current_value=target.text().strip(),
+            parent=self,
+        )
+        if dialog.exec() == QDialog.Accepted:
+            target.setText(dialog.selected_value)
+
+    def values(self) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for field_name, widget in self.widgets.items():
+            if isinstance(widget, QComboBox):
+                out[field_name] = widget.currentText().strip()
+            elif isinstance(widget, QLineEdit):
+                out[field_name] = widget.text().strip()
+            else:
+                out[field_name] = ""
+        return out
+
+
 class EditableTableSection(QWidget):
     def __init__(
         self,
@@ -177,7 +358,9 @@ class EditableTableSection(QWidget):
         *,
         searchable_columns: Optional[set[str]] = None,
         variable_catalog_provider: Optional[Callable[[], List[str]]] = None,
+        mapping_key_provider: Optional[Callable[[], List[str]]] = None,
         status_callback: Optional[Callable[[str], None]] = None,
+        add_row_dialog_factory: Optional[Callable[[Optional[Dict[str, Any]]], Optional[Dict[str, str]]]] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -185,7 +368,9 @@ class EditableTableSection(QWidget):
         self.columns = columns
         self.searchable_columns = searchable_columns or set()
         self.variable_catalog_provider = variable_catalog_provider
+        self.mapping_key_provider = mapping_key_provider
         self.status_callback = status_callback
+        self.add_row_dialog_factory = add_row_dialog_factory
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -216,12 +401,12 @@ class EditableTableSection(QWidget):
         header.setStretchLastSection(True)
         layout.addWidget(self.table, 1)
 
-        self.btn_add.clicked.connect(lambda: self.add_row())
+        self.btn_add.clicked.connect(self._prompt_add_row)
         self.btn_duplicate.clicked.connect(self.duplicate_selected_rows)
         self.btn_remove.clicked.connect(self.remove_selected_rows)
         self.table.cellDoubleClicked.connect(self._handle_cell_double_click)
 
-    def add_row(self, values: Optional[Dict[str, Any]] = None) -> None:
+    def _insert_row(self, values: Optional[Dict[str, Any]] = None) -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
         values = values or {}
@@ -229,10 +414,18 @@ class EditableTableSection(QWidget):
             text = "" if values.get(column) is None else str(values.get(column))
             self.table.setItem(row, col_idx, QTableWidgetItem(text))
 
+    def _prompt_add_row(self) -> None:
+        values: Optional[Dict[str, Any]] = None
+        if self.add_row_dialog_factory is not None:
+            values = self.add_row_dialog_factory(None)
+            if values is None:
+                return
+        self._insert_row(values)
+
     def load_records(self, records: List[Dict[str, Any]]) -> None:
         self.table.setRowCount(0)
         for record in records:
-            self.add_row(record)
+            self._insert_row(record)
 
     def remove_selected_rows(self) -> None:
         rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
@@ -242,7 +435,7 @@ class EditableTableSection(QWidget):
     def duplicate_selected_rows(self) -> None:
         rows = sorted({item.row() for item in self.table.selectedItems()})
         for row in rows:
-            self.add_row(self.record_at(row))
+            self._insert_row(self.record_at(row))
 
     def record_at(self, row: int) -> Dict[str, str]:
         out: Dict[str, str] = {}
@@ -381,8 +574,15 @@ class Pipeline29ConfigEditor(QMainWindow):
             searchable_columns=SEARCHABLE_COLUMNS_BY_SECTION.get("Mappings", set()),
             variable_catalog_provider=self._available_variable_catalog,
             status_callback=self._show_status,
+            add_row_dialog_factory=lambda initial=None: self._open_row_helper("Mappings", DEFAULT_MAPPING_COLUMNS, initial),
         )
-        self.instruments_table = EditableTableSection("Instruments", DEFAULT_INSTRUMENT_COLUMNS, status_callback=self._show_status)
+        self.instruments_table = EditableTableSection(
+            "Instruments",
+            DEFAULT_INSTRUMENT_COLUMNS,
+            mapping_key_provider=self._current_mapping_keys,
+            status_callback=self._show_status,
+            add_row_dialog_factory=lambda initial=None: self._open_row_helper("Instruments", DEFAULT_INSTRUMENT_COLUMNS, initial),
+        )
         self.reporting_table = EditableTableSection("Reporting_Rounding", DEFAULT_REPORTING_COLUMNS, status_callback=self._show_status)
         self.plots_table = EditableTableSection(
             "Plots",
@@ -390,6 +590,7 @@ class Pipeline29ConfigEditor(QMainWindow):
             searchable_columns=SEARCHABLE_COLUMNS_BY_SECTION.get("Plots", set()),
             variable_catalog_provider=self._available_variable_catalog,
             status_callback=self._show_status,
+            add_row_dialog_factory=lambda initial=None: self._open_row_helper("Plots", DEFAULT_PLOT_COLUMNS, initial),
         )
 
         self.tabs.addTab(self.defaults_table, "Defaults")
@@ -524,6 +725,40 @@ class Pipeline29ConfigEditor(QMainWindow):
                     if text:
                         names.add(text)
         return sorted(names, key=str.lower)
+
+    def _current_mapping_keys(self) -> List[str]:
+        keys: List[str] = []
+        for record in self.mappings_table.records():
+            key = str(record.get("key", "")).strip()
+            if key:
+                keys.append(key)
+        return sorted(dict.fromkeys(keys), key=str.lower)
+
+    def _open_row_helper(
+        self,
+        section_title: str,
+        columns: List[str],
+        initial_values: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, str]]:
+        field_specs = DEFAULT_FIELD_SPECS_BY_SECTION.get(
+            section_title,
+            [{"name": column, "kind": "text"} for column in columns],
+        )
+        dialog = ConfigRowDialog(
+            section_title=section_title,
+            field_specs=field_specs,
+            initial_values=initial_values,
+            variable_catalog_provider=self._available_variable_catalog,
+            mapping_key_provider=self._current_mapping_keys,
+            status_callback=self._show_status,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        values = dialog.values()
+        for column in columns:
+            values.setdefault(column, "")
+        return values
 
     def _bundle_from_ui(self) -> Tuple[Pipeline29ConfigBundle, List[str]]:
         errors: List[str] = []

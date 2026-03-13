@@ -117,6 +117,8 @@ Observacoes:
 - a GUI agora tem `Save` e `Save As` separados para a config textual;
 - a GUI tem um `Variable source` proprio para gerar catalogo de variaveis e alimentar os seletores de `Mappings` e `Plots`;
 - os campos de variavel em `Mappings` e `Plots` aceitam selecao por picker pesquisavel com wildcard ao dar duplo clique na celula;
+- `Add row` em `Mappings`, `Instruments` e `Plots` abre helper vertical dedicado;
+- o helper de `Instruments` usa dropdown editavel de `key` baseado nas chaves atuais de `Mappings`, inclusive sem salvar;
 - cada plot agora pode explicitar `show_uncertainty = auto | on | off` em `config/pipeline29_text/plots.toml`.
 
 ## Como rodar os utilitarios KIBOX
