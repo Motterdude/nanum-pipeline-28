@@ -143,9 +143,16 @@ def _safe_name(text: str) -> str:
     return slug or "plot"
 
 
+def _strip_leading_raw_token(text: str) -> str:
+    raw = str(text or "").strip()
+    if raw.lower().startswith("raw_"):
+        return raw[4:]
+    return raw
+
+
 def _default_plot_filename(x_col: str, y_col: str) -> str:
-    x_name = _safe_name(x_col)
-    y_name = _safe_name(y_col)
+    x_name = _safe_name(_strip_leading_raw_token(x_col))
+    y_name = _safe_name(_strip_leading_raw_token(y_col))
     if not y_name:
         return ""
     if not x_name:
@@ -154,8 +161,8 @@ def _default_plot_filename(x_col: str, y_col: str) -> str:
 
 
 def _default_plot_title(x_col: str, y_col: str) -> str:
-    x_text = str(x_col or "").strip()
-    y_text = str(y_col or "").strip()
+    x_text = _strip_leading_raw_token(x_col)
+    y_text = _strip_leading_raw_token(y_col)
     if not x_text or not y_text:
         return ""
     return f"{y_text} vs {x_text} (all fuels)"
@@ -312,7 +319,11 @@ def _build_axis_suggestion(df: pd.DataFrame, column: str) -> Optional[Dict[str, 
         "y_min": f"{suggested_min:g}",
         "y_max": f"{suggested_max:g}",
         "y_step": f"{step:g}",
-        "summary": f"Suggested fixed Y axis: min={suggested_min:g}, max={suggested_max:g}, step={step:g}.",
+        "summary": (
+            f"Preview auto: y_min[{suggested_min:g}] "
+            f"y_max[{suggested_max:g}] "
+            f"y_step[{step:g}]"
+        ),
     }
 
 
@@ -414,6 +425,17 @@ def _build_source_catalog_from_records(records: List[Dict[str, str]]) -> Dict[st
             catalog[source] = " ".join(parts)
 
     return catalog
+
+
+def _sanitize_plot_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(record or {})
+    filename = str(out.get("filename", "")).strip()
+    if filename:
+        out["filename"] = _strip_leading_raw_token(filename)
+    title = str(out.get("title", "")).strip()
+    if title:
+        out["title"] = _strip_leading_raw_token(title)
+    return out
 
 
 class VariableSelectorDialog(QDialog):
@@ -680,7 +702,9 @@ class ConfigRowDialog(QDialog):
             label.setWordWrap(True)
             return label
         if self.section_title == "Plots" and field_name == "y_step":
-            label = QLabel("Y axis defaults to autoscale. The helper keeps y_min, y_max and y_step as 'auto' and updates the suggested fixed range live.")
+            label = QLabel(
+                "Y axis defaults to autoscale. The helper keeps y_min, y_max and y_step as 'auto' and shows a live preview like y_min[value] y_max[value] y_step[value]."
+            )
             label.setWordWrap(True)
             self.info_labels["plot_y_axis"] = label
             return label
@@ -773,11 +797,11 @@ class ConfigRowDialog(QDialog):
         if label is not None:
             if axis_suggestion is None:
                 label.setText(
-                    "Y axis defaults to autoscale. The helper keeps y_min, y_max and y_step as 'auto' and updates the suggested fixed range live."
+                    "Y axis defaults to autoscale. The helper keeps y_min, y_max and y_step as 'auto' and shows a live preview like y_min[value] y_max[value] y_step[value]."
                 )
             else:
                 label.setText(
-                    f"Y axis autoscale is active by default. {axis_suggestion.get('summary', '').strip()} Leave the fields as 'auto' if you want autoscale."
+                    f"Y axis autoscale is active by default. {axis_suggestion.get('summary', '').strip()}. Leave the fields as 'auto' if you want autoscale."
                 )
 
         for field_name in PLOT_Y_AUTOSCALE_FIELDS:
@@ -785,7 +809,7 @@ class ConfigRowDialog(QDialog):
             if not isinstance(widget, QLineEdit):
                 continue
             suggested_value = "" if axis_suggestion is None else str(axis_suggestion.get(field_name, "")).strip()
-            widget.setPlaceholderText(suggested_value)
+            widget.setPlaceholderText(f"[{suggested_value}]" if suggested_value else "")
             current_value = widget.text().strip()
             if force_if_empty or not current_value or current_value == self._last_auto_y_axis.get(field_name, ""):
                 widget.setText(PLOT_Y_AUTOSCALE_TOKEN)
@@ -842,6 +866,8 @@ class ConfigRowDialog(QDialog):
                     out[field] = "0"
             if not out.get("source", "").strip():
                 out["source"] = INSTRUMENT_SOURCE_DEFAULT
+        if self.section_title == "Plots":
+            out = _sanitize_plot_record(out)
         return out
 
 
@@ -1229,7 +1255,7 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.mappings_table.load_records(mappings_records)
         self.instruments_table.load_records(bundle.instruments_df.to_dict(orient="records"))
         self.reporting_table.load_records(bundle.reporting_df.to_dict(orient="records"))
-        self.plots_table.load_records(bundle.plots_df.to_dict(orient="records"))
+        self.plots_table.load_records([_sanitize_plot_record(record) for record in bundle.plots_df.to_dict(orient="records")])
 
     def _available_variable_catalog(self) -> List[str]:
         names = {name for name in self.variable_catalog if str(name).strip()}
@@ -1393,7 +1419,10 @@ class Pipeline29ConfigEditor(QMainWindow):
             mappings=mappings,
             instruments_df=pd.DataFrame(self.instruments_table.records(), columns=DEFAULT_INSTRUMENT_COLUMNS),
             reporting_df=pd.DataFrame(self.reporting_table.records(), columns=DEFAULT_REPORTING_COLUMNS),
-            plots_df=pd.DataFrame(self.plots_table.records(), columns=DEFAULT_PLOT_COLUMNS),
+            plots_df=pd.DataFrame(
+                [_sanitize_plot_record(record) for record in self.plots_table.records()],
+                columns=DEFAULT_PLOT_COLUMNS,
+            ),
             data_quality_cfg=data_quality_cfg,
             defaults_cfg=defaults_cfg,
             source_kind="text",

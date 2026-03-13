@@ -6084,8 +6084,15 @@ def _resolve_plot_yerr_col(
     return None
 
 
+def _strip_leading_raw_plot_name(value: object) -> str:
+    text = _to_str_or_empty(value)
+    if text.lower().startswith("raw_"):
+        return text[4:]
+    return text
+
+
 def _derive_filename_for_expansion(template: str, y_col: str) -> str:
-    t = (template or "").strip()
+    t = _strip_leading_raw_plot_name(template)
     if not t:
         return f"kibox_{_safe_name(y_col)}_vs_power_all.png"
     if "{y}" in t:
@@ -6097,7 +6104,7 @@ def _derive_filename_for_expansion(template: str, y_col: str) -> str:
 
 
 def _derive_title_for_expansion(template: str, x_col: str, y_col: str) -> str:
-    t = (template or "").strip()
+    t = _strip_leading_raw_plot_name(template)
     if not t:
         return f"{y_col} vs {x_col} (all fuels)"
     if "{y}" in t or "{x}" in t:
@@ -6168,8 +6175,8 @@ def make_plots_from_config(
             continue
 
         plot_type = _to_str_or_empty(r.get("plot_type", ""))
-        filename = _to_str_or_empty(r.get("filename", ""))
-        title = _to_str_or_empty(r.get("title", ""))
+        filename = _strip_leading_raw_plot_name(r.get("filename", ""))
+        title = _strip_leading_raw_plot_name(r.get("title", ""))
 
         if not plot_type:
             print("[ERROR] Plots row invÃ¡lida: plot_type vazio. Pulei.")
