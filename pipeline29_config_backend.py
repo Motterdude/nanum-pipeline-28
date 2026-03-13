@@ -4,6 +4,7 @@ import json
 import math
 import os
 import tomllib
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -133,6 +134,12 @@ def _norm_text(value: Any) -> str:
     return str(value).replace("\ufeff", "").strip()
 
 
+def _norm_key(value: Any) -> str:
+    text = _norm_text(value).lower()
+    text = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in text if not unicodedata.combining(ch))
+
+
 def _to_builtin_scalar(value: Any) -> Any:
     if _is_blank(value):
         return None
@@ -205,7 +212,8 @@ def _normalize_bundle_shapes(bundle: Pipeline29ConfigBundle) -> Pipeline29Config
 
 def validate_bundle(bundle: Pipeline29ConfigBundle) -> List[str]:
     errors: List[str] = []
-    missing_keys = REQUIRED_MAPPING_KEYS - set(bundle.mappings.keys())
+    mapping_keys_norm = {_norm_key(key) for key in bundle.mappings.keys()}
+    missing_keys = REQUIRED_MAPPING_KEYS - mapping_keys_norm
     if missing_keys:
         errors.append(f"Mappings sem chaves obrigatorias: {sorted(missing_keys)}")
     for column in DEFAULT_INSTRUMENT_COLUMNS:

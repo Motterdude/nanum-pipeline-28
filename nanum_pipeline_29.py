@@ -1705,6 +1705,50 @@ def _choose_config_path() -> Path:
     raise FileNotFoundError(f"Nao encontrei {p.name} em {CFG_DIR.resolve()}")
 
 
+def _prepare_config_bundle_for_pipeline(bundle: Pipeline29ConfigBundle) -> Pipeline29ConfigBundle:
+    mappings_prepared: Dict[str, Dict[str, str]] = {}
+    for key, spec in (bundle.mappings or {}).items():
+        key_norm = norm_key(key)
+        if not key_norm:
+            continue
+        mappings_prepared[key_norm] = {
+            "mean": _to_str_or_empty((spec or {}).get("mean", "")),
+            "sd": _to_str_or_empty((spec or {}).get("sd", "")),
+            "unit": _to_str_or_empty((spec or {}).get("unit", "")),
+            "notes": _to_str_or_empty((spec or {}).get("notes", "")),
+        }
+
+    defaults_prepared = {
+        norm_key(key): _to_str_or_empty(value)
+        for key, value in (bundle.defaults_cfg or {}).items()
+        if norm_key(key)
+    }
+
+    instruments_df = bundle.instruments_df.copy() if bundle.instruments_df is not None else pd.DataFrame()
+    if "key" not in instruments_df.columns:
+        instruments_df["key"] = pd.NA
+    instruments_df["key_norm"] = instruments_df["key"].map(norm_key)
+
+    reporting_df = bundle.reporting_df.copy() if bundle.reporting_df is not None else pd.DataFrame()
+    if "key" not in reporting_df.columns:
+        reporting_df["key"] = pd.NA
+    reporting_df["key_norm"] = reporting_df["key"].map(norm_key)
+
+    plots_df = bundle.plots_df.copy() if bundle.plots_df is not None else pd.DataFrame()
+
+    return Pipeline29ConfigBundle(
+        mappings=mappings_prepared,
+        instruments_df=instruments_df,
+        reporting_df=reporting_df,
+        plots_df=plots_df,
+        data_quality_cfg=dict(bundle.data_quality_cfg or {}),
+        defaults_cfg=defaults_prepared,
+        source_kind=bundle.source_kind,
+        source_path=bundle.source_path,
+        text_dir=bundle.text_dir,
+    )
+
+
 def load_pipeline29_config_bundle(
     *,
     config_source: str = "auto",
@@ -1727,13 +1771,13 @@ def load_pipeline29_config_bundle(
             bundle.text_dir = text_dir
             bundle.source_kind = "text"
             bundle.source_path = text_dir
-            return bundle
+            return _prepare_config_bundle_for_pipeline(bundle)
         if source_mode == "text":
             raise FileNotFoundError(f"Nao encontrei config textual completa em {text_dir}")
 
     excel_path = _choose_config_path()
     mappings, instruments_df, reporting_df, plots_df, data_quality_cfg, defaults_cfg = load_config_excel(excel_path)
-    return Pipeline29ConfigBundle(
+    return _prepare_config_bundle_for_pipeline(Pipeline29ConfigBundle(
         mappings=mappings,
         instruments_df=instruments_df,
         reporting_df=reporting_df,
@@ -1743,7 +1787,7 @@ def load_pipeline29_config_bundle(
         source_kind="excel",
         source_path=excel_path,
         text_dir=text_dir if text_config_exists(text_dir) else None,
-    )
+    ))
 
 
 def _try_read_sheet(xlsx_path: Path, sheet: str) -> Optional[pd.DataFrame]:
