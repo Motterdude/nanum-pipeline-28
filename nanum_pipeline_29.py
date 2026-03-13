@@ -1089,6 +1089,32 @@ def find_b_etanol_col(df: pd.DataFrame) -> str:
     )
 
 
+def _sanitize_labview_invalid_pressure_sentinels(df: pd.DataFrame, *, basename: str = "") -> pd.DataFrame:
+    out = df.copy()
+    sentinel = -1000.0
+    hits: List[Tuple[str, int]] = []
+
+    for col in out.columns:
+        col_text = str(col).strip()
+        if not col_text.startswith("P_"):
+            continue
+
+        series = pd.to_numeric(out[col], errors="coerce")
+        bad_mask = series.eq(sentinel)
+        n_bad = int(bad_mask.sum())
+        if n_bad <= 0:
+            continue
+
+        out.loc[bad_mask, col] = pd.NA
+        hits.append((col_text, n_bad))
+
+    if hits:
+        label = basename or "<unknown>"
+        parts = ", ".join(f"{col}={count}" for col, count in hits)
+        print(f"[WARN] Sentinela invalido '-1000' removido em {label}: {parts}")
+    return out
+
+
 def _infer_load_series_from_signal(df: pd.DataFrame) -> Optional[pd.Series]:
     load_col = "Carga (kW)" if "Carga (kW)" in df.columns else _find_first_col_by_substrings(df, ["carga", "kw"])
     if not load_col:
@@ -1119,6 +1145,7 @@ def read_labview_xlsx(meta: FileMeta) -> pd.DataFrame:
 
     df.columns = _normalize_cols(list(df.columns))
     df = df.loc[:, ~pd.Series(df.columns).astype(str).str.startswith("Unnamed").values].copy()
+    df = _sanitize_labview_invalid_pressure_sentinels(df, basename=meta.basename)
 
     df = df.reset_index(drop=True)
     df["Index"] = range(len(df))
