@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from pipeline29_config_backend import (
+    DEFAULT_FUEL_PROPERTY_COLUMNS,
     DEFAULT_INSTRUMENT_COLUMNS,
     DEFAULT_MAPPING_COLUMNS,
     DEFAULT_PLOT_COLUMNS,
@@ -116,6 +117,18 @@ DEFAULT_FIELD_SPECS_BY_SECTION: Dict[str, List[Dict[str, Any]]] = {
         {"name": "y_tol_minus", "kind": "text"},
         {"name": "filter_h2o_list", "kind": "text"},
         {"name": "label_variant", "kind": "combo", "options": ["box", "inline", "none"]},
+        {"name": "notes", "kind": "text"},
+    ],
+    "Fuel Properties": [
+        {"name": "Fuel_Label", "kind": "text"},
+        {"name": "DIES_pct", "kind": "text"},
+        {"name": "BIOD_pct", "kind": "text"},
+        {"name": "EtOH_pct", "kind": "text"},
+        {"name": "H2O_pct", "kind": "text"},
+        {"name": "LHV_kJ_kg", "kind": "text"},
+        {"name": "Fuel_Density_kg_m3", "kind": "text"},
+        {"name": "Fuel_Cost_R_L", "kind": "text"},
+        {"name": "reference", "kind": "text"},
         {"name": "notes", "kind": "text"},
     ],
 }
@@ -631,6 +644,12 @@ class ConfigRowDialog(QDialog):
         root.addWidget(QLabel(f"Configure a new row for {section_title}"))
         if section_title == "Plots":
             root.addWidget(QLabel("X defaults: min=0, max=55, step=5. Y default: autoscale. Leave y_min / y_max / y_step blank to keep autoscale."))
+        if section_title == "Fuel Properties":
+            root.addWidget(
+                QLabel(
+                    "LHV_kJ_kg representa o PCI/LHV inferior em kJ/kg. Densidade e custo podem ficar em branco se voce quiser manter fallback no Defaults."
+                )
+            )
 
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
@@ -779,6 +798,10 @@ class ConfigRowDialog(QDialog):
             )
             label.setWordWrap(True)
             self.info_labels["plot_y_axis"] = label
+            return label
+        if self.section_title == "Fuel Properties" and field_name == "LHV_kJ_kg":
+            label = QLabel("Use o PCI/LHV inferior da mistura. Se quiser, mantenha a composicao e o Fuel_Label alinhados para facilitar o merge automatico.")
+            label.setWordWrap(True)
             return label
         return None
 
@@ -1237,6 +1260,17 @@ class Pipeline29ConfigEditor(QMainWindow):
             add_row_dialog_factory=lambda initial=None: self._open_row_helper("Instruments", DEFAULT_INSTRUMENT_COLUMNS, initial),
         )
         self.reporting_table = EditableTableSection("Reporting_Rounding", DEFAULT_REPORTING_COLUMNS, status_callback=self._show_status)
+        self.fuel_properties_table = EditableTableSection(
+            "Fuel Properties",
+            DEFAULT_FUEL_PROPERTY_COLUMNS,
+            auto_sort_column="Fuel_Label",
+            status_callback=self._show_status,
+            add_row_dialog_factory=lambda initial=None: self._open_row_helper(
+                "Fuel Properties",
+                DEFAULT_FUEL_PROPERTY_COLUMNS,
+                initial,
+            ),
+        )
         self.plots_table = EditableTableSection(
             "Plots",
             DEFAULT_PLOT_COLUMNS,
@@ -1252,6 +1286,7 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.tabs.addTab(self.mappings_table, "Mappings")
         self.tabs.addTab(self.instruments_table, "Instruments")
         self.tabs.addTab(self.reporting_table, "Reporting")
+        self.tabs.addTab(self.fuel_properties_table, "Fuel Properties")
         self.tabs.addTab(self.plots_table, "Plots")
 
         self.status = QStatusBar(self)
@@ -1339,6 +1374,7 @@ class Pipeline29ConfigEditor(QMainWindow):
             instruments_df=pd.DataFrame(columns=DEFAULT_INSTRUMENT_COLUMNS),
             reporting_df=pd.DataFrame(columns=DEFAULT_REPORTING_COLUMNS),
             plots_df=pd.DataFrame(columns=DEFAULT_PLOT_COLUMNS),
+            fuel_properties_df=pd.DataFrame(columns=DEFAULT_FUEL_PROPERTY_COLUMNS),
             data_quality_cfg={},
             defaults_cfg={},
             source_kind="text",
@@ -1366,6 +1402,7 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.mappings_table.load_records(mappings_records)
         self.instruments_table.load_records(bundle.instruments_df.to_dict(orient="records"))
         self.reporting_table.load_records(bundle.reporting_df.to_dict(orient="records"))
+        self.fuel_properties_table.load_records(bundle.fuel_properties_df.to_dict(orient="records"))
         self.plots_table.load_records([_sanitize_plot_record(record) for record in bundle.plots_df.to_dict(orient="records")])
 
     def _available_variable_catalog(self) -> List[str]:
@@ -1543,6 +1580,10 @@ class Pipeline29ConfigEditor(QMainWindow):
             plots_df=pd.DataFrame(
                 [_sanitize_plot_record(record) for record in self.plots_table.records()],
                 columns=DEFAULT_PLOT_COLUMNS,
+            ),
+            fuel_properties_df=pd.DataFrame(
+                self.fuel_properties_table.records(),
+                columns=DEFAULT_FUEL_PROPERTY_COLUMNS,
             ),
             data_quality_cfg=data_quality_cfg,
             defaults_cfg=defaults_cfg,

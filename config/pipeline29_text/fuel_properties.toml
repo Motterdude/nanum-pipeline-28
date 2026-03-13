@@ -1,0 +1,45 @@
+schema_version = 1
+
+[[fuel_properties]]
+"Fuel_Label" = "D85B15"
+"DIES_pct" = 85
+"BIOD_pct" = 15
+"EtOH_pct" = 0
+"H2O_pct" = 0
+"LHV_kJ_kg" = 41600
+"Fuel_Density_kg_m3" = 853
+"Fuel_Cost_R_L" = 5.4
+"reference" = "Migrated from legacy lhv.csv"
+
+[[fuel_properties]]
+"Fuel_Label" = "E94H6"
+"DIES_pct" = 0
+"BIOD_pct" = 0
+"EtOH_pct" = 94
+"H2O_pct" = 6
+"LHV_kJ_kg" = 24600
+"Fuel_Density_kg_m3" = 809
+"Fuel_Cost_R_L" = 2.1
+"reference" = "Migrated from legacy lhv.csv"
+
+[[fuel_properties]]
+"Fuel_Label" = "E75H25"
+"DIES_pct" = 0
+"BIOD_pct" = 0
+"EtOH_pct" = 75
+"H2O_pct" = 25
+"LHV_kJ_kg" = 18000
+"Fuel_Density_kg_m3" = 873
+"Fuel_Cost_R_L" = 2.1
+"reference" = "Migrated from legacy lhv.csv"
+
+[[fuel_properties]]
+"Fuel_Label" = "E65H35"
+"DIES_pct" = 0
+"BIOD_pct" = 0
+"EtOH_pct" = 65
+"H2O_pct" = 35
+"LHV_kJ_kg" = 15000
+"Fuel_Density_kg_m3" = 897
+"Fuel_Cost_R_L" = 2.1
+"reference" = "Migrated from legacy lhv.csv"

@@ -24,6 +24,7 @@ MAPPINGS_FILENAME = "mappings.toml"
 INSTRUMENTS_FILENAME = "instruments.toml"
 REPORTING_FILENAME = "reporting_rounding.toml"
 PLOTS_FILENAME = "plots.toml"
+FUEL_PROPERTIES_FILENAME = "fuel_properties.toml"
 
 DEFAULT_MAPPING_COLUMNS = ["key", "col_mean", "col_sd", "unit", "notes"]
 DEFAULT_INSTRUMENT_COLUMNS = [
@@ -66,6 +67,18 @@ DEFAULT_PLOT_COLUMNS = [
     "label_variant",
     "notes",
 ]
+DEFAULT_FUEL_PROPERTY_COLUMNS = [
+    "Fuel_Label",
+    "DIES_pct",
+    "BIOD_pct",
+    "EtOH_pct",
+    "H2O_pct",
+    "LHV_kJ_kg",
+    "Fuel_Density_kg_m3",
+    "Fuel_Cost_R_L",
+    "reference",
+    "notes",
+]
 DEFAULT_KEY_VALUE_COLUMNS = ["param", "value", "notes"]
 
 REQUIRED_MAPPING_KEYS = {"power_kw", "fuel_kgh", "lhv_kj_kg"}
@@ -77,6 +90,7 @@ class Pipeline29ConfigBundle:
     instruments_df: pd.DataFrame
     reporting_df: pd.DataFrame
     plots_df: pd.DataFrame
+    fuel_properties_df: pd.DataFrame
     data_quality_cfg: Dict[str, float]
     defaults_cfg: Dict[str, str]
     source_kind: str = "text"
@@ -109,12 +123,14 @@ def bundle_required_paths(config_dir: Path) -> Dict[str, Path]:
         "instruments": config_dir / INSTRUMENTS_FILENAME,
         "reporting": config_dir / REPORTING_FILENAME,
         "plots": config_dir / PLOTS_FILENAME,
+        "fuel_properties": config_dir / FUEL_PROPERTIES_FILENAME,
     }
 
 
 def text_config_exists(config_dir: Path) -> bool:
     paths = bundle_required_paths(config_dir)
-    return all(path.exists() for path in paths.values())
+    required_names = {"metadata", "defaults", "data_quality", "mappings", "instruments", "reporting", "plots"}
+    return all(path.exists() for name, path in paths.items() if name in required_names)
 
 
 def _is_blank(value: Any) -> bool:
@@ -185,6 +201,10 @@ def _normalize_bundle_shapes(bundle: Pipeline29ConfigBundle) -> Pipeline29Config
     inst = _records_to_dataframe(bundle.instruments_df.to_dict(orient="records"), DEFAULT_INSTRUMENT_COLUMNS)
     rep = _records_to_dataframe(bundle.reporting_df.to_dict(orient="records"), DEFAULT_REPORTING_COLUMNS)
     plots = _records_to_dataframe(bundle.plots_df.to_dict(orient="records"), DEFAULT_PLOT_COLUMNS)
+    fuel_properties = _records_to_dataframe(
+        bundle.fuel_properties_df.to_dict(orient="records"),
+        DEFAULT_FUEL_PROPERTY_COLUMNS,
+    )
     defaults_cfg = {str(k).strip(): _norm_text(v) for k, v in bundle.defaults_cfg.items() if str(k).strip()}
     data_quality_cfg = {}
     for key, value in bundle.data_quality_cfg.items():
@@ -202,6 +222,7 @@ def _normalize_bundle_shapes(bundle: Pipeline29ConfigBundle) -> Pipeline29Config
         instruments_df=inst,
         reporting_df=rep,
         plots_df=plots,
+        fuel_properties_df=fuel_properties,
         data_quality_cfg=data_quality_cfg,
         defaults_cfg=defaults_cfg,
         source_kind=bundle.source_kind,
@@ -225,6 +246,9 @@ def validate_bundle(bundle: Pipeline29ConfigBundle) -> List[str]:
     for column in DEFAULT_PLOT_COLUMNS:
         if column not in bundle.plots_df.columns:
             errors.append(f"Plots sem coluna obrigatoria: {column}")
+    for column in DEFAULT_FUEL_PROPERTY_COLUMNS:
+        if column not in bundle.fuel_properties_df.columns:
+            errors.append(f"Fuel Properties sem coluna obrigatoria: {column}")
     return errors
 
 
@@ -359,6 +383,12 @@ def save_text_config_bundle(
         _dataframe_records(normalized.plots_df, DEFAULT_PLOT_COLUMNS),
         DEFAULT_PLOT_COLUMNS,
     )
+    _write_toml_array_of_tables(
+        paths["fuel_properties"],
+        "fuel_properties",
+        _dataframe_records(normalized.fuel_properties_df, DEFAULT_FUEL_PROPERTY_COLUMNS),
+        DEFAULT_FUEL_PROPERTY_COLUMNS,
+    )
     normalized.text_dir = config_dir
     normalized.source_kind = "text"
     normalized.source_path = config_dir
@@ -383,6 +413,7 @@ def load_text_config_bundle(config_dir: Path) -> Pipeline29ConfigBundle:
     instruments_doc = _read_toml_file(paths["instruments"])
     reporting_doc = _read_toml_file(paths["reporting"])
     plots_doc = _read_toml_file(paths["plots"])
+    fuel_properties_doc = _read_toml_file(paths["fuel_properties"])
 
     defaults_cfg = {str(k): _norm_text(v) for k, v in defaults_doc.get("defaults", {}).items()}
 
@@ -410,12 +441,17 @@ def load_text_config_bundle(config_dir: Path) -> Pipeline29ConfigBundle:
     instruments_df = _records_to_dataframe(instruments_doc.get("instruments", []) or [], DEFAULT_INSTRUMENT_COLUMNS)
     reporting_df = _records_to_dataframe(reporting_doc.get("reporting", []) or [], DEFAULT_REPORTING_COLUMNS)
     plots_df = _records_to_dataframe(plots_doc.get("plots", []) or [], DEFAULT_PLOT_COLUMNS)
+    fuel_properties_df = _records_to_dataframe(
+        fuel_properties_doc.get("fuel_properties", []) or [],
+        DEFAULT_FUEL_PROPERTY_COLUMNS,
+    )
 
     bundle = Pipeline29ConfigBundle(
         mappings=mappings,
         instruments_df=instruments_df,
         reporting_df=reporting_df,
         plots_df=plots_df,
+        fuel_properties_df=fuel_properties_df,
         data_quality_cfg=data_quality_cfg,
         defaults_cfg=defaults_cfg,
         source_kind="text",
@@ -450,6 +486,118 @@ def _worksheet_rows(path: Path, sheet_name: str) -> List[Dict[str, Any]]:
         return out
     finally:
         wb.close()
+
+
+def _format_pct_for_label(value: Any) -> str:
+    try:
+        numeric = float(value)
+    except Exception:
+        return _norm_text(value)
+    if math.isfinite(numeric) and numeric.is_integer():
+        return str(int(numeric))
+    return f"{numeric:g}"
+
+
+def _infer_fuel_label(dies_pct: Any, biod_pct: Any, etoh_pct: Any, h2o_pct: Any) -> str:
+    dies = _to_builtin_scalar(dies_pct)
+    biod = _to_builtin_scalar(biod_pct)
+    etoh = _to_builtin_scalar(etoh_pct)
+    h2o = _to_builtin_scalar(h2o_pct)
+
+    try:
+        dies_num = float(dies) if dies is not None else float("nan")
+        biod_num = float(biod) if biod is not None else float("nan")
+        etoh_num = float(etoh) if etoh is not None else float("nan")
+        h2o_num = float(h2o) if h2o is not None else float("nan")
+    except Exception:
+        return ""
+
+    if math.isfinite(dies_num) and math.isfinite(biod_num) and abs(etoh_num or 0.0) < 1e-9 and abs(h2o_num or 0.0) < 1e-9:
+        return f"D{_format_pct_for_label(dies_num)}B{_format_pct_for_label(biod_num)}"
+    if math.isfinite(etoh_num) and math.isfinite(h2o_num) and abs(dies_num or 0.0) < 1e-9 and abs(biod_num or 0.0) < 1e-9:
+        return f"E{_format_pct_for_label(etoh_num)}H{_format_pct_for_label(h2o_num)}"
+    return ""
+
+
+def _lookup_default_value(defaults_cfg: Dict[str, str], key_name: str) -> str:
+    wanted = _norm_key(key_name)
+    for key, value in defaults_cfg.items():
+        if _norm_key(key) == wanted:
+            return _norm_text(value)
+    return ""
+
+
+def _legacy_fuel_properties_from_csv(csv_path: Path, defaults_cfg: Dict[str, str]) -> pd.DataFrame:
+    if not csv_path.exists():
+        return pd.DataFrame(columns=DEFAULT_FUEL_PROPERTY_COLUMNS)
+
+    try:
+        df = pd.read_csv(csv_path, sep=None, engine="python", encoding="utf-8-sig")
+    except Exception:
+        return pd.DataFrame(columns=DEFAULT_FUEL_PROPERTY_COLUMNS)
+
+    rename_map: Dict[str, str] = {}
+    for column in df.columns:
+        column_norm = _norm_key(column)
+        if column_norm in {"fuel_label", "label"}:
+            rename_map[column] = "Fuel_Label"
+        elif column_norm in {"dies_pct", "dies", "diesel_pct", "diesel"}:
+            rename_map[column] = "DIES_pct"
+        elif column_norm in {"biod_pct", "biod", "biodiesel_pct", "biodiesel"}:
+            rename_map[column] = "BIOD_pct"
+        elif column_norm in {"etoh_pct", "etoh", "e_pct", "e"}:
+            rename_map[column] = "EtOH_pct"
+        elif column_norm in {"h2o_pct", "h2o", "h20_pct", "h20", "h_pct", "h"}:
+            rename_map[column] = "H2O_pct"
+        elif column_norm in {"lhv_kj_kg", "lhv", "pci_kj_kg", "pci"}:
+            rename_map[column] = "LHV_kJ_kg"
+        elif column_norm in {"fuel_density_kg_m3", "density_kg_m3", "density"}:
+            rename_map[column] = "Fuel_Density_kg_m3"
+        elif column_norm in {"fuel_cost_r_l", "cost_r_l", "cost"}:
+            rename_map[column] = "Fuel_Cost_R_L"
+        elif column_norm in {"reference", "source"}:
+            rename_map[column] = "reference"
+        elif column_norm in {"notes", "note"}:
+            rename_map[column] = "notes"
+    df = df.rename(columns=rename_map)
+
+    records: List[Dict[str, Any]] = []
+    for raw_row in df.to_dict(orient="records"):
+        row = _coerce_row_dict(raw_row, DEFAULT_FUEL_PROPERTY_COLUMNS)
+        label = _norm_text(row.get("Fuel_Label", ""))
+        if not label:
+            label = _infer_fuel_label(
+                row.get("DIES_pct", ""),
+                row.get("BIOD_pct", ""),
+                row.get("EtOH_pct", ""),
+                row.get("H2O_pct", ""),
+            )
+        if not label:
+            continue
+
+        density = _norm_text(row.get("Fuel_Density_kg_m3", ""))
+        cost = _norm_text(row.get("Fuel_Cost_R_L", ""))
+        if not density:
+            density = _lookup_default_value(defaults_cfg, f"FUEL_DENSITY_KG_M3_{label}")
+        if not cost:
+            cost = _lookup_default_value(defaults_cfg, f"FUEL_COST_R_L_{label}")
+
+        records.append(
+            {
+                "Fuel_Label": label,
+                "DIES_pct": row.get("DIES_pct", ""),
+                "BIOD_pct": row.get("BIOD_pct", ""),
+                "EtOH_pct": row.get("EtOH_pct", ""),
+                "H2O_pct": row.get("H2O_pct", ""),
+                "LHV_kJ_kg": row.get("LHV_kJ_kg", ""),
+                "Fuel_Density_kg_m3": density,
+                "Fuel_Cost_R_L": cost,
+                "reference": _norm_text(row.get("reference", "")) or f"Imported from {csv_path.name}",
+                "notes": _norm_text(row.get("notes", "")),
+            }
+        )
+
+    return _records_to_dataframe(records, DEFAULT_FUEL_PROPERTY_COLUMNS)
 
 
 def _excel_rows_to_bundle(excel_path: Path) -> Pipeline29ConfigBundle:
@@ -497,6 +645,7 @@ def _excel_rows_to_bundle(excel_path: Path) -> Pipeline29ConfigBundle:
         except Exception:
             continue
 
+    fuel_properties_df = _legacy_fuel_properties_from_csv(excel_path.parent / "lhv.csv", defaults_cfg)
     instruments_df = _records_to_dataframe(instruments_rows, DEFAULT_INSTRUMENT_COLUMNS)
     reporting_df = _records_to_dataframe(reporting_rows, DEFAULT_REPORTING_COLUMNS)
     plots_df = _records_to_dataframe(plots_rows, DEFAULT_PLOT_COLUMNS)
@@ -515,6 +664,7 @@ def _excel_rows_to_bundle(excel_path: Path) -> Pipeline29ConfigBundle:
         instruments_df=instruments_df,
         reporting_df=reporting_df,
         plots_df=plots_df,
+        fuel_properties_df=fuel_properties_df,
         data_quality_cfg=data_quality_cfg,
         defaults_cfg=defaults_cfg,
         source_kind="excel",
@@ -537,6 +687,7 @@ def bundle_to_preset_payload(bundle: Pipeline29ConfigBundle) -> Dict[str, Any]:
         "instruments": _dataframe_records(normalized.instruments_df, DEFAULT_INSTRUMENT_COLUMNS),
         "reporting": _dataframe_records(normalized.reporting_df, DEFAULT_REPORTING_COLUMNS),
         "plots": _dataframe_records(normalized.plots_df, DEFAULT_PLOT_COLUMNS),
+        "fuel_properties": _dataframe_records(normalized.fuel_properties_df, DEFAULT_FUEL_PROPERTY_COLUMNS),
         "data_quality": normalized.data_quality_cfg,
         "defaults": normalized.defaults_cfg,
     }
@@ -549,6 +700,10 @@ def bundle_from_preset_payload(payload: Dict[str, Any]) -> Pipeline29ConfigBundl
             instruments_df=_records_to_dataframe(payload.get("instruments", []) or [], DEFAULT_INSTRUMENT_COLUMNS),
             reporting_df=_records_to_dataframe(payload.get("reporting", []) or [], DEFAULT_REPORTING_COLUMNS),
             plots_df=_records_to_dataframe(payload.get("plots", []) or [], DEFAULT_PLOT_COLUMNS),
+            fuel_properties_df=_records_to_dataframe(
+                payload.get("fuel_properties", []) or [],
+                DEFAULT_FUEL_PROPERTY_COLUMNS,
+            ),
             data_quality_cfg=dict(payload.get("data_quality", {}) or {}),
             defaults_cfg=dict(payload.get("defaults", {}) or {}),
             source_kind="preset",

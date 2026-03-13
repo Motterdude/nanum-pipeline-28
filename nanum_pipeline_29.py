@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
 from pipeline29_config_backend import (
+    DEFAULT_FUEL_PROPERTY_COLUMNS,
     Pipeline29ConfigBundle,
     bootstrap_text_config_from_excel,
     default_gui_state_path,
@@ -1883,12 +1884,14 @@ def _prepare_config_bundle_for_pipeline(bundle: Pipeline29ConfigBundle) -> Pipel
     reporting_df["key_norm"] = reporting_df["key"].map(norm_key)
 
     plots_df = bundle.plots_df.copy() if bundle.plots_df is not None else pd.DataFrame()
+    fuel_properties_df = bundle.fuel_properties_df.copy() if bundle.fuel_properties_df is not None else pd.DataFrame()
 
     return Pipeline29ConfigBundle(
         mappings=mappings_prepared,
         instruments_df=instruments_df,
         reporting_df=reporting_df,
         plots_df=plots_df,
+        fuel_properties_df=fuel_properties_df,
         data_quality_cfg=dict(bundle.data_quality_cfg or {}),
         defaults_cfg=defaults_prepared,
         source_kind=bundle.source_kind,
@@ -1930,6 +1933,7 @@ def load_pipeline29_config_bundle(
         instruments_df=instruments_df,
         reporting_df=reporting_df,
         plots_df=plots_df,
+        fuel_properties_df=pd.DataFrame(columns=DEFAULT_FUEL_PROPERTY_COLUMNS),
         data_quality_cfg=data_quality_cfg,
         defaults_cfg=defaults_cfg,
         source_kind="excel",
@@ -3195,6 +3199,148 @@ def load_lhv_lookup() -> pd.DataFrame:
     return df
 
 
+def _normalize_fuel_properties_df(df: Optional[pd.DataFrame]) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame(columns=DEFAULT_FUEL_PROPERTY_COLUMNS)
+
+    out = df.copy()
+    rename_map: Dict[str, str] = {}
+    for column in out.columns:
+        cl = norm_key(column)
+        if cl in {"fuel_label", "label"}:
+            rename_map[column] = "Fuel_Label"
+        elif cl in {"dies_pct", "dies", "diesel_pct", "diesel"}:
+            rename_map[column] = "DIES_pct"
+        elif cl in {"biod_pct", "biod", "biodiesel_pct", "biodiesel"}:
+            rename_map[column] = "BIOD_pct"
+        elif cl in {"etoh_pct", "etoh", "e_pct", "e"}:
+            rename_map[column] = "EtOH_pct"
+        elif cl in {"h2o_pct", "h2o", "h20_pct", "h20", "h_pct", "h"}:
+            rename_map[column] = "H2O_pct"
+        elif cl in {"lhv_kj_kg", "lhv", "pci_kj_kg", "pci"}:
+            rename_map[column] = "LHV_kJ_kg"
+        elif cl in {"fuel_density_kg_m3", "density_kg_m3", "density"}:
+            rename_map[column] = "Fuel_Density_kg_m3"
+        elif cl in {"fuel_cost_r_l", "cost_r_l", "cost"}:
+            rename_map[column] = "Fuel_Cost_R_L"
+        elif cl in {"reference", "source"}:
+            rename_map[column] = "reference"
+        elif cl in {"notes", "note"}:
+            rename_map[column] = "notes"
+    out = out.rename(columns=rename_map)
+
+    for column in DEFAULT_FUEL_PROPERTY_COLUMNS:
+        if column not in out.columns:
+            out[column] = pd.NA
+
+    for column in COMPOSITION_COLS:
+        out[column] = pd.to_numeric(out[column], errors="coerce").astype("Float64")
+    for column in ("LHV_kJ_kg", "Fuel_Density_kg_m3", "Fuel_Cost_R_L"):
+        out[column] = pd.to_numeric(out[column], errors="coerce")
+    if "Fuel_Label" in out.columns:
+        missing_label = out["Fuel_Label"].isna() | out["Fuel_Label"].map(lambda value: not _to_str_or_empty(value).strip())
+        if bool(missing_label.any()):
+            dies = pd.to_numeric(out.get("DIES_pct", pd.Series(pd.NA, index=out.index)), errors="coerce")
+            biod = pd.to_numeric(out.get("BIOD_pct", pd.Series(pd.NA, index=out.index)), errors="coerce")
+            etoh = pd.to_numeric(out.get("EtOH_pct", pd.Series(pd.NA, index=out.index)), errors="coerce")
+            h2o = pd.to_numeric(out.get("H2O_pct", pd.Series(pd.NA, index=out.index)), errors="coerce")
+            inferred = pd.Series(pd.NA, index=out.index, dtype="object")
+            inferred = inferred.mask((dies.sub(85.0).abs() <= 0.6) & (biod.sub(15.0).abs() <= 0.6), "D85B15")
+            inferred = inferred.mask((etoh.sub(94.0).abs() <= 0.6) & (h2o.sub(6.0).abs() <= 0.6), "E94H6")
+            inferred = inferred.mask((etoh.sub(75.0).abs() <= 0.6) & (h2o.sub(25.0).abs() <= 0.6), "E75H25")
+            inferred = inferred.mask((etoh.sub(65.0).abs() <= 0.6) & (h2o.sub(35.0).abs() <= 0.6), "E65H35")
+            out.loc[missing_label, "Fuel_Label"] = inferred.loc[missing_label]
+    for column in ("Fuel_Label", "reference", "notes"):
+        out[column] = out[column].map(lambda value: _to_str_or_empty(value) or pd.NA)
+
+    return out[DEFAULT_FUEL_PROPERTY_COLUMNS].copy()
+
+
+def _fill_fuel_property_defaults(fuel_properties_df: pd.DataFrame, defaults_cfg: Dict[str, str]) -> pd.DataFrame:
+    if fuel_properties_df is None or fuel_properties_df.empty:
+        return pd.DataFrame(columns=DEFAULT_FUEL_PROPERTY_COLUMNS)
+
+    out = _normalize_fuel_properties_df(fuel_properties_df)
+    if out.empty:
+        return out
+
+    for idx, row in out.iterrows():
+        label = _to_str_or_empty(row.get("Fuel_Label", "")).strip()
+        if not label:
+            continue
+        density = _to_float(row.get("Fuel_Density_kg_m3", pd.NA), default=float("nan"))
+        cost = _to_float(row.get("Fuel_Cost_R_L", pd.NA), default=float("nan"))
+        if not np.isfinite(density) or density <= 0:
+            density_default = _to_float(defaults_cfg.get(norm_key(f"FUEL_DENSITY_KG_M3_{label}"), ""), default=float("nan"))
+            if np.isfinite(density_default) and density_default > 0:
+                out.at[idx, "Fuel_Density_kg_m3"] = float(density_default)
+        if not np.isfinite(cost) or cost <= 0:
+            cost_default = _to_float(defaults_cfg.get(norm_key(f"FUEL_COST_R_L_{label}"), ""), default=float("nan"))
+            if np.isfinite(cost_default) and cost_default > 0:
+                out.at[idx, "Fuel_Cost_R_L"] = float(cost_default)
+    return out
+
+
+def load_lhv_lookup(defaults_cfg: Optional[Dict[str, str]] = None) -> pd.DataFrame:
+    p = CFG_DIR / "lhv.csv"
+    if not p.exists():
+        raise FileNotFoundError(f"NÃƒÂ£o encontrei {p}.")
+
+    df = pd.read_csv(p, sep=None, engine="python", encoding="utf-8-sig")
+    df = _normalize_fuel_properties_df(df)
+    if "LHV_kJ_kg" not in df.columns:
+        raise KeyError(f"lhv.csv precisa da coluna LHV_kJ_kg. Colunas atuais: {list(df.columns)}")
+    if defaults_cfg:
+        df = _fill_fuel_property_defaults(df, defaults_cfg)
+    return df
+
+
+def load_fuel_properties_lookup(
+    config_bundle: Optional[Pipeline29ConfigBundle],
+    defaults_cfg: Dict[str, str],
+) -> pd.DataFrame:
+    configured = pd.DataFrame(columns=DEFAULT_FUEL_PROPERTY_COLUMNS)
+    if config_bundle is not None and getattr(config_bundle, "fuel_properties_df", None) is not None:
+        configured = _fill_fuel_property_defaults(config_bundle.fuel_properties_df, defaults_cfg)
+        if not configured.empty and pd.to_numeric(configured.get("LHV_kJ_kg", pd.Series(dtype="float64")), errors="coerce").notna().any():
+            return configured
+
+    try:
+        legacy = load_lhv_lookup(defaults_cfg=defaults_cfg)
+    except Exception:
+        legacy = pd.DataFrame(columns=DEFAULT_FUEL_PROPERTY_COLUMNS)
+
+    if configured.empty:
+        return legacy
+    if legacy.empty:
+        return configured
+
+    configured_keys = {
+        (
+            _to_float(row.get("DIES_pct", pd.NA), default=float("nan")),
+            _to_float(row.get("BIOD_pct", pd.NA), default=float("nan")),
+            _to_float(row.get("EtOH_pct", pd.NA), default=float("nan")),
+            _to_float(row.get("H2O_pct", pd.NA), default=float("nan")),
+        )
+        for _, row in configured.iterrows()
+    }
+    missing_legacy_rows: List[Dict[str, Any]] = []
+    for _, row in legacy.iterrows():
+        key = (
+            _to_float(row.get("DIES_pct", pd.NA), default=float("nan")),
+            _to_float(row.get("BIOD_pct", pd.NA), default=float("nan")),
+            _to_float(row.get("EtOH_pct", pd.NA), default=float("nan")),
+            _to_float(row.get("H2O_pct", pd.NA), default=float("nan")),
+        )
+        if key in configured_keys:
+            continue
+        missing_legacy_rows.append(row.to_dict())
+    if not missing_legacy_rows:
+        return configured
+    combined = pd.concat([configured, pd.DataFrame(missing_legacy_rows)], ignore_index=True)
+    return _normalize_fuel_properties_df(combined)
+
+
 def _lookup_lhv_for_blend(
     lhv_df: pd.DataFrame,
     *,
@@ -4204,7 +4350,7 @@ def _guess_plot_uncertainty_col(out_df: pd.DataFrame, y_col: str, mappings: dict
 # =========================
 def build_final_table(
     ponto: pd.DataFrame,
-    lhv: pd.DataFrame,
+    fuel_properties: pd.DataFrame,
     kibox_agg: pd.DataFrame,
     motec_ponto: pd.DataFrame,
     mappings: dict,
@@ -4213,7 +4359,7 @@ def build_final_table(
     defaults_cfg: Dict[str, str],
 ) -> pd.DataFrame:
     df = add_source_identity_columns(ponto)
-    df = _left_merge_on_fuel_keys(df, lhv)
+    df = _left_merge_on_fuel_keys(df, fuel_properties)
     if kibox_agg is not None and not kibox_agg.empty:
         df = _left_merge_on_fuel_keys(df, kibox_agg, extra_on=["SourceFolder", "Load_kW"])
     if motec_ponto is not None and not motec_ponto.empty:
@@ -4257,26 +4403,49 @@ def build_final_table(
         df["uc_Consumo_kg_h"] = pd.NA
         df["U_Consumo_kg_h"] = pd.NA
 
-    df["Fuel_Label"] = _fuel_blend_labels(df)
-    df["Fuel_Density_kg_m3"], missing_density = _fuel_default_lookup_series(
+    merged_fuel_label = df.get("Fuel_Label", pd.Series(pd.NA, index=df.index, dtype="object"))
+    fallback_fuel_label = _fuel_blend_labels(df)
+    df["Fuel_Label"] = merged_fuel_label.where(merged_fuel_label.notna(), fallback_fuel_label)
+
+    default_density, _missing_density_defaults = _fuel_default_lookup_series(
         df,
         defaults_cfg,
         field="density_param",
     )
-    df["Fuel_Cost_R_L"], missing_cost = _fuel_default_lookup_series(
+    merged_density = pd.to_numeric(df.get("Fuel_Density_kg_m3", pd.NA), errors="coerce")
+    df["Fuel_Density_kg_m3"] = merged_density.where(merged_density.gt(0), default_density)
+
+    default_cost, _missing_cost_defaults = _fuel_default_lookup_series(
         df,
         defaults_cfg,
         field="cost_param",
     )
+    merged_cost = pd.to_numeric(df.get("Fuel_Cost_R_L", pd.NA), errors="coerce")
+    df["Fuel_Cost_R_L"] = merged_cost.where(merged_cost.gt(0), default_cost)
+
+    missing_density = sorted(
+        {
+            str(label)
+            for label in df.loc[pd.to_numeric(df["Fuel_Density_kg_m3"], errors="coerce").le(0) | pd.to_numeric(df["Fuel_Density_kg_m3"], errors="coerce").isna(), "Fuel_Label"].dropna()
+            if str(label).strip()
+        }
+    )
+    missing_cost = sorted(
+        {
+            str(label)
+            for label in df.loc[pd.to_numeric(df["Fuel_Cost_R_L"], errors="coerce").le(0) | pd.to_numeric(df["Fuel_Cost_R_L"], errors="coerce").isna(), "Fuel_Label"].dropna()
+            if str(label).strip()
+        }
+    )
     if missing_density:
         print(
-            "[WARN] Densidade ausente/invalida no Defaults para: "
+            "[WARN] Densidade ausente/invalida em Fuel Properties/Defaults para: "
             + ", ".join(sorted(set(missing_density)))
             + ". Consumo_L_h ficara vazio nesses combustiveis."
         )
     if missing_cost:
         print(
-            "[WARN] Custo por litro ausente/invalido no Defaults para: "
+            "[WARN] Custo por litro ausente/invalido em Fuel Properties/Defaults para: "
             + ", ".join(sorted(set(missing_cost)))
             + ". Custo_R_h ficara vazio nesses combustiveis."
         )
@@ -4291,14 +4460,14 @@ def build_final_table(
     fuel_cost = pd.to_numeric(df["Fuel_Cost_R_L"], errors="coerce")
     mdot = Fkgh / 3600.0
     LHVv = pd.to_numeric(df[L_col], errors="coerce")
-    lhv_e94h6_kj_kg = _lookup_lhv_for_blend(lhv, etoh_pct=94.0, h2o_pct=6.0)
+    lhv_e94h6_kj_kg = _lookup_lhv_for_blend(fuel_properties, etoh_pct=94.0, h2o_pct=6.0)
 
     # Generic alias for the measured UPD power used by runtime-specific plots.
     df["UPD_Power_kW"] = PkW
     df["UPD_Power_Bin_kW"] = PkW.round(1).where(PkW.notna(), pd.NA)
     df["LHV_E94H6_kJ_kg"] = lhv_e94h6_kj_kg if np.isfinite(lhv_e94h6_kj_kg) else pd.NA
     if not np.isfinite(lhv_e94h6_kj_kg):
-        print("[WARN] LHV E94H6 (94/6) nao encontrado no lhv.csv; n_th_E94H6_eq_flow ficara vazio.")
+        print("[WARN] LHV E94H6 (94/6) nao encontrado em Fuel Properties; n_th_E94H6_eq_flow ficara vazio.")
 
     df["n_th"] = PkW / (mdot * LHVv)
     df.loc[(PkW <= 0) | (mdot <= 0) | (LHVv <= 0), "n_th"] = pd.NA
@@ -6821,7 +6990,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     trechos = compute_trechos_stats(lv_raw, instruments_df=instruments_df)
     ponto = compute_ponto_stats(trechos)
 
-    lhv = load_lhv_lookup()
+    fuel_properties = load_fuel_properties_lookup(config_bundle, defaults_cfg)
     kibox_agg = (
         kibox_aggregate(kibox_files)
         if kibox_files
@@ -6850,7 +7019,16 @@ def main(argv: Optional[List[str]] = None) -> None:
         else:
             print("[WARN] Arquivos MOTEC encontrados, mas nenhum foi lido com sucesso.")
 
-    out = build_final_table(ponto, lhv, kibox_agg, motec_ponto, mappings, instruments_df, reporting_df, defaults_cfg)
+    out = build_final_table(
+        ponto,
+        fuel_properties,
+        kibox_agg,
+        motec_ponto,
+        mappings,
+        instruments_df,
+        reporting_df,
+        defaults_cfg,
+    )
 
     out_xlsx = safe_to_excel(out, OUT_DIR / "lv_kpis_clean.xlsx")
     print(f"[OK] Excel gerado: {out_xlsx}")
