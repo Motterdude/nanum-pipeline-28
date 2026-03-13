@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import fnmatch
 import re
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -66,6 +68,7 @@ INSTRUMENT_ZERO_DEFAULT_FIELDS = {"acc_pct", "digits", "lsd", "resolution"}
 INSTRUMENT_SOURCE_DEFAULT = "User input"
 PLOT_X_DEFAULTS = {"x_min": "0", "x_max": "55", "x_step": "5"}
 PLOT_Y_AUTOSCALE_FIELDS = {"y_min", "y_max", "y_step"}
+PLOT_Y_AUTOSCALE_TOKEN = "auto"
 
 DEFAULT_FIELD_SPECS_BY_SECTION: Dict[str, List[Dict[str, Any]]] = {
     "Mappings": [
@@ -158,6 +161,161 @@ def _default_plot_title(x_col: str, y_col: str) -> str:
     return f"{y_text} vs {x_text} (all fuels)"
 
 
+def _norm_key_local(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "_", text)
+    return text.strip("_")
+
+
+def _prefix_from_key_local(key_norm: str) -> str:
+    if key_norm == "power_kw":
+        return "P_kw"
+    if key_norm == "fuel_kgh":
+        return "Consumo_kg_h"
+    if key_norm == "lhv_kj_kg":
+        return "LHV_kJ_kg"
+    return key_norm.upper()
+
+
+def _mapping_records_to_specs(records: List[Dict[str, str]]) -> Dict[str, Dict[str, str]]:
+    specs: Dict[str, Dict[str, str]] = {}
+    for record in records:
+        key_norm = _norm_key_local(record.get("key", ""))
+        if not key_norm:
+            continue
+        specs[key_norm] = {
+            "mean": str(record.get("col_mean", "")).strip(),
+            "sd": str(record.get("col_sd", "")).strip(),
+            "unit": str(record.get("unit", "")).strip(),
+            "notes": str(record.get("notes", "")).strip(),
+        }
+    return specs
+
+
+def _defaults_records_to_cfg(records: List[Dict[str, str]]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for record in records:
+        key_norm = _norm_key_local(record.get("param", ""))
+        if not key_norm:
+            continue
+        out[key_norm] = str(record.get("value", "")).strip()
+    return out
+
+
+def _expected_uncertainty_columns(
+    mappings_records: List[Dict[str, str]],
+    instruments_records: List[Dict[str, str]],
+) -> List[str]:
+    instrument_keys = {_norm_key_local(record.get("key", "")) for record in instruments_records}
+    out: List[str] = []
+    for record in mappings_records:
+        key_norm = _norm_key_local(record.get("key", ""))
+        mean_col = str(record.get("col_mean", "")).strip()
+        sd_col = str(record.get("col_sd", "")).strip()
+        if not key_norm or not mean_col:
+            continue
+        prefix = _prefix_from_key_local(key_norm)
+        if sd_col:
+            out.append(f"uA_{prefix}")
+        if key_norm in instrument_keys:
+            out.append(f"uB_{prefix}")
+        out.extend([f"uc_{prefix}", f"U_{prefix}"])
+    return sorted(dict.fromkeys(out), key=str.lower)
+
+
+def _closest_uncertainty_match(y_col: str, uncertainty_cols: List[str]) -> str:
+    if not y_col or not uncertainty_cols:
+        return ""
+    y_norm = _norm_key_local(y_col)
+    by_norm = {_norm_key_local(name): name for name in uncertainty_cols}
+    direct = by_norm.get(_norm_key_local(f"U_{y_col}"))
+    if direct:
+        return direct
+
+    matches = difflib.get_close_matches(y_norm, list(by_norm.keys()), n=1, cutoff=0.52)
+    if matches:
+        return by_norm[matches[0]]
+    return ""
+
+
+def _guess_plot_yerr_col_from_context(
+    y_col: str,
+    *,
+    available_columns: List[str],
+    mappings_records: List[Dict[str, str]],
+) -> str:
+    y_text = str(y_col or "").strip()
+    if not y_text:
+        return ""
+
+    uncertainty_cols = sorted(
+        {name for name in available_columns if str(name).strip().startswith("U_")},
+        key=str.lower,
+    )
+    if f"U_{y_text}" in uncertainty_cols:
+        return f"U_{y_text}"
+
+    y_norm = _norm_key_local(y_text)
+    for record in mappings_records:
+        mean_col = str(record.get("col_mean", "")).strip()
+        if _norm_key_local(mean_col) != y_norm:
+            continue
+        key_norm = _norm_key_local(record.get("key", ""))
+        if not key_norm:
+            continue
+        candidate = f"U_{_prefix_from_key_local(key_norm)}"
+        if candidate in available_columns:
+            return candidate
+        if candidate in uncertainty_cols:
+            return candidate
+
+    return _closest_uncertainty_match(y_text, uncertainty_cols)
+
+
+def _nice_step(value: float) -> float:
+    if not np.isfinite(value) or value <= 0:
+        return 1.0
+    exponent = np.floor(np.log10(value))
+    fraction = value / (10**exponent)
+    if fraction <= 1:
+        nice_fraction = 1
+    elif fraction <= 2:
+        nice_fraction = 2
+    elif fraction <= 5:
+        nice_fraction = 5
+    else:
+        nice_fraction = 10
+    return float(nice_fraction * (10**exponent))
+
+
+def _build_axis_suggestion(df: pd.DataFrame, column: str) -> Optional[Dict[str, str]]:
+    if df is None or df.empty or column not in df.columns:
+        return None
+    values = pd.to_numeric(df[column], errors="coerce").dropna()
+    if values.empty:
+        return None
+
+    y_min = float(values.min())
+    y_max = float(values.max())
+    if not np.isfinite(y_min) or not np.isfinite(y_max):
+        return None
+
+    if np.isclose(y_min, y_max):
+        pad = max(abs(y_max) * 0.05, 1.0)
+    else:
+        pad = max((y_max - y_min) * 0.08, 1e-9)
+    span = max((y_max - y_min) + 2.0 * pad, 1e-9)
+    step = _nice_step(span / 6.0)
+    suggested_min = np.floor((y_min - pad) / step) * step
+    suggested_max = np.ceil((y_max + pad) / step) * step
+    return {
+        "y_min": f"{suggested_min:g}",
+        "y_max": f"{suggested_max:g}",
+        "y_step": f"{step:g}",
+        "summary": f"Suggested fixed Y axis: min={suggested_min:g}, max={suggested_max:g}, step={step:g}.",
+    }
+
+
 def _load_variable_catalog_from_file(path: Path) -> List[str]:
     if not path.exists() or not path.is_file():
         return []
@@ -189,6 +347,41 @@ def _load_variable_catalog_from_file(path: Path) -> List[str]:
             except Exception:
                 continue
     return []
+
+
+def _load_preview_frame_from_file(path: Path) -> pd.DataFrame:
+    if not path.exists() or not path.is_file():
+        return pd.DataFrame()
+
+    suffix = path.suffix.lower()
+    if suffix in {".xlsx", ".xlsm", ".xls"}:
+        try:
+            xf = pd.ExcelFile(path)
+        except Exception:
+            return pd.DataFrame()
+
+        preferred_sheets: List[str] = []
+        for preferred in ("lv_kpis_clean", "Sheet1"):
+            if preferred in xf.sheet_names:
+                preferred_sheets.append(preferred)
+        preferred_sheets.extend([name for name in xf.sheet_names if name not in preferred_sheets])
+
+        for sheet_name in preferred_sheets:
+            try:
+                frame = pd.read_excel(path, sheet_name=sheet_name)
+            except Exception:
+                continue
+            if not frame.empty and len(frame.columns) > 0:
+                return frame
+        return pd.DataFrame()
+
+    if suffix == ".csv":
+        for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+            try:
+                return pd.read_csv(path, sep=None, engine="python", encoding=encoding)
+            except Exception:
+                continue
+    return pd.DataFrame()
 
 
 def _build_source_catalog_from_records(records: List[Dict[str, str]]) -> Dict[str, str]:
@@ -310,6 +503,8 @@ class ConfigRowDialog(QDialog):
         variable_catalog_provider: Optional[Callable[[], List[str]]] = None,
         mapping_key_provider: Optional[Callable[[], List[str]]] = None,
         source_catalog_provider: Optional[Callable[[], Dict[str, str]]] = None,
+        plot_yerr_provider: Optional[Callable[[str], str]] = None,
+        plot_axis_suggestion_provider: Optional[Callable[[str], Optional[Dict[str, str]]]] = None,
         status_callback: Optional[Callable[[str], None]] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
@@ -320,12 +515,16 @@ class ConfigRowDialog(QDialog):
         self.variable_catalog_provider = variable_catalog_provider
         self.mapping_key_provider = mapping_key_provider
         self.source_catalog_provider = source_catalog_provider
+        self.plot_yerr_provider = plot_yerr_provider
+        self.plot_axis_suggestion_provider = plot_axis_suggestion_provider
         self.status_callback = status_callback
         self.widgets: Dict[str, Any] = {}
         self.info_labels: Dict[str, QLabel] = {}
         self._last_auto_sd = ""
         self._last_auto_filename = ""
         self._last_auto_title = ""
+        self._last_auto_yerr = ""
+        self._last_auto_y_axis: Dict[str, str] = {}
         self._window_state_applied = False
 
         self.setWindowTitle(f"{section_title} helper")
@@ -391,7 +590,7 @@ class ConfigRowDialog(QDialog):
             if not str(prepared.get("plot_type", "")).strip():
                 prepared["plot_type"] = "all_fuels_yx"
             if not str(prepared.get("show_uncertainty", "")).strip():
-                prepared["show_uncertainty"] = "auto"
+                prepared["show_uncertainty"] = "on"
             if not str(prepared.get("x_col", "")).strip():
                 prepared["x_col"] = "Load_kW"
             if not str(prepared.get("x_label", "")).strip():
@@ -399,6 +598,11 @@ class ConfigRowDialog(QDialog):
             for field, default_value in PLOT_X_DEFAULTS.items():
                 if not str(prepared.get(field, "")).strip():
                     prepared[field] = default_value
+            for field in PLOT_Y_AUTOSCALE_FIELDS:
+                if not str(prepared.get(field, "")).strip():
+                    prepared[field] = PLOT_Y_AUTOSCALE_TOKEN
+        if self.section_title == "Instruments" and not str(prepared.get("dist", "")).strip():
+            prepared["dist"] = "rect"
         return prepared
 
     def _build_editor(self, spec: Dict[str, Any], value: Any) -> QWidget:
@@ -476,8 +680,9 @@ class ConfigRowDialog(QDialog):
             label.setWordWrap(True)
             return label
         if self.section_title == "Plots" and field_name == "y_step":
-            label = QLabel("Y axis defaults to autoscale. Leave y_min, y_max and y_step blank if you want autoscale.")
+            label = QLabel("Y axis defaults to autoscale. The helper keeps y_min, y_max and y_step as 'auto' and updates the suggested fixed range live.")
             label.setWordWrap(True)
+            self.info_labels["plot_y_axis"] = label
             return label
         return None
 
@@ -534,6 +739,58 @@ class ConfigRowDialog(QDialog):
                 title_widget.setText(auto_title)
                 self._last_auto_title = auto_title
 
+        yerr_widget = self.widgets.get("yerr_col")
+        if isinstance(yerr_widget, QLineEdit) and self.plot_yerr_provider is not None:
+            auto_yerr = self.plot_yerr_provider(y_col)
+            if auto_yerr:
+                current_yerr = yerr_widget.text().strip()
+                if force_if_empty or not current_yerr or current_yerr == self._last_auto_yerr:
+                    yerr_widget.setText(auto_yerr)
+                    self._last_auto_yerr = auto_yerr
+
+        show_uncertainty_widget = self.widgets.get("show_uncertainty")
+        if isinstance(show_uncertainty_widget, QComboBox):
+            current_mode = show_uncertainty_widget.currentText().strip().lower()
+            if current_mode in {"", "auto"} and y_col:
+                show_uncertainty_widget.setCurrentText("on")
+
+        y_label_widget = self.widgets.get("y_label")
+        if isinstance(y_label_widget, QLineEdit) and y_col:
+            current_y_label = y_label_widget.text().strip()
+            if force_if_empty or not current_y_label:
+                y_label_widget.setText(y_col)
+
+        axis_suggestion = self.plot_axis_suggestion_provider(y_col) if self.plot_axis_suggestion_provider is not None else None
+        self._apply_plot_axis_suggestion(axis_suggestion, force_if_empty=force_if_empty)
+
+    def _apply_plot_axis_suggestion(
+        self,
+        axis_suggestion: Optional[Dict[str, str]],
+        *,
+        force_if_empty: bool = False,
+    ) -> None:
+        label = self.info_labels.get("plot_y_axis")
+        if label is not None:
+            if axis_suggestion is None:
+                label.setText(
+                    "Y axis defaults to autoscale. The helper keeps y_min, y_max and y_step as 'auto' and updates the suggested fixed range live."
+                )
+            else:
+                label.setText(
+                    f"Y axis autoscale is active by default. {axis_suggestion.get('summary', '').strip()} Leave the fields as 'auto' if you want autoscale."
+                )
+
+        for field_name in PLOT_Y_AUTOSCALE_FIELDS:
+            widget = self.widgets.get(field_name)
+            if not isinstance(widget, QLineEdit):
+                continue
+            suggested_value = "" if axis_suggestion is None else str(axis_suggestion.get(field_name, "")).strip()
+            widget.setPlaceholderText(suggested_value)
+            current_value = widget.text().strip()
+            if force_if_empty or not current_value or current_value == self._last_auto_y_axis.get(field_name, ""):
+                widget.setText(PLOT_Y_AUTOSCALE_TOKEN)
+                self._last_auto_y_axis[field_name] = PLOT_Y_AUTOSCALE_TOKEN
+
     def _update_source_description(self) -> None:
         label = self.info_labels.get("source")
         widget = self.widgets.get("source")
@@ -578,6 +835,8 @@ class ConfigRowDialog(QDialog):
             else:
                 out[field_name] = ""
         if self.section_title == "Instruments":
+            if not out.get("dist", "").strip():
+                out["dist"] = "rect"
             for field in INSTRUMENT_ZERO_DEFAULT_FIELDS:
                 if not out.get(field, "").strip():
                     out[field] = "0"
@@ -595,6 +854,7 @@ class EditableTableSection(QWidget):
         searchable_columns: Optional[set[str]] = None,
         variable_catalog_provider: Optional[Callable[[], List[str]]] = None,
         mapping_key_provider: Optional[Callable[[], List[str]]] = None,
+        auto_sort_column: Optional[str] = None,
         status_callback: Optional[Callable[[str], None]] = None,
         add_row_dialog_factory: Optional[Callable[[Optional[Dict[str, Any]]], Optional[Dict[str, str]]]] = None,
         parent: Optional[QWidget] = None,
@@ -605,6 +865,7 @@ class EditableTableSection(QWidget):
         self.searchable_columns = searchable_columns or set()
         self.variable_catalog_provider = variable_catalog_provider
         self.mapping_key_provider = mapping_key_provider
+        self.auto_sort_column = auto_sort_column
         self.status_callback = status_callback
         self.add_row_dialog_factory = add_row_dialog_factory
 
@@ -648,6 +909,12 @@ class EditableTableSection(QWidget):
             width = self.table.columnWidth(col_idx)
             self.table.setColumnWidth(col_idx, width + 18)
 
+    def _auto_sort_rows(self) -> None:
+        if not self.auto_sort_column or self.auto_sort_column not in self.columns:
+            return
+        sort_col_idx = self.columns.index(self.auto_sort_column)
+        self.table.sortItems(sort_col_idx, Qt.AscendingOrder)
+
     def _insert_row(self, values: Optional[Dict[str, Any]] = None) -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
@@ -655,6 +922,7 @@ class EditableTableSection(QWidget):
         for col_idx, column in enumerate(self.columns):
             text = "" if values.get(column) is None else str(values.get(column))
             self.table.setItem(row, col_idx, QTableWidgetItem(text))
+        self._auto_sort_rows()
         self._auto_resize_columns()
 
     def _prompt_add_row(self) -> None:
@@ -669,6 +937,7 @@ class EditableTableSection(QWidget):
         self.table.setRowCount(0)
         for record in records:
             self._insert_row(record)
+        self._auto_sort_rows()
         self._auto_resize_columns()
 
     def remove_selected_rows(self) -> None:
@@ -736,6 +1005,9 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.base_dir = base_dir
         self.last_preset_path = ""
         self.variable_catalog: List[str] = []
+        self.variable_preview_df = pd.DataFrame()
+        self._preview_output_cache_key = ""
+        self._preview_output_cache_df = pd.DataFrame()
 
         default_config_dir = config_dir.resolve()
         default_excel_path = excel_path.resolve()
@@ -834,6 +1106,7 @@ class Pipeline29ConfigEditor(QMainWindow):
             DEFAULT_PLOT_COLUMNS,
             searchable_columns=SEARCHABLE_COLUMNS_BY_SECTION.get("Plots", set()),
             variable_catalog_provider=self._available_variable_catalog,
+            auto_sort_column="filename",
             status_callback=self._show_status,
             add_row_dialog_factory=lambda initial=None: self._open_row_helper("Plots", DEFAULT_PLOT_COLUMNS, initial),
         )
@@ -960,6 +1233,12 @@ class Pipeline29ConfigEditor(QMainWindow):
 
     def _available_variable_catalog(self) -> List[str]:
         names = {name for name in self.variable_catalog if str(name).strip()}
+        if self.variable_preview_df is not None and not self.variable_preview_df.empty:
+            names.update([str(name).strip() for name in self.variable_preview_df.columns if str(name).strip()])
+        preview_df = self._current_preview_output_df()
+        if preview_df is not None and not preview_df.empty:
+            names.update([str(name).strip() for name in preview_df.columns if str(name).strip()])
+        names.update(_expected_uncertainty_columns(self.mappings_table.records(), self.instruments_table.records()))
         for table_section, columns in (
             (self.mappings_table, SEARCHABLE_COLUMNS_BY_SECTION.get("Mappings", set())),
             (self.plots_table, SEARCHABLE_COLUMNS_BY_SECTION.get("Plots", set())),
@@ -982,6 +1261,72 @@ class Pipeline29ConfigEditor(QMainWindow):
     def _current_source_catalog(self) -> Dict[str, str]:
         return _build_source_catalog_from_records(self.instruments_table.records())
 
+    def _current_preview_output_df(self) -> pd.DataFrame:
+        if self.variable_preview_df is None or self.variable_preview_df.empty:
+            return pd.DataFrame()
+
+        cache_parts = [
+            repr(sorted((str(k), str(v)) for k, v in _defaults_records_to_cfg(self.defaults_table.records()).items())),
+            repr(sorted(tuple(sorted(record.items())) for record in self.mappings_table.records())),
+            repr(sorted(tuple(sorted(record.items())) for record in self.instruments_table.records())),
+            str(tuple(str(c) for c in self.variable_preview_df.columns)),
+            str(len(self.variable_preview_df)),
+        ]
+        cache_key = "|".join(cache_parts)
+        if cache_key == self._preview_output_cache_key:
+            return self._preview_output_cache_df
+
+        try:
+            from nanum_pipeline_29 import add_uncertainties_from_mappings
+        except Exception:
+            self._preview_output_cache_key = cache_key
+            self._preview_output_cache_df = self.variable_preview_df.copy()
+            return self._preview_output_cache_df
+
+        preview_df = self.variable_preview_df.copy()
+        mappings = _mapping_records_to_specs(self.mappings_table.records())
+        defaults_cfg = _defaults_records_to_cfg(self.defaults_table.records())
+        instruments_df = pd.DataFrame(self.instruments_table.records(), columns=DEFAULT_INSTRUMENT_COLUMNS)
+        if "key" not in instruments_df.columns:
+            instruments_df["key"] = pd.NA
+        instruments_df["key_norm"] = instruments_df["key"].map(_norm_key_local)
+        N = pd.to_numeric(preview_df.get("N_trechos_validos", pd.Series(pd.NA, index=preview_df.index)), errors="coerce")
+
+        try:
+            preview_df = add_uncertainties_from_mappings(
+                preview_df,
+                mappings,
+                instruments_df,
+                N,
+                defaults_cfg=defaults_cfg,
+            )
+        except Exception:
+            preview_df = self.variable_preview_df.copy()
+
+        self._preview_output_cache_key = cache_key
+        self._preview_output_cache_df = preview_df
+        return preview_df
+
+    def _guess_plot_yerr_for_y(self, y_col: str) -> str:
+        return _guess_plot_yerr_col_from_context(
+            y_col,
+            available_columns=self._available_variable_catalog(),
+            mappings_records=self.mappings_table.records(),
+        )
+
+    def _plot_axis_suggestion_for_y(self, y_col: str) -> Optional[Dict[str, str]]:
+        y_text = str(y_col or "").strip()
+        if not y_text:
+            return None
+        preview_df = self._current_preview_output_df()
+        if preview_df is not None and not preview_df.empty:
+            suggestion = _build_axis_suggestion(preview_df, y_text)
+            if suggestion is not None:
+                return suggestion
+        if self.variable_preview_df is not None and not self.variable_preview_df.empty:
+            return _build_axis_suggestion(self.variable_preview_df, y_text)
+        return None
+
     def _open_row_helper(
         self,
         section_title: str,
@@ -999,6 +1344,8 @@ class Pipeline29ConfigEditor(QMainWindow):
             variable_catalog_provider=self._available_variable_catalog,
             mapping_key_provider=self._current_mapping_keys,
             source_catalog_provider=self._current_source_catalog,
+            plot_yerr_provider=self._guess_plot_yerr_for_y,
+            plot_axis_suggestion_provider=self._plot_axis_suggestion_for_y,
             status_callback=self._show_status,
             parent=self,
         )
@@ -1062,9 +1409,20 @@ class Pipeline29ConfigEditor(QMainWindow):
     def reload_variable_catalog(self, *, show_message: bool = True) -> None:
         path = self._current_variable_source_path()
         self.variable_catalog = _load_variable_catalog_from_file(path)
+        self.variable_preview_df = _load_preview_frame_from_file(path)
+        self._preview_output_cache_key = ""
+        self._preview_output_cache_df = pd.DataFrame()
         if show_message:
-            if self.variable_catalog:
-                self._show_status(f"Loaded {len(self.variable_catalog)} variable(s) from {path}")
+            total_catalog = len(self._available_variable_catalog())
+            derived_cols = 0
+            preview_df = self._current_preview_output_df()
+            if preview_df is not None and not preview_df.empty:
+                derived_cols = max(len(preview_df.columns) - len(self.variable_preview_df.columns), 0)
+            if total_catalog:
+                self._show_status(
+                    f"Loaded {total_catalog} variable(s) from {path} "
+                    f"(preview rows: {len(self.variable_preview_df)}, derived uncertainty cols: {derived_cols})"
+                )
             else:
                 self._show_status(f"No variable catalog loaded from {path}")
 

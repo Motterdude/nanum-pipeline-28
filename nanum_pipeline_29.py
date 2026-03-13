@@ -2522,7 +2522,7 @@ def _prompt_plot_point_filter_catalog_via_qt(
     )
     table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
     table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
-    table.verticalHeader().setDefaultSectionSize(72)
+    table.verticalHeader().setDefaultSectionSize(56)
     table.horizontalHeader().setMinimumSectionSize(120)
     main_layout.addWidget(table, stretch=1)
 
@@ -2557,12 +2557,10 @@ def _prompt_plot_point_filter_catalog_via_qt(
 
             cell_widget = QWidget()
             cell_layout = QVBoxLayout(cell_widget)
-            cell_layout.setContentsMargins(0, 4, 0, 4)
-            cell_layout.setSpacing(2)
-            cell_layout.addStretch(1)
+            cell_layout.setContentsMargins(0, 2, 0, 2)
+            cell_layout.setSpacing(1)
             cell_layout.addWidget(checkbox, alignment=Qt.AlignCenter)
             cell_layout.addWidget(count_label, alignment=Qt.AlignCenter)
-            cell_layout.addStretch(1)
 
             table.setCellWidget(row_idx, col_idx, cell_widget)
             checkbox_map[key] = checkbox
@@ -2671,7 +2669,7 @@ def _prompt_plot_point_filter_catalog_via_tk(
             highlightthickness=1,
             bd=0,
             padx=4,
-            pady=3,
+            pady=1,
         )
         cell.grid(row=row, column=column, sticky="nsew")
         return cell
@@ -2701,7 +2699,7 @@ def _prompt_plot_point_filter_catalog_via_tk(
             point_cell = make_cell(row_idx, col_idx)
             inner = ttk.Frame(point_cell)
             inner.pack(fill="both", expand=True)
-            ttk.Checkbutton(inner, variable=var).pack(anchor="center", pady=(0, 1))
+            ttk.Checkbutton(inner, variable=var).pack(anchor="center", pady=0)
             ttk.Label(inner, text="" if count == 1 else f"{count}x", anchor="center", justify="center").pack(anchor="center")
 
     status_var = tk.StringVar()
