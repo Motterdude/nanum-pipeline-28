@@ -102,6 +102,16 @@ Arquivos de referencia:
     - validar
     - salvar preset
     - carregar preset
+- GUI refinada depois na mesma data:
+  - `Save` passou a sobrescrever a config textual atual;
+  - `Save As` passou a gravar em outro diretorio de config;
+  - o editor ganhou `Variable source` dedicado para montar catalogo de colunas a partir de `.xlsx/.csv`;
+  - colunas de variavel em `Mappings` e `Plots` agora podem ser preenchidas via seletor pesquisavel com wildcard, acionado por duplo clique.
+- Fluxo de execucao refinado no `nanum_pipeline_29.py`:
+  - no run normal, pergunta se a GUI deve ser aberta antes do processamento;
+  - para automacao, pode pular essa pergunta com:
+    - `--skip-config-gui-prompt`
+    - `PIPELINE29_SKIP_CONFIG_GUI_PROMPT=1`
 - Plot com/sem incerteza:
   - nova chave `show_uncertainty` por linha em `plots.toml`;
   - valores suportados:

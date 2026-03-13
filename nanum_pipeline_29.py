@@ -2082,6 +2082,77 @@ def _prompt_runtime_dirs_via_cli(initial_input_dir: Path, initial_out_dir: Path)
     return input_dir, out_dir
 
 
+def _prompt_open_config_gui_via_windows_dialog() -> Optional[bool]:
+    ps_script = r"""
+Add-Type -AssemblyName System.Windows.Forms
+$result = [System.Windows.Forms.MessageBox]::Show(
+    'Abrir a GUI de configuracao do pipeline29 antes de rodar?',
+    'Pipeline 29',
+    [System.Windows.Forms.MessageBoxButtons]::YesNo,
+    [System.Windows.Forms.MessageBoxIcon]::Question
+)
+if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { exit 10 }
+if ($result -eq [System.Windows.Forms.DialogResult]::No) { exit 11 }
+exit 2
+"""
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode == 10:
+        return True
+    if completed.returncode == 11:
+        return False
+    if completed.returncode == 2:
+        return None
+    raise RuntimeError(
+        "Falha ao abrir prompt de GUI do pipeline29. "
+        f"stderr={completed.stderr.strip()!r} code={completed.returncode}"
+    )
+
+
+def _prompt_open_config_gui_via_tk_dialog() -> Optional[bool]:
+    if tk is None or messagebox is None:
+        return None
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        answer = messagebox.askyesno(
+            "Pipeline 29",
+            "Abrir a GUI de configuracao do pipeline29 antes de rodar?",
+            parent=root,
+        )
+        return bool(answer)
+    finally:
+        root.destroy()
+
+
+def _prompt_open_config_gui_via_cli() -> bool:
+    raw = input("Abrir GUI de configuracao do pipeline29 antes de rodar? [y/N]: ").strip().lower()
+    return raw in {"y", "yes", "s", "sim", "1", "true", "on"}
+
+
+def _prompt_open_config_gui() -> bool:
+    if os.name == "nt":
+        try:
+            answer = _prompt_open_config_gui_via_windows_dialog()
+            if answer is not None:
+                return answer
+        except Exception as exc:
+            print(f"[WARN] Prompt nativo da GUI de configuracao falhou: {exc}")
+
+    try:
+        answer = _prompt_open_config_gui_via_tk_dialog()
+        if answer is not None:
+            return answer
+    except Exception as exc:
+        print(f"[WARN] Prompt Tkinter da GUI de configuracao falhou: {exc}")
+
+    return _prompt_open_config_gui_via_cli()
+
+
 def _prompt_runtime_dirs(initial_input_dir: Path, initial_out_dir: Path) -> Tuple[Path, Path]:
     if os.name == "nt":
         try:
@@ -6321,6 +6392,7 @@ def _parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--config-dir", default="", help="Diretorio da configuracao textual do pipeline29.")
     parser.add_argument("--rebuild-text-config", action="store_true", help="Regera a config textual a partir do Excel rev3.")
     parser.add_argument("--config-gui", action="store_true", help="Abre o editor GUI da configuracao textual e sai.")
+    parser.add_argument("--skip-config-gui-prompt", action="store_true", help="Nao pergunta se deve abrir a GUI antes do run.")
     return parser.parse_args(argv)
 
 
@@ -6336,6 +6408,16 @@ def main(argv: Optional[List[str]] = None) -> None:
             raise RuntimeError(f"Nao consegui abrir a GUI de configuracao do pipeline29: {exc}") from exc
         launch_config_gui(base_dir=BASE_DIR, config_dir=text_config_dir, excel_path=_choose_config_path())
         return
+
+    skip_gui_prompt = norm_key(os.environ.get("PIPELINE29_SKIP_CONFIG_GUI_PROMPT", ""))
+    if not args.skip_config_gui_prompt and skip_gui_prompt not in {"1", "true", "yes", "on"}:
+        if _prompt_open_config_gui():
+            try:
+                from pipeline29_config_gui import launch_config_gui
+            except Exception as exc:
+                print(f"[WARN] Nao consegui abrir a GUI de configuracao do pipeline29: {exc}")
+            else:
+                launch_config_gui(base_dir=BASE_DIR, config_dir=text_config_dir, excel_path=_choose_config_path())
 
     config_bundle = load_pipeline29_config_bundle(
         config_source=args.config_source,

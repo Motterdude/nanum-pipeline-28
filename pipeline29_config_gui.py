@@ -1,18 +1,26 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QHeaderView,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -22,7 +30,6 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
-    QHeaderView,
 )
 
 from pipeline29_config_backend import (
@@ -46,11 +53,139 @@ from pipeline29_config_backend import (
 )
 
 
+SEARCHABLE_COLUMNS_BY_SECTION: Dict[str, set[str]] = {
+    "Mappings": {"col_mean", "col_sd"},
+    "Plots": {"x_col", "y_col", "yerr_col"},
+}
+
+
+def _load_variable_catalog_from_file(path: Path) -> List[str]:
+    if not path.exists() or not path.is_file():
+        return []
+
+    suffix = path.suffix.lower()
+    columns: List[str] = []
+
+    if suffix in {".xlsx", ".xlsm", ".xls"}:
+        xf = pd.ExcelFile(path)
+        seen: set[str] = set()
+        for sheet_name in xf.sheet_names:
+            try:
+                frame = pd.read_excel(path, sheet_name=sheet_name, nrows=0)
+            except Exception:
+                continue
+            for column in frame.columns.tolist():
+                text = str(column).strip()
+                if not text or text in seen:
+                    continue
+                seen.add(text)
+                columns.append(text)
+        return columns
+
+    if suffix == ".csv":
+        for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+            try:
+                frame = pd.read_csv(path, nrows=0, sep=None, engine="python", encoding=encoding)
+                return [str(column).strip() for column in frame.columns.tolist() if str(column).strip()]
+            except Exception:
+                continue
+    return []
+
+
+class VariableSelectorDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        title: str,
+        variable_names: List[str],
+        current_value: str = "",
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.variable_names = sorted({name for name in variable_names if str(name).strip()}, key=str.lower)
+        self.selected_value = current_value.strip()
+
+        self.setWindowTitle(title)
+        self.resize(760, 520)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(10)
+
+        root.addWidget(QLabel("Search accepts wildcard. Example: *T_* or U_*"))
+
+        self.search_edit = QLineEdit(current_value)
+        self.search_edit.setPlaceholderText("Type wildcard or part of the variable name")
+        root.addWidget(self.search_edit)
+
+        self.list_widget = QListWidget(self)
+        root.addWidget(self.list_widget, 1)
+
+        self.status_label = QLabel("")
+        root.addWidget(self.status_label)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
+        root.addWidget(buttons)
+
+        buttons.accepted.connect(self._accept_selection)
+        buttons.rejected.connect(self.reject)
+        self.search_edit.textChanged.connect(self._refresh_list)
+        self.list_widget.itemDoubleClicked.connect(lambda _item: self._accept_selection())
+
+        self._refresh_list()
+        self.search_edit.setFocus()
+        self.search_edit.selectAll()
+
+    def _filtered_variables(self) -> List[str]:
+        raw = self.search_edit.text().strip()
+        if not raw:
+            return self.variable_names
+        pattern = raw
+        if not any(ch in pattern for ch in "*?[]"):
+            pattern = f"*{pattern}*"
+        pattern_low = pattern.lower()
+        return [name for name in self.variable_names if fnmatch.fnmatch(name.lower(), pattern_low)]
+
+    def _refresh_list(self) -> None:
+        items = self._filtered_variables()
+        self.list_widget.clear()
+        for name in items:
+            self.list_widget.addItem(QListWidgetItem(name))
+        if items:
+            self.list_widget.setCurrentRow(0)
+        self.status_label.setText(f"{len(items)} variable(s) matched")
+
+    def _accept_selection(self) -> None:
+        item = self.list_widget.currentItem()
+        if item is not None:
+            self.selected_value = item.text().strip()
+            self.accept()
+            return
+        text = self.search_edit.text().strip()
+        if text:
+            self.selected_value = text
+            self.accept()
+            return
+        QMessageBox.warning(self, "Pipeline 29", "Select one variable or type a value.")
+
+
 class EditableTableSection(QWidget):
-    def __init__(self, title: str, columns: List[str], parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        columns: List[str],
+        *,
+        searchable_columns: Optional[set[str]] = None,
+        variable_catalog_provider: Optional[Callable[[], List[str]]] = None,
+        status_callback: Optional[Callable[[str], None]] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
         self.title = title
         self.columns = columns
+        self.searchable_columns = searchable_columns or set()
+        self.variable_catalog_provider = variable_catalog_provider
+        self.status_callback = status_callback
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -58,6 +193,8 @@ class EditableTableSection(QWidget):
 
         toolbar = QHBoxLayout()
         toolbar.addWidget(QLabel(title))
+        if self.searchable_columns:
+            toolbar.addWidget(QLabel("Double-click searchable cells to pick a variable"))
         toolbar.addStretch(1)
 
         self.btn_add = QPushButton("Add row")
@@ -70,8 +207,8 @@ class EditableTableSection(QWidget):
 
         self.table = QTableWidget(0, len(columns), self)
         self.table.setHorizontalHeaderLabels(columns)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.ExtendedSelection)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         header = self.table.horizontalHeader()
@@ -82,6 +219,7 @@ class EditableTableSection(QWidget):
         self.btn_add.clicked.connect(lambda: self.add_row())
         self.btn_duplicate.clicked.connect(self.duplicate_selected_rows)
         self.btn_remove.clicked.connect(self.remove_selected_rows)
+        self.table.cellDoubleClicked.connect(self._handle_cell_double_click)
 
     def add_row(self, values: Optional[Dict[str, Any]] = None) -> None:
         row = self.table.rowCount()
@@ -121,27 +259,66 @@ class EditableTableSection(QWidget):
                 out.append(record)
         return out
 
+    def _handle_cell_double_click(self, row: int, col_idx: int) -> None:
+        column = self.columns[col_idx]
+        if column not in self.searchable_columns or self.variable_catalog_provider is None:
+            return
+
+        variable_names = self.variable_catalog_provider()
+        if not variable_names:
+            if self.status_callback is not None:
+                self.status_callback("No variable catalog loaded. Choose a source file first.")
+            QMessageBox.warning(
+                self,
+                "Pipeline 29",
+                "No variable catalog loaded.\nChoose a variable source file first.",
+            )
+            return
+
+        item = self.table.item(row, col_idx)
+        current_value = "" if item is None else item.text().strip()
+        dialog = VariableSelectorDialog(
+            title=f"{self.title} - select {column}",
+            variable_names=variable_names,
+            current_value=current_value,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        if item is None:
+            item = QTableWidgetItem("")
+            self.table.setItem(row, col_idx, item)
+        item.setText(dialog.selected_value)
+        if self.status_callback is not None:
+            self.status_callback(f"{self.title}.{column} updated to '{dialog.selected_value}'")
+
 
 class Pipeline29ConfigEditor(QMainWindow):
     def __init__(self, *, base_dir: Path, config_dir: Path, excel_path: Path) -> None:
         super().__init__()
         self.base_dir = base_dir
-        self.config_dir = config_dir
-        self.excel_path = excel_path
         self.last_preset_path = ""
+        self.variable_catalog: List[str] = []
 
+        default_config_dir = config_dir.resolve()
+        default_excel_path = excel_path.resolve()
         state = load_gui_state(default_gui_state_path())
-        state_config_dir = state.get("config_dir", "")
-        state_excel_path = state.get("excel_path", "")
-        state_last_preset = state.get("last_preset_path", "")
-        if not str(config_dir).strip() and state_config_dir:
-            self.config_dir = Path(state_config_dir)
-        if not str(excel_path).strip() and state_excel_path:
-            self.excel_path = Path(state_excel_path)
-        self.last_preset_path = state_last_preset
+
+        state_config_dir = str(state.get("config_dir", "")).strip()
+        state_excel_path = str(state.get("excel_path", "")).strip()
+        state_variable_source = str(state.get("variable_source_path", "")).strip()
+        self.last_preset_path = str(state.get("last_preset_path", "")).strip()
+
+        self.config_dir = Path(state_config_dir).expanduser().resolve() if state_config_dir else default_config_dir
+        self.excel_path = Path(state_excel_path).expanduser().resolve() if state_excel_path else default_excel_path
+        self.variable_source_path = (
+            Path(state_variable_source).expanduser().resolve()
+            if state_variable_source
+            else (self.base_dir / "out" / "lv_kpis_clean.xlsx").resolve()
+        )
 
         self.setWindowTitle("Pipeline 29 Config Editor")
-        self.resize(1600, 920)
+        self.resize(1700, 980)
 
         central = QWidget(self)
         self.setCentralWidget(central)
@@ -149,30 +326,44 @@ class Pipeline29ConfigEditor(QMainWindow):
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(10)
 
-        path_row = QHBoxLayout()
-        path_row.addWidget(QLabel("Text config dir"))
+        config_row = QHBoxLayout()
+        config_row.addWidget(QLabel("Text config dir"))
         self.config_dir_edit = QLineEdit(str(self.config_dir))
-        path_row.addWidget(self.config_dir_edit, 1)
+        config_row.addWidget(self.config_dir_edit, 1)
         self.btn_browse_config_dir = QPushButton("Browse")
-        path_row.addWidget(self.btn_browse_config_dir)
-        path_row.addSpacing(12)
-        path_row.addWidget(QLabel("Excel rev3"))
+        config_row.addWidget(self.btn_browse_config_dir)
+        root.addLayout(config_row)
+
+        excel_row = QHBoxLayout()
+        excel_row.addWidget(QLabel("Excel rev3"))
         self.excel_path_edit = QLineEdit(str(self.excel_path))
-        path_row.addWidget(self.excel_path_edit, 1)
+        excel_row.addWidget(self.excel_path_edit, 1)
         self.btn_browse_excel = QPushButton("Browse")
-        path_row.addWidget(self.btn_browse_excel)
-        root.addLayout(path_row)
+        excel_row.addWidget(self.btn_browse_excel)
+        root.addLayout(excel_row)
+
+        variable_row = QHBoxLayout()
+        variable_row.addWidget(QLabel("Variable source"))
+        self.variable_source_edit = QLineEdit(str(self.variable_source_path))
+        variable_row.addWidget(self.variable_source_edit, 1)
+        self.btn_browse_variable_source = QPushButton("Browse")
+        self.btn_reload_variable_catalog = QPushButton("Reload catalog")
+        variable_row.addWidget(self.btn_browse_variable_source)
+        variable_row.addWidget(self.btn_reload_variable_catalog)
+        root.addLayout(variable_row)
 
         actions = QHBoxLayout()
         self.btn_reload_text = QPushButton("Reload text")
         self.btn_import_excel = QPushButton("Import Excel -> text")
-        self.btn_save_text = QPushButton("Save text config")
+        self.btn_save = QPushButton("Save")
+        self.btn_save_as = QPushButton("Save As")
         self.btn_validate = QPushButton("Validate")
         self.btn_save_preset = QPushButton("Save preset")
         self.btn_load_preset = QPushButton("Load preset")
         actions.addWidget(self.btn_reload_text)
         actions.addWidget(self.btn_import_excel)
-        actions.addWidget(self.btn_save_text)
+        actions.addWidget(self.btn_save)
+        actions.addWidget(self.btn_save_as)
         actions.addWidget(self.btn_validate)
         actions.addWidget(self.btn_save_preset)
         actions.addWidget(self.btn_load_preset)
@@ -182,12 +373,24 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.tabs = QTabWidget(self)
         root.addWidget(self.tabs, 1)
 
-        self.defaults_table = EditableTableSection("Defaults", ["param", "value"])
-        self.data_quality_table = EditableTableSection("Data Quality", ["param", "value"])
-        self.mappings_table = EditableTableSection("Mappings", DEFAULT_MAPPING_COLUMNS)
-        self.instruments_table = EditableTableSection("Instruments", DEFAULT_INSTRUMENT_COLUMNS)
-        self.reporting_table = EditableTableSection("Reporting_Rounding", DEFAULT_REPORTING_COLUMNS)
-        self.plots_table = EditableTableSection("Plots", DEFAULT_PLOT_COLUMNS)
+        self.defaults_table = EditableTableSection("Defaults", ["param", "value"], status_callback=self._show_status)
+        self.data_quality_table = EditableTableSection("Data Quality", ["param", "value"], status_callback=self._show_status)
+        self.mappings_table = EditableTableSection(
+            "Mappings",
+            DEFAULT_MAPPING_COLUMNS,
+            searchable_columns=SEARCHABLE_COLUMNS_BY_SECTION.get("Mappings", set()),
+            variable_catalog_provider=self._available_variable_catalog,
+            status_callback=self._show_status,
+        )
+        self.instruments_table = EditableTableSection("Instruments", DEFAULT_INSTRUMENT_COLUMNS, status_callback=self._show_status)
+        self.reporting_table = EditableTableSection("Reporting_Rounding", DEFAULT_REPORTING_COLUMNS, status_callback=self._show_status)
+        self.plots_table = EditableTableSection(
+            "Plots",
+            DEFAULT_PLOT_COLUMNS,
+            searchable_columns=SEARCHABLE_COLUMNS_BY_SECTION.get("Plots", set()),
+            variable_catalog_provider=self._available_variable_catalog,
+            status_callback=self._show_status,
+        )
 
         self.tabs.addTab(self.defaults_table, "Defaults")
         self.tabs.addTab(self.data_quality_table, "Data Quality")
@@ -201,14 +404,18 @@ class Pipeline29ConfigEditor(QMainWindow):
 
         self.btn_browse_config_dir.clicked.connect(self._choose_config_dir)
         self.btn_browse_excel.clicked.connect(self._choose_excel_path)
+        self.btn_browse_variable_source.clicked.connect(self._choose_variable_source_path)
+        self.btn_reload_variable_catalog.clicked.connect(self.reload_variable_catalog)
         self.btn_reload_text.clicked.connect(self.reload_text_bundle)
         self.btn_import_excel.clicked.connect(self.import_from_excel)
-        self.btn_save_text.clicked.connect(self.save_text_bundle)
+        self.btn_save.clicked.connect(self.save_text_bundle)
+        self.btn_save_as.clicked.connect(self.save_text_bundle_as)
         self.btn_validate.clicked.connect(self.validate_current_bundle)
         self.btn_save_preset.clicked.connect(self.save_preset)
         self.btn_load_preset.clicked.connect(self.load_preset)
 
         self._load_initial_bundle()
+        self.reload_variable_catalog(show_message=False)
 
     def _current_config_dir(self) -> Path:
         raw = self.config_dir_edit.text().strip()
@@ -220,7 +427,13 @@ class Pipeline29ConfigEditor(QMainWindow):
         raw = self.excel_path_edit.text().strip()
         if raw:
             return Path(raw).expanduser().resolve()
-        return self.base_dir / "config" / "config_incertezas_rev3.xlsx"
+        return (self.base_dir / "config" / "config_incertezas_rev3.xlsx").resolve()
+
+    def _current_variable_source_path(self) -> Path:
+        raw = self.variable_source_edit.text().strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+        return (self.base_dir / "out" / "lv_kpis_clean.xlsx").resolve()
 
     def _choose_config_dir(self) -> None:
         selected = QFileDialog.getExistingDirectory(self, "Select pipeline29 text config dir", str(self._current_config_dir()))
@@ -236,6 +449,17 @@ class Pipeline29ConfigEditor(QMainWindow):
         )
         if selected:
             self.excel_path_edit.setText(selected)
+
+    def _choose_variable_source_path(self) -> None:
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select variable source file",
+            str(self._current_variable_source_path()),
+            "Data files (*.xlsx *.xlsm *.xls *.csv)",
+        )
+        if selected:
+            self.variable_source_edit.setText(selected)
+            self.reload_variable_catalog(show_message=True)
 
     def _load_initial_bundle(self) -> None:
         config_dir = self._current_config_dir()
@@ -269,7 +493,7 @@ class Pipeline29ConfigEditor(QMainWindow):
     def _load_bundle(self, bundle: Pipeline29ConfigBundle) -> None:
         defaults_records = [{"param": key, "value": value} for key, value in bundle.defaults_cfg.items()]
         data_quality_records = [{"param": key, "value": value} for key, value in bundle.data_quality_cfg.items()]
-        mappings_records = []
+        mappings_records: List[Dict[str, Any]] = []
         for key, spec in bundle.mappings.items():
             mappings_records.append(
                 {
@@ -288,6 +512,19 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.reporting_table.load_records(bundle.reporting_df.to_dict(orient="records"))
         self.plots_table.load_records(bundle.plots_df.to_dict(orient="records"))
 
+    def _available_variable_catalog(self) -> List[str]:
+        names = {name for name in self.variable_catalog if str(name).strip()}
+        for table_section, columns in (
+            (self.mappings_table, SEARCHABLE_COLUMNS_BY_SECTION.get("Mappings", set())),
+            (self.plots_table, SEARCHABLE_COLUMNS_BY_SECTION.get("Plots", set())),
+        ):
+            for record in table_section.records():
+                for column in columns:
+                    text = str(record.get(column, "")).strip()
+                    if text:
+                        names.add(text)
+        return sorted(names, key=str.lower)
+
     def _bundle_from_ui(self) -> Tuple[Pipeline29ConfigBundle, List[str]]:
         errors: List[str] = []
 
@@ -302,9 +539,7 @@ class Pipeline29ConfigEditor(QMainWindow):
         for row in self.data_quality_table.records():
             key = row.get("param", "").strip()
             value_txt = row.get("value", "").strip()
-            if not key:
-                continue
-            if not value_txt:
+            if not key or not value_txt:
                 continue
             try:
                 data_quality_cfg[key] = float(value_txt.replace(",", "."))
@@ -339,6 +574,15 @@ class Pipeline29ConfigEditor(QMainWindow):
 
     def _show_status(self, message: str) -> None:
         self.status.showMessage(message, 12000)
+
+    def reload_variable_catalog(self, *, show_message: bool = True) -> None:
+        path = self._current_variable_source_path()
+        self.variable_catalog = _load_variable_catalog_from_file(path)
+        if show_message:
+            if self.variable_catalog:
+                self._show_status(f"Loaded {len(self.variable_catalog)} variable(s) from {path}")
+            else:
+                self._show_status(f"No variable catalog loaded from {path}")
 
     def reload_text_bundle(self) -> None:
         config_dir = self._current_config_dir()
@@ -375,8 +619,43 @@ class Pipeline29ConfigEditor(QMainWindow):
             return
         config_dir = self._current_config_dir()
         saved = save_text_config_bundle(bundle, config_dir)
+        self.config_dir_edit.setText(str(config_dir))
         self._load_bundle(saved)
         self._show_status(f"Saved text config to {config_dir}")
+
+    def save_text_bundle_as(self) -> None:
+        parent_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Select parent directory for Save As",
+            str(self._current_config_dir().parent),
+        )
+        if not parent_dir:
+            return
+
+        default_name = self._current_config_dir().name or "pipeline29_text"
+        folder_name, ok = QInputDialog.getText(
+            self,
+            "Save As",
+            "Config folder name:",
+            text=default_name,
+        )
+        if not ok or not folder_name.strip():
+            return
+
+        target_dir = Path(parent_dir) / folder_name.strip()
+        if target_dir.exists() and target_dir != self._current_config_dir():
+            answer = QMessageBox.question(
+                self,
+                "Pipeline 29",
+                f"Directory already exists:\n{target_dir}\n\nOverwrite files?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        self.config_dir_edit.setText(str(target_dir))
+        self.save_text_bundle()
 
     def save_preset(self) -> None:
         bundle, errors = self._bundle_from_ui()
@@ -384,9 +663,7 @@ class Pipeline29ConfigEditor(QMainWindow):
             QMessageBox.warning(self, "Pipeline 29", "\n".join(errors))
             return
         preset_dir = default_preset_dir()
-        default_name = "pipeline29_preset.json"
-        if self.last_preset_path:
-            default_name = Path(self.last_preset_path).name
+        default_name = Path(self.last_preset_path).name if self.last_preset_path else "pipeline29_preset.json"
         target, _ = QFileDialog.getSaveFileName(
             self,
             "Save preset",
@@ -420,6 +697,7 @@ class Pipeline29ConfigEditor(QMainWindow):
             {
                 "config_dir": str(self._current_config_dir()),
                 "excel_path": str(self._current_excel_path()),
+                "variable_source_path": str(self._current_variable_source_path()),
                 "last_preset_path": self.last_preset_path,
             },
             default_gui_state_path(),

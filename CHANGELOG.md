@@ -46,6 +46,12 @@ Todas as mudancas relevantes deste repositorio devem ser registradas aqui.
   - `text` (`config/pipeline29_text`)
   - `excel` (`config_incertezas_rev3.xlsx`)
   - `auto` com bootstrap automatico do Excel para texto
+- Ao iniciar o `pipeline29` em run normal, o script agora pergunta se a GUI de configuracao deve ser aberta antes do processamento.
+- A GUI do `pipeline29` ganhou:
+  - `Save` para sobrescrever a config textual atual no mesmo diretorio;
+  - `Save As` para gravar em outro diretorio de config;
+  - `Variable source` separado para montar catalogo de variaveis via arquivo `.xlsx/.csv`;
+  - seletor pesquisavel com wildcard para colunas de `Mappings` (`col_mean`, `col_sd`) e `Plots` (`x_col`, `y_col`, `yerr_col`).
 - O dispatcher de plots do `pipeline29` ganhou a chave `show_uncertainty` por plot:
   - `auto`
   - `on`

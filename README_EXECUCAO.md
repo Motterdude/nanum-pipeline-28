@@ -111,8 +111,12 @@ Regerar os TOMLs a partir da `rev3`:
 ```
 
 Observacoes:
+- no run normal, o `pipeline29` pergunta se deve abrir a GUI antes de processar; para automacao, use `--skip-config-gui-prompt` ou `PIPELINE29_SKIP_CONFIG_GUI_PROMPT=1`;
 - a GUI salva/carrega presets em JSON fora do repo, em `%LOCALAPPDATA%\nanum_pipeline_29\presets\`;
 - o ultimo estado da GUI fica em `%LOCALAPPDATA%\nanum_pipeline_29\config_gui_state.json`;
+- a GUI agora tem `Save` e `Save As` separados para a config textual;
+- a GUI tem um `Variable source` proprio para gerar catalogo de variaveis e alimentar os seletores de `Mappings` e `Plots`;
+- os campos de variavel em `Mappings` e `Plots` aceitam selecao por picker pesquisavel com wildcard ao dar duplo clique na celula;
 - cada plot agora pode explicitar `show_uncertainty = auto | on | off` em `config/pipeline29_text/plots.toml`.
 
 ## Como rodar os utilitarios KIBOX
