@@ -72,8 +72,8 @@ DEFAULT_RAW_DIR = BASE_DIR / "raw"
 DEFAULT_PROCESS_DIR = DEFAULT_RAW_DIR / "PROCESSAR"
 DEFAULT_OUT_DIR = BASE_DIR / "out"
 MESTRADO_ROOT = Path(r"D:\Drive\Faculdade\PUC\Mestrado")
-RUNTIME_SETTINGS_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "nanum_pipeline_28"
-RUNTIME_SETTINGS_PATH = RUNTIME_SETTINGS_DIR / "pipeline28_runtime_paths.json"
+RUNTIME_SETTINGS_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "nanum_pipeline_29"
+RUNTIME_SETTINGS_PATH = RUNTIME_SETTINGS_DIR / "pipeline29_runtime_paths.json"
 
 RAW_DIR = DEFAULT_RAW_DIR
 PROCESS_DIR = DEFAULT_PROCESS_DIR
@@ -1888,12 +1888,12 @@ def _prompt_runtime_dirs_via_windows_dialog(initial_input_dir: Path, initial_out
 def _prompt_runtime_dirs_via_tk_dialog(initial_input_dir: Path, initial_out_dir: Path) -> Tuple[Path, Path]:
     if tk is None or ttk is None or filedialog is None or messagebox is None:
         raise RuntimeError(
-            "Tkinter nao esta disponivel neste Python. O pipeline28 agora exige popup Windows "
+            "Tkinter nao esta disponivel neste Python. O pipeline29 agora exige popup Windows "
             "para selecionar RAW_INPUT_DIR e OUT_DIR."
         )
 
     root = tk.Tk()
-    root.title("Pipeline 28 - Diretorios de execucao")
+    root.title("Pipeline 29 - Diretorios de execucao")
     root.resizable(False, False)
     root.attributes("-topmost", True)
 
@@ -1947,26 +1947,26 @@ def _prompt_runtime_dirs_via_tk_dialog(initial_input_dir: Path, initial_out_dir:
         raw_input = input_var.get().strip()
         out_input = out_var.get().strip()
         if not raw_input:
-            messagebox.showerror("Pipeline 28", "Selecione o diretorio de entrada.", parent=root)
+            messagebox.showerror("Pipeline 29", "Selecione o diretorio de entrada.", parent=root)
             return
         if not out_input:
-            messagebox.showerror("Pipeline 28", "Selecione o diretorio de saida.", parent=root)
+            messagebox.showerror("Pipeline 29", "Selecione o diretorio de saida.", parent=root)
             return
 
         input_dir = Path(raw_input).expanduser().resolve()
         out_dir = Path(out_input).expanduser().resolve()
 
         if not input_dir.exists():
-            messagebox.showerror("Pipeline 28", f"Input dir nao existe:\n{input_dir}", parent=root)
+            messagebox.showerror("Pipeline 29", f"Input dir nao existe:\n{input_dir}", parent=root)
             return
         if not input_dir.is_dir():
-            messagebox.showerror("Pipeline 28", f"Input dir nao e diretorio:\n{input_dir}", parent=root)
+            messagebox.showerror("Pipeline 29", f"Input dir nao e diretorio:\n{input_dir}", parent=root)
             return
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
         except Exception as exc:
             messagebox.showerror(
-                "Pipeline 28",
+                "Pipeline 29",
                 f"Nao consegui preparar o diretorio de saida:\n{out_dir}\n\n{exc}",
                 parent=root,
             )
@@ -2103,9 +2103,12 @@ def _choose_runtime_dirs(defaults_cfg: Dict[str, str], xlsx_path: Path) -> Tuple
     initial_input_dir = _resolve_runtime_dir(raw_cfg, DEFAULT_PROCESS_DIR)
     initial_out_dir = _resolve_runtime_dir(out_cfg, DEFAULT_OUT_DIR)
 
-    use_defaults_env = norm_key(os.environ.get("PIPELINE28_USE_DEFAULT_RUNTIME_DIRS", ""))
+    use_defaults_env = norm_key(
+        os.environ.get("PIPELINE29_USE_DEFAULT_RUNTIME_DIRS", "")
+        or os.environ.get("PIPELINE28_USE_DEFAULT_RUNTIME_DIRS", "")
+    )
     if use_defaults_env in {"1", "true", "yes", "on"}:
-        print("[INFO] PIPELINE28_USE_DEFAULT_RUNTIME_DIRS ativo; usando RAW_INPUT_DIR/OUT_DIR sem popup.")
+        print("[INFO] PIPELINE29_USE_DEFAULT_RUNTIME_DIRS ativo; usando RAW_INPUT_DIR/OUT_DIR sem popup.")
         defaults_cfg[norm_key("RAW_INPUT_DIR")] = str(initial_input_dir)
         defaults_cfg[norm_key("OUT_DIR")] = str(initial_out_dir)
         return initial_input_dir, initial_out_dir
@@ -2249,7 +2252,7 @@ def _ensure_qt_application() -> Tuple[object, bool]:
     app = QApplication.instance()
     owns_app = False
     if app is None:
-        app = QApplication(["pipeline28"])
+        app = QApplication(["pipeline29"])
         owns_app = True
         if QStyleFactory is not None:
             try:
@@ -2273,7 +2276,7 @@ def _prompt_plot_point_filter_catalog_via_qt(
     app, owns_app = _ensure_qt_application()
     _ = app
     dialog = QDialog()
-    dialog.setWindowTitle("Pipeline 28 - filtro de pontos para plots")
+    dialog.setWindowTitle("Pipeline 29 - filtro de pontos para plots")
     dialog.setModal(True)
     dialog.resize(1120, 760)
 
@@ -2392,7 +2395,7 @@ def _prompt_plot_point_filter_catalog_via_qt(
     def accept_selection() -> None:
         selected = {key for key, checkbox in checkbox_map.items() if bool(checkbox.isChecked())}
         if not selected:
-            QMessageBox.critical(dialog, "Pipeline 28", "Selecione pelo menos um ponto para gerar os graficos.")
+            QMessageBox.critical(dialog, "Pipeline 29", "Selecione pelo menos um ponto para gerar os graficos.")
             return
         selected_result["selected"] = selected
         dialog.accept()
@@ -2421,7 +2424,7 @@ def _prompt_plot_point_filter_catalog_via_tk(
 
     result: dict[str, object] = {"selected": None}
     root = tk.Tk()
-    root.title("Pipeline 28 - filtro de pontos para plots")
+    root.title("Pipeline 29 - filtro de pontos para plots")
     root.withdraw()
     root.resizable(True, True)
     root.attributes("-topmost", True)
@@ -2526,7 +2529,7 @@ def _prompt_plot_point_filter_catalog_via_tk(
     def confirm() -> None:
         selected = {key for key, var in cell_vars.items() if bool(var.get())}
         if not selected:
-            messagebox.showerror("Pipeline 28", "Selecione pelo menos um ponto para gerar os graficos.", parent=root)
+            messagebox.showerror("Pipeline 29", "Selecione pelo menos um ponto para gerar os graficos.", parent=root)
             return
         result["selected"] = selected
         root.destroy()

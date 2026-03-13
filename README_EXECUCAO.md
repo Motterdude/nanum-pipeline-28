@@ -2,6 +2,7 @@
 
 ## O que precisa estar no Git
 - Codigo principal:
+  - `nanum_pipeline_29.py`
   - `nanum_pipeline_28.py`
   - `standalone_kibox_cycle_viewer_fast.py`
 - Config obrigatoria:
@@ -36,6 +37,7 @@ Processamentos/
 |-- raw/
 |-- out/
 |-- out_validation/
+|-- nanum_pipeline_29.py
 |-- nanum_pipeline_28.py
 |-- standalone_kibox_cycle_viewer_fast.py
 |-- requirements_pipeline.txt
@@ -64,17 +66,19 @@ powershell -ExecutionPolicy Bypass -File .\setup_env.ps1 -WithGui -PythonExe "C:
 ## Como rodar o pipeline
 1. Rode o pipeline normalmente:
 ```powershell
-& ".\.venv\Scripts\python.exe" .\nanum_pipeline_28.py
+& ".\.venv\Scripts\python.exe" .\nanum_pipeline_29.py
 ```
+`nanum_pipeline_28.py` fica preservado como rollback do snapshot de 2026-03-13.
 2. Em toda execucao, o pipeline abre um popup Windows para selecionar:
    - `RAW_INPUT_DIR`
    - `OUT_DIR`
 3. O fluxo tenta primeiro o seletor nativo de pastas do Windows; se ele falhar, cai para popup Tkinter e, em ultimo caso, para prompt no terminal.
 4. A ultima selecao fica salva localmente em:
-   - `%LOCALAPPDATA%\nanum_pipeline_28\pipeline28_runtime_paths.json`
+   - `%LOCALAPPDATA%\nanum_pipeline_29\pipeline29_runtime_paths.json`
 5. O popup volta preenchido com a ultima selecao para acelerar a proxima execucao.
 6. O restante do `config/config_incertezas_rev3.xlsx` continua sendo lido normalmente.
 7. Apenas `RAW_INPUT_DIR` e `OUT_DIR` sao sincronizados de volta na aba `Defaults`; o resto da planilha nao e alterado.
+8. Para rodar sem popup, use `PIPELINE29_USE_DEFAULT_RUNTIME_DIRS=1` antes de chamar o script. O `pipeline29` tambem aceita a variavel legada `PIPELINE28_USE_DEFAULT_RUNTIME_DIRS=1`.
 
 ## Como rodar os utilitarios KIBOX
 Viewer rapido Qt:

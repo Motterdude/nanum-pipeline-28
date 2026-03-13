@@ -8,6 +8,7 @@ __pycache__/
 # Generated outputs
 out/
 out_validation/
+out_pipeline28_temp_unc/
 
 # Local editor settings
 .vscode/

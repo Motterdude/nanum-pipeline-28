@@ -2,6 +2,50 @@
 
 Todas as mudancas relevantes deste repositorio devem ser registradas aqui.
 
+## 2026-03-13
+
+### Added
+
+- `nanum_pipeline_29.py` criado como copia funcional do estado atual do `nanum_pipeline_28.py`, para a proxima linha de trabalho manter rollback simples no `28`.
+- Novos mapeamentos de incerteza para temperaturas:
+  - `T_S_CIL_1..4`
+  - `T_CARTER`
+  - `T_AMBIENTE`
+  - `T_RADIADOR`
+  - `T_S_AGUA`
+  - `T_WATERCOOLER`
+  - `T_ADMISSAO`
+  - `T_E_TURB`
+  - `T_S_TURB`
+- Novos mapeamentos de incerteza para pressao:
+  - `P_S_TURB_RAW`
+  - `P_E_TURB_RAW`
+  - `P_COLETOR_RAW`
+  - `P_S_COMP_RAW`
+
+### Changed
+
+- `nanum_pipeline_28.py` passou a filtrar componentes da aba `Instruments` por seletor da aba `Defaults`, permitindo chavear o `NI9213_TC_MODE` entre modos do modulo.
+- A propagacao de incerteza agora gera tambem:
+  - `T_E_CIL_AVG`
+  - `DT_ADMISSAO_TO_T_E_CIL_AVG_C`
+- O fluxo de runtime ganhou bypass por ambiente com `PIPELINE28_USE_DEFAULT_RUNTIME_DIRS=1`; no `nanum_pipeline_29.py`, o alias novo e `PIPELINE29_USE_DEFAULT_RUNTIME_DIRS=1`, com fallback para a variavel antiga.
+- A planilha `config/config_incertezas_rev3.xlsx` foi atualizada para:
+  - corrigir `T_AMBIENTE` para termopar tipo `T`;
+  - incluir componentes K/T e `NI 9213` por modo;
+  - incluir os sensores de pressao com limite `+/-2.93 kPa` tratado como distribuicao retangular;
+  - adicionar `yerr_col` nos plots de temperatura e pressao relevantes.
+
+### Validation
+
+- `python -m py_compile nanum_pipeline_28.py`
+- `python -m py_compile nanum_pipeline_29.py`
+- Reprocessamento local confirmou colunas `uA/uB/uc/U` para temperaturas e para:
+  - `P_S_TURB_RAW`
+  - `P_E_TURB_RAW`
+  - `P_COLETOR_RAW`
+  - `P_S_COMP_RAW`
+
 ## 2026-03-12
 
 ### Added

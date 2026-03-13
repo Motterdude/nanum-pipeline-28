@@ -13,6 +13,52 @@ Arquivos de referencia:
 - O nome oficial daqui para frente e `HANDOFF_GLOBAL.md`. Nao criar novos arquivos de handoff paralelos sem necessidade objetiva.
 - Arquivos grandes de aquisicao bruta em formato `.open` podem ser mantidos localmente para reproducao, mas nao entram no Git comum quando excedem o limite operacional do GitHub. Quando isso acontecer, a decisao deve ser registrada aqui.
 
+## Snapshot congelado do pipeline 28 e abertura do pipeline 29 - 2026-03-13
+- Objetivo:
+  - congelar o estado atual do `nanum_pipeline_28.py` antes da migracao planejada de configuracao via Excel para GUI + texto;
+  - abrir a proxima linha de evolucao em `nanum_pipeline_29.py`, mantendo rollback simples para o `28`.
+- Arquivos afetados:
+  - `nanum_pipeline_28.py`
+  - `nanum_pipeline_29.py`
+  - `config/config_incertezas_rev3.xlsx`
+  - `CHANGELOG.md`
+  - `README_EXECUCAO.md`
+  - `HANDOFF_GLOBAL.md`
+- Consolidacao funcional incluida neste snapshot:
+  - incertezas de temperatura expandidas para:
+    - `T_S_CIL_1..4`
+    - `T_CARTER`
+    - `T_AMBIENTE`
+    - `T_RADIADOR`
+    - `T_S_AGUA`
+    - `T_WATERCOOLER`
+    - `T_ADMISSAO`
+    - `T_E_TURB`
+    - `T_S_TURB`
+  - derivacao com incerteza para:
+    - `T_E_CIL_AVG`
+    - `DT_ADMISSAO_TO_T_E_CIL_AVG_C`
+  - seletor `NI9213_TC_MODE` na aba `Defaults`, mantendo `high_speed` como default e suportando troca por configuracao;
+  - bypass de popup por ambiente:
+    - `PIPELINE28_USE_DEFAULT_RUNTIME_DIRS=1` no `28`
+    - `PIPELINE29_USE_DEFAULT_RUNTIME_DIRS=1` no `29`, com fallback para a variavel antiga;
+  - incertezas de pressao aplicadas via Excel para:
+    - `P_S_TURB_RAW`
+    - `P_E_TURB_RAW`
+    - `P_COLETOR_RAW`
+    - `P_S_COMP_RAW`
+  - criterio de pressao adotado:
+    - limite informado do sensor `+/-2.93 kPa`;
+    - entrada na aba `Instruments` como distribuicao retangular;
+    - `uB = 2.93 / sqrt(3) = 1.6916 kPa`.
+- Validacao local registrada:
+  - compilacao de `nanum_pipeline_28.py` e `nanum_pipeline_29.py`;
+  - `lv_kpis_clean.xlsx` com colunas `uA/uB/uc/U` preenchidas para os canais de temperatura acima e para os quatro canais de pressao;
+  - plots de temperatura e pressao relevantes com `yerr_col` configurado.
+- Decisao operacional a partir deste ponto:
+  - `nanum_pipeline_28.py` passa a ser o rollback congelado deste snapshot;
+  - novas mudancas estruturais devem partir de `nanum_pipeline_29.py`.
+
 ## Registro global de mudancas - 2026-03-08
 - Origem importada: `D:\Drive\Faculdade\PUC\Mestrado\Dados_Ensaios\Processamento Pyton 28`
 - Destino Git: branch `import/notebook-pipeline28-2026-03-08` a partir de `main`
