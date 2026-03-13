@@ -54,6 +54,12 @@ Todas as mudancas relevantes deste repositorio devem ser registradas aqui.
   - seletor pesquisavel com wildcard para colunas de `Mappings` (`col_mean`, `col_sd`) e `Plots` (`x_col`, `y_col`, `yerr_col`).
   - helper vertical de `Add row` para `Mappings`, `Instruments` e `Plots`;
   - dropdown editavel de `Instruments.key` alimentado dinamicamente pelas `keys` atuais de `Mappings`, mesmo antes de salvar.
+  - abertura maximizada por padrao;
+  - sugestao automatica de `col_sd` a partir de `col_mean` no helper de `Mappings`;
+  - defaults no helper de `Instruments` para `acc_pct`, `digits`, `lsd` e `resolution` = `0`, com `source = User input`;
+  - explicacao visual de `acc_abs` como limite `+/-`;
+  - dropdown editavel de `source` com descricao dinamica do catalogo atual de instrumentos;
+  - defaults no helper de `Plots` para `enabled = 1`, `plot_type = all_fuels_yx`, `x_col = Load_kW`, `x_min = 0`, `x_max = 55`, `x_step = 5`, com `filename/title` gerados automaticamente e Y em autoscale por padrao.
 - O dispatcher de plots do `pipeline29` ganhou a chave `show_uncertainty` por plot:
   - `auto`
   - `on`

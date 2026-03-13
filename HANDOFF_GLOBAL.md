@@ -109,6 +109,14 @@ Arquivos de referencia:
   - colunas de variavel em `Mappings` e `Plots` agora podem ser preenchidas via seletor pesquisavel com wildcard, acionado por duplo clique.
   - `Add row` de `Mappings`, `Instruments` e `Plots` passou a abrir helper vertical em dialog separado;
   - o helper de `Instruments` recebeu dropdown editavel de `key`, alimentado pelas `keys` atuais do `Mappings` ainda nao salvas.
+  - a janela principal da GUI passou a abrir maximizada;
+  - o helper de `Mappings` passou a sugerir `col_sd` automaticamente a partir de `col_mean`;
+  - o helper de `Instruments` passou a:
+    - explicar `acc_abs` como limite `+/-`;
+    - preencher `acc_pct`, `digits`, `lsd` e `resolution` com `0` por default;
+    - assumir `source = User input` por default;
+    - mostrar descricao dinamica para o `source` selecionado;
+  - o helper de `Plots` passou a abrir com defaults de setup rapido (`enabled = 1`, `plot_type = all_fuels_yx`, `x = 0..55 passo 5`) e a gerar `filename/title` automaticamente.
 - Fluxo de execucao refinado no `nanum_pipeline_29.py`:
   - no run normal, pergunta se a GUI deve ser aberta antes do processamento;
   - para automacao, pode pular essa pergunta com:

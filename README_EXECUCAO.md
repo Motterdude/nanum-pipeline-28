@@ -119,6 +119,10 @@ Observacoes:
 - os campos de variavel em `Mappings` e `Plots` aceitam selecao por picker pesquisavel com wildcard ao dar duplo clique na celula;
 - `Add row` em `Mappings`, `Instruments` e `Plots` abre helper vertical dedicado;
 - o helper de `Instruments` usa dropdown editavel de `key` baseado nas chaves atuais de `Mappings`, inclusive sem salvar;
+- a janela principal abre maximizada por padrao;
+- no helper de `Mappings`, `col_sd` e sugerido automaticamente a partir do `col_mean`;
+- no helper de `Instruments`, `acc_pct`, `digits`, `lsd` e `resolution` caem para `0` quando vazios, `source` assume `User input`, e o `source` mostra descricao dinamica do catalogo atual;
+- no helper de `Plots`, os defaults de X ja entram preenchidos (`0 .. 55`, passo `5`) e `filename/title` sao gerados automaticamente pelos eixos;
 - cada plot agora pode explicitar `show_uncertainty = auto | on | off` em `config/pipeline29_text/plots.toml`.
 
 ## Como rodar os utilitarios KIBOX

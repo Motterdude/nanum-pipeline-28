@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import re
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -61,6 +62,11 @@ SEARCHABLE_COLUMNS_BY_SECTION: Dict[str, set[str]] = {
     "Plots": {"x_col", "y_col", "yerr_col"},
 }
 
+INSTRUMENT_ZERO_DEFAULT_FIELDS = {"acc_pct", "digits", "lsd", "resolution"}
+INSTRUMENT_SOURCE_DEFAULT = "User input"
+PLOT_X_DEFAULTS = {"x_min": "0", "x_max": "55", "x_step": "5"}
+PLOT_Y_AUTOSCALE_FIELDS = {"y_min", "y_max", "y_step"}
+
 DEFAULT_FIELD_SPECS_BY_SECTION: Dict[str, List[Dict[str, Any]]] = {
     "Mappings": [
         {"name": "key", "kind": "text"},
@@ -80,7 +86,7 @@ DEFAULT_FIELD_SPECS_BY_SECTION: Dict[str, List[Dict[str, Any]]] = {
         {"name": "digits", "kind": "text"},
         {"name": "lsd", "kind": "text"},
         {"name": "resolution", "kind": "text"},
-        {"name": "source", "kind": "text"},
+        {"name": "source", "kind": "source_combo"},
         {"name": "notes", "kind": "text"},
         {"name": "setting_param", "kind": "text"},
         {"name": "setting_value", "kind": "text"},
@@ -109,6 +115,47 @@ DEFAULT_FIELD_SPECS_BY_SECTION: Dict[str, List[Dict[str, Any]]] = {
         {"name": "notes", "kind": "text"},
     ],
 }
+
+
+def _infer_sd_from_mean(col_mean: str) -> str:
+    text = str(col_mean or "").strip()
+    if not text:
+        return ""
+    replacements = [
+        ("_mean_mean_of_windows", "_sd_of_windows"),
+        ("_mean_of_windows", "_sd_of_windows"),
+        ("_mean", "_sd"),
+    ]
+    for old, new in replacements:
+        if old in text:
+            return text.replace(old, new)
+    return ""
+
+
+def _safe_name(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", raw).strip("_")
+    return slug or "plot"
+
+
+def _default_plot_filename(x_col: str, y_col: str) -> str:
+    x_name = _safe_name(x_col)
+    y_name = _safe_name(y_col)
+    if not y_name:
+        return ""
+    if not x_name:
+        return f"{y_name}.png"
+    return f"{y_name}_vs_{x_name}_all.png"
+
+
+def _default_plot_title(x_col: str, y_col: str) -> str:
+    x_text = str(x_col or "").strip()
+    y_text = str(y_col or "").strip()
+    if not x_text or not y_text:
+        return ""
+    return f"{y_text} vs {x_text} (all fuels)"
 
 
 def _load_variable_catalog_from_file(path: Path) -> List[str]:
@@ -142,6 +189,38 @@ def _load_variable_catalog_from_file(path: Path) -> List[str]:
             except Exception:
                 continue
     return []
+
+
+def _build_source_catalog_from_records(records: List[Dict[str, str]]) -> Dict[str, str]:
+    catalog: Dict[str, str] = {
+        "User input": "Manual assumption entered by the user. Typical use: +/- limit informed directly for the sensor.",
+        "ASTM E230 / ANSI MC96.1 summary": "Thermocouple standard-grade tolerance reference used for K/T sensor uncertainty.",
+        "NI 9213 datasheet Fig. 3 (approx.)": "Approximate NI 9213 module uncertainty for Type K based on the datasheet curves.",
+        "NI 9213 datasheet Fig. 4 (approx.)": "Approximate NI 9213 module uncertainty for Type T based on the datasheet curves.",
+    }
+
+    grouped: Dict[str, List[Dict[str, str]]] = {}
+    for record in records:
+        source = str(record.get("source", "")).strip()
+        if not source:
+            continue
+        grouped.setdefault(source, []).append(record)
+
+    for source, source_records in grouped.items():
+        components = sorted({str(row.get("component", "")).strip() for row in source_records if str(row.get("component", "")).strip()})
+        notes = sorted({str(row.get("notes", "")).strip() for row in source_records if str(row.get("notes", "")).strip()})
+        parts: List[str] = []
+        if components:
+            preview = ", ".join(components[:3])
+            if len(components) > 3:
+                preview += ", ..."
+            parts.append(f"Components: {preview}")
+        if notes:
+            parts.append(notes[0])
+        if parts:
+            catalog[source] = " ".join(parts)
+
+    return catalog
 
 
 class VariableSelectorDialog(QDialog):
@@ -230,26 +309,34 @@ class ConfigRowDialog(QDialog):
         initial_values: Optional[Dict[str, Any]] = None,
         variable_catalog_provider: Optional[Callable[[], List[str]]] = None,
         mapping_key_provider: Optional[Callable[[], List[str]]] = None,
+        source_catalog_provider: Optional[Callable[[], Dict[str, str]]] = None,
         status_callback: Optional[Callable[[str], None]] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self.section_title = section_title
         self.field_specs = field_specs
-        self.initial_values = initial_values or {}
+        self.initial_values = self._prepare_initial_values(initial_values or {})
         self.variable_catalog_provider = variable_catalog_provider
         self.mapping_key_provider = mapping_key_provider
+        self.source_catalog_provider = source_catalog_provider
         self.status_callback = status_callback
         self.widgets: Dict[str, Any] = {}
+        self.info_labels: Dict[str, QLabel] = {}
+        self._last_auto_sd = ""
+        self._last_auto_filename = ""
+        self._last_auto_title = ""
 
         self.setWindowTitle(f"{section_title} helper")
-        self.resize(820, 760 if section_title == "Plots" else 640)
+        self.resize(640 if section_title == "Plots" else 560, 720 if section_title == "Plots" else 620)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(10)
 
         root.addWidget(QLabel(f"Configure a new row for {section_title}"))
+        if section_title == "Plots":
+            root.addWidget(QLabel("X defaults: min=0, max=55, step=5. Y default: autoscale. Leave y_min / y_max / y_step blank to keep autoscale."))
 
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
@@ -266,11 +353,39 @@ class ConfigRowDialog(QDialog):
             label = QLabel(field_name)
             editor = self._build_editor(spec, self.initial_values.get(field_name, ""))
             form.addRow(label, editor)
+            extra = self._field_extra_label(field_name)
+            if extra is not None:
+                form.addRow(QLabel(""), extra)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
+        self._after_build()
+
+    def _prepare_initial_values(self, values: Dict[str, Any]) -> Dict[str, Any]:
+        prepared = dict(values or {})
+        if self.section_title == "Instruments":
+            for field in INSTRUMENT_ZERO_DEFAULT_FIELDS:
+                if not str(prepared.get(field, "")).strip():
+                    prepared[field] = "0"
+            if not str(prepared.get("source", "")).strip():
+                prepared["source"] = INSTRUMENT_SOURCE_DEFAULT
+        if self.section_title == "Plots":
+            if not str(prepared.get("enabled", "")).strip():
+                prepared["enabled"] = "1"
+            if not str(prepared.get("plot_type", "")).strip():
+                prepared["plot_type"] = "all_fuels_yx"
+            if not str(prepared.get("show_uncertainty", "")).strip():
+                prepared["show_uncertainty"] = "auto"
+            if not str(prepared.get("x_col", "")).strip():
+                prepared["x_col"] = "Load_kW"
+            if not str(prepared.get("x_label", "")).strip():
+                prepared["x_label"] = "Power (kW)"
+            for field, default_value in PLOT_X_DEFAULTS.items():
+                if not str(prepared.get(field, "")).strip():
+                    prepared[field] = default_value
+        return prepared
 
     def _build_editor(self, spec: Dict[str, Any], value: Any) -> QWidget:
         kind = str(spec.get("kind", "text"))
@@ -286,6 +401,20 @@ class ConfigRowDialog(QDialog):
             combo.addItems(options)
             combo.setCurrentText(value_text)
             self.widgets[field_name] = combo
+            return combo
+
+        if kind == "source_combo":
+            combo = QComboBox(self)
+            combo.setEditable(True)
+            options = []
+            if self.source_catalog_provider is not None:
+                options = sorted(self.source_catalog_provider().keys(), key=str.lower)
+            if value_text and value_text not in options:
+                options.append(value_text)
+            combo.addItems(options)
+            combo.setCurrentText(value_text or INSTRUMENT_SOURCE_DEFAULT)
+            self.widgets[field_name] = combo
+            combo.currentTextChanged.connect(lambda _text: self._update_source_description())
             return combo
 
         if kind == "mapping_key_combo":
@@ -318,6 +447,89 @@ class ConfigRowDialog(QDialog):
         self.widgets[field_name] = line_edit
         return line_edit
 
+    def _field_extra_label(self, field_name: str) -> Optional[QLabel]:
+        if self.section_title == "Instruments" and field_name == "acc_abs":
+            label = QLabel("Absolute accuracy limit. Example: enter 2.93 for a sensor specified as +/-2.93 kPa.")
+            label.setWordWrap(True)
+            return label
+        if self.section_title == "Instruments" and field_name == "source":
+            label = QLabel("")
+            label.setWordWrap(True)
+            self.info_labels["source"] = label
+            return label
+        if self.section_title == "Instruments" and field_name == "resolution":
+            label = QLabel("If acc_pct, digits, lsd or resolution are left blank, the helper stores 0 by default.")
+            label.setWordWrap(True)
+            return label
+        if self.section_title == "Plots" and field_name == "y_step":
+            label = QLabel("Y axis defaults to autoscale. Leave y_min, y_max and y_step blank if you want autoscale.")
+            label.setWordWrap(True)
+            return label
+        return None
+
+    def _after_build(self) -> None:
+        if self.section_title == "Mappings":
+            mean_widget = self.widgets.get("col_mean")
+            if isinstance(mean_widget, QLineEdit):
+                mean_widget.textChanged.connect(lambda _text: self._maybe_sync_mapping_sd())
+            self._maybe_sync_mapping_sd(force_if_empty=True)
+        if self.section_title == "Plots":
+            for field_name in ("x_col", "y_col"):
+                widget = self.widgets.get(field_name)
+                if isinstance(widget, QLineEdit):
+                    widget.textChanged.connect(lambda _text: self._maybe_sync_plot_defaults())
+            self._maybe_sync_plot_defaults(force_if_empty=True)
+        if self.section_title == "Instruments":
+            self._update_source_description()
+
+    def _maybe_sync_mapping_sd(self, force_if_empty: bool = False) -> None:
+        mean_widget = self.widgets.get("col_mean")
+        sd_widget = self.widgets.get("col_sd")
+        if not isinstance(mean_widget, QLineEdit) or not isinstance(sd_widget, QLineEdit):
+            return
+        current_mean = mean_widget.text().strip()
+        candidate = _infer_sd_from_mean(current_mean)
+        if not candidate:
+            return
+        current_sd = sd_widget.text().strip()
+        if force_if_empty or not current_sd or current_sd == self._last_auto_sd:
+            sd_widget.setText(candidate)
+            self._last_auto_sd = candidate
+
+    def _maybe_sync_plot_defaults(self, force_if_empty: bool = False) -> None:
+        x_widget = self.widgets.get("x_col")
+        y_widget = self.widgets.get("y_col")
+        filename_widget = self.widgets.get("filename")
+        title_widget = self.widgets.get("title")
+        if not isinstance(x_widget, QLineEdit) or not isinstance(y_widget, QLineEdit):
+            return
+        x_col = x_widget.text().strip()
+        y_col = y_widget.text().strip()
+
+        auto_filename = _default_plot_filename(x_col, y_col)
+        if isinstance(filename_widget, QLineEdit) and auto_filename:
+            current = filename_widget.text().strip()
+            if force_if_empty or not current or current == self._last_auto_filename:
+                filename_widget.setText(auto_filename)
+                self._last_auto_filename = auto_filename
+
+        auto_title = _default_plot_title(x_col, y_col)
+        if isinstance(title_widget, QLineEdit) and auto_title:
+            current = title_widget.text().strip()
+            if force_if_empty or not current or current == self._last_auto_title:
+                title_widget.setText(auto_title)
+                self._last_auto_title = auto_title
+
+    def _update_source_description(self) -> None:
+        label = self.info_labels.get("source")
+        widget = self.widgets.get("source")
+        if label is None or not isinstance(widget, QComboBox):
+            return
+        source = widget.currentText().strip() or INSTRUMENT_SOURCE_DEFAULT
+        catalog = self.source_catalog_provider() if self.source_catalog_provider is not None else {}
+        desc = catalog.get(source, "Custom source. Use it to document where the equipment uncertainty came from.")
+        label.setText(f"Source description: {desc}")
+
     def _pick_variable(self, field_name: str, target: QLineEdit) -> None:
         variable_names = self.variable_catalog_provider() if self.variable_catalog_provider is not None else []
         if not variable_names:
@@ -337,6 +549,10 @@ class ConfigRowDialog(QDialog):
         )
         if dialog.exec() == QDialog.Accepted:
             target.setText(dialog.selected_value)
+            if self.section_title == "Mappings" and field_name == "col_mean":
+                self._maybe_sync_mapping_sd()
+            if self.section_title == "Plots" and field_name in {"x_col", "y_col"}:
+                self._maybe_sync_plot_defaults(force_if_empty=True)
 
     def values(self) -> Dict[str, str]:
         out: Dict[str, str] = {}
@@ -347,6 +563,12 @@ class ConfigRowDialog(QDialog):
                 out[field_name] = widget.text().strip()
             else:
                 out[field_name] = ""
+        if self.section_title == "Instruments":
+            for field in INSTRUMENT_ZERO_DEFAULT_FIELDS:
+                if not out.get(field, "").strip():
+                    out[field] = "0"
+            if not out.get("source", "").strip():
+                out["source"] = INSTRUMENT_SOURCE_DEFAULT
         return out
 
 
@@ -734,6 +956,9 @@ class Pipeline29ConfigEditor(QMainWindow):
                 keys.append(key)
         return sorted(dict.fromkeys(keys), key=str.lower)
 
+    def _current_source_catalog(self) -> Dict[str, str]:
+        return _build_source_catalog_from_records(self.instruments_table.records())
+
     def _open_row_helper(
         self,
         section_title: str,
@@ -750,6 +975,7 @@ class Pipeline29ConfigEditor(QMainWindow):
             initial_values=initial_values,
             variable_catalog_provider=self._available_variable_catalog,
             mapping_key_provider=self._current_mapping_keys,
+            source_catalog_provider=self._current_source_catalog,
             status_callback=self._show_status,
             parent=self,
         )
@@ -947,7 +1173,7 @@ def launch_config_gui(*, base_dir: Path, config_dir: Optional[Path] = None, exce
         config_dir=(config_dir or default_text_config_dir(base_dir)).resolve(),
         excel_path=(excel_path or (base_dir / "config" / "config_incertezas_rev3.xlsx")).resolve(),
     )
-    window.show()
+    window.showMaximized()
     return app.exec()
 
 
