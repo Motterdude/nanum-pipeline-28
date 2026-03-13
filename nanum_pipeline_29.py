@@ -392,6 +392,104 @@ def _to_float(x: object, default: float = 0.0) -> float:
         return default
 
 
+def _canon_unit_token(text: object) -> str:
+    s = _canon_name(text).replace("º", "").replace("°", "")
+    s = s.replace("/", "_").replace("-", "_")
+    if not s:
+        return ""
+    aliases = {
+        "mbar": "mbar",
+        "mbars": "mbar",
+        "millibar": "mbar",
+        "millibars": "mbar",
+        "kpa": "kpa",
+        "pa": "pa",
+        "bar": "bar",
+        "c": "c",
+        "degc": "c",
+        "celsius": "c",
+    }
+    return aliases.get(s, s)
+
+
+def _unit_scale_to_base(unit: str) -> Optional[float]:
+    unit_norm = _canon_unit_token(unit)
+    scales = {
+        "pa": 1.0,
+        "mbar": 100.0,
+        "kpa": 1000.0,
+        "bar": 100000.0,
+        "c": 1.0,
+    }
+    return scales.get(unit_norm)
+
+
+def _convert_unit_value(value: float, from_unit: str, to_unit: str) -> Optional[float]:
+    from_scale = _unit_scale_to_base(from_unit)
+    to_scale = _unit_scale_to_base(to_unit)
+    if from_scale is None or to_scale is None:
+        return None
+    return float(value * from_scale / to_scale)
+
+
+def _mapping_unit_for_y_col(y_col: str, mappings: dict) -> Optional[str]:
+    y_text = _to_str_or_empty(y_col)
+    if not y_text:
+        return None
+    for _key_norm, spec in mappings.items():
+        col_mean_req = str(spec.get("mean", "")).strip()
+        if not col_mean_req:
+            continue
+        if norm_key(col_mean_req) == norm_key(y_text):
+            unit = _to_str_or_empty(spec.get("unit", ""))
+            return unit or None
+    return None
+
+
+def _parse_axis_value(value: object, *, target_unit: Optional[str] = None, default: float = np.nan) -> float:
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+
+    if isinstance(value, (int, float)):
+        try:
+            return float(value)
+        except Exception:
+            return default
+
+    text = str(value).replace("\ufeff", "").strip()
+    if not text:
+        return default
+    if text.lower() in {"auto", "nan", "none", "off", "disabled", "n/a", "na"}:
+        return default
+
+    text_num = text.replace(",", ".")
+    try:
+        return float(text_num)
+    except Exception:
+        pass
+
+    match = re.fullmatch(r"\s*([+-]?\d+(?:\.\d+)?)\s*([A-Za-z°º/_-]+)\s*", text_num)
+    if not match:
+        return default
+
+    number = float(match.group(1))
+    unit = _canon_unit_token(match.group(2))
+    if not unit:
+        return number
+    if not target_unit:
+        return number
+
+    converted = _convert_unit_value(number, unit, target_unit)
+    if converted is None:
+        return default
+    return converted
+
+
 def _safe_name(name: str) -> str:
     s = re.sub(r"[^A-Za-z0-9_]+", "_", str(name))
     s = re.sub(r"_+", "_", s).strip("_")
@@ -696,10 +794,16 @@ def _parse_csv_list_ints(x: object) -> Optional[List[int]]:
     return out if out else None
 
 
-def _parse_axis_spec(min_v: object, max_v: object, step_v: object) -> Optional[Tuple[float, float, float]]:
-    a = _to_float(min_v, default=np.nan)
-    b = _to_float(max_v, default=np.nan)
-    c = _to_float(step_v, default=np.nan)
+def _parse_axis_spec(
+    min_v: object,
+    max_v: object,
+    step_v: object,
+    *,
+    target_unit: Optional[str] = None,
+) -> Optional[Tuple[float, float, float]]:
+    a = _parse_axis_value(min_v, target_unit=target_unit, default=np.nan)
+    b = _parse_axis_value(max_v, target_unit=target_unit, default=np.nan)
+    c = _parse_axis_value(step_v, target_unit=target_unit, default=np.nan)
     if not (np.isfinite(a) and np.isfinite(b) and np.isfinite(c)):
         return None
     if c <= 0:
@@ -2522,7 +2626,7 @@ def _prompt_plot_point_filter_catalog_via_qt(
     )
     table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
     table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
-    table.verticalHeader().setDefaultSectionSize(56)
+    table.verticalHeader().setDefaultSectionSize(38)
     table.horizontalHeader().setMinimumSectionSize(120)
     main_layout.addWidget(table, stretch=1)
 
@@ -2550,15 +2654,16 @@ def _prompt_plot_point_filter_catalog_via_qt(
 
             checkbox = QCheckBox()
             checkbox.setChecked(True)
+            checkbox.setStyleSheet("QCheckBox::indicator { width: 14px; height: 14px; }")
             checkbox.stateChanged.connect(lambda _state, _refresh=refresh_status: _refresh())
             count_label = QLabel("" if count == 1 else f"{count}x")
             count_label.setAlignment(Qt.AlignCenter)
-            count_label.setStyleSheet("color: #5f6b76; font-size: 11px;")
+            count_label.setStyleSheet("color: #5f6b76; font-size: 10px;")
 
             cell_widget = QWidget()
             cell_layout = QVBoxLayout(cell_widget)
-            cell_layout.setContentsMargins(0, 2, 0, 2)
-            cell_layout.setSpacing(1)
+            cell_layout.setContentsMargins(0, 0, 0, 0)
+            cell_layout.setSpacing(0)
             cell_layout.addWidget(checkbox, alignment=Qt.AlignCenter)
             cell_layout.addWidget(count_label, alignment=Qt.AlignCenter)
 
@@ -2668,8 +2773,8 @@ def _prompt_plot_point_filter_catalog_via_tk(
             highlightbackground=cell_border,
             highlightthickness=1,
             bd=0,
-            padx=4,
-            pady=1,
+            padx=3,
+            pady=0,
         )
         cell.grid(row=row, column=column, sticky="nsew")
         return cell
@@ -6189,9 +6294,15 @@ def make_plots_from_config(
         x_label = _to_str_or_empty(r.get("x_label", ""))
         y_label = _to_str_or_empty(r.get("y_label", ""))
 
+        y_axis_unit = _mapping_unit_for_y_col(y_col_req, mappings)
         fixed_x = _parse_axis_spec(r.get("x_min", pd.NA), r.get("x_max", pd.NA), r.get("x_step", pd.NA))
-        fixed_y = _parse_axis_spec(r.get("y_min", pd.NA), r.get("y_max", pd.NA), r.get("y_step", pd.NA))
-        y_tick_step = _to_float(r.get("y_step", pd.NA), np.nan)
+        fixed_y = _parse_axis_spec(
+            r.get("y_min", pd.NA),
+            r.get("y_max", pd.NA),
+            r.get("y_step", pd.NA),
+            target_unit=y_axis_unit,
+        )
+        y_tick_step = _parse_axis_value(r.get("y_step", pd.NA), target_unit=y_axis_unit, default=np.nan)
         if not np.isfinite(y_tick_step) or y_tick_step <= 0:
             y_tick_step = None
         if fixed_y is not None:

@@ -703,7 +703,7 @@ class ConfigRowDialog(QDialog):
             return label
         if self.section_title == "Plots" and field_name == "y_step":
             label = QLabel(
-                "Y axis defaults to autoscale. The helper keeps y_min, y_max and y_step as 'auto' and shows a live preview like y_min[value] y_max[value] y_step[value]."
+                "Y axis defaults to autoscale. The helper keeps y_min, y_max and y_step as 'auto' and shows a live preview like y_min[value] y_max[value] y_step[value]. The runtime also accepts steps such as 2, 2mBar, 0.2kPa or 0.002bar."
             )
             label.setWordWrap(True)
             self.info_labels["plot_y_axis"] = label
