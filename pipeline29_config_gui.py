@@ -319,12 +319,73 @@ def _build_axis_suggestion(df: pd.DataFrame, column: str) -> Optional[Dict[str, 
         "y_min": f"{suggested_min:g}",
         "y_max": f"{suggested_max:g}",
         "y_step": f"{step:g}",
+        "unit": "",
         "summary": (
             f"Preview auto: y_min[{suggested_min:g}] "
             f"y_max[{suggested_max:g}] "
             f"y_step[{step:g}]"
         ),
     }
+
+
+def _parse_preview_axis_value(text: str, *, target_unit: str = "") -> Optional[float]:
+    raw = str(text or "").strip()
+    if not raw or raw.lower() in {"auto", "nan", "none", "off", "n/a", "na"}:
+        return None
+    try:
+        from nanum_pipeline_29 import _parse_axis_value
+
+        value = _parse_axis_value(raw, target_unit=target_unit or None, default=np.nan)
+        if np.isfinite(value):
+            return float(value)
+    except Exception:
+        pass
+    return None
+
+
+def _format_preview_axis_summary(
+    axis_suggestion: Optional[Dict[str, str]],
+    *,
+    current_y_min: str,
+    current_y_max: str,
+    current_y_step: str,
+) -> str:
+    if axis_suggestion is None:
+        return (
+            "Y axis defaults to autoscale. The helper keeps y_min, y_max and y_step as 'auto' and "
+            "shows a live preview like y_min[value] y_max[value] y_step[value]."
+        )
+
+    unit = str(axis_suggestion.get("unit", "")).strip()
+    default_min = _parse_preview_axis_value(axis_suggestion.get("y_min", ""), target_unit=unit)
+    default_max = _parse_preview_axis_value(axis_suggestion.get("y_max", ""), target_unit=unit)
+    default_step = _parse_preview_axis_value(axis_suggestion.get("y_step", ""), target_unit=unit)
+    if default_min is None or default_max is None or default_step is None or default_step <= 0:
+        return (
+            "Y axis autoscale is active by default. "
+            f"{str(axis_suggestion.get('summary', '')).strip()}. Leave the fields as 'auto' if you want autoscale."
+        )
+
+    preview_step = _parse_preview_axis_value(current_y_step, target_unit=unit)
+    if preview_step is None or preview_step <= 0:
+        preview_step = default_step
+
+    preview_min = _parse_preview_axis_value(current_y_min, target_unit=unit)
+    preview_max = _parse_preview_axis_value(current_y_max, target_unit=unit)
+
+    if preview_min is None:
+        preview_min = float(np.floor((default_min + preview_step * 1e-9) / preview_step) * preview_step)
+    if preview_max is None:
+        preview_max = float(np.ceil((default_max - preview_step * 1e-9) / preview_step) * preview_step)
+
+    if preview_max <= preview_min:
+        preview_max = preview_min + preview_step
+
+    return (
+        "Y axis autoscale is active by default. "
+        f"Preview auto: y_min[{preview_min:g}] y_max[{preview_max:g}] y_step[{preview_step:g}]. "
+        "Leave the fields as 'auto' if you want autoscale."
+    )
 
 
 def _load_variable_catalog_from_file(path: Path) -> List[str]:
@@ -717,7 +778,7 @@ class ConfigRowDialog(QDialog):
                 mean_widget.textChanged.connect(lambda _text: self._maybe_sync_mapping_sd())
             self._maybe_sync_mapping_sd(force_if_empty=True)
         if self.section_title == "Plots":
-            for field_name in ("x_col", "y_col"):
+            for field_name in ("x_col", "y_col", "y_min", "y_max", "y_step"):
                 widget = self.widgets.get(field_name)
                 if isinstance(widget, QLineEdit):
                     widget.textChanged.connect(lambda _text: self._maybe_sync_plot_defaults())
@@ -794,15 +855,21 @@ class ConfigRowDialog(QDialog):
         force_if_empty: bool = False,
     ) -> None:
         label = self.info_labels.get("plot_y_axis")
+        y_min_widget = self.widgets.get("y_min")
+        y_max_widget = self.widgets.get("y_max")
+        y_step_widget = self.widgets.get("y_step")
+        current_y_min = y_min_widget.text().strip() if isinstance(y_min_widget, QLineEdit) else ""
+        current_y_max = y_max_widget.text().strip() if isinstance(y_max_widget, QLineEdit) else ""
+        current_y_step = y_step_widget.text().strip() if isinstance(y_step_widget, QLineEdit) else ""
         if label is not None:
-            if axis_suggestion is None:
-                label.setText(
-                    "Y axis defaults to autoscale. The helper keeps y_min, y_max and y_step as 'auto' and shows a live preview like y_min[value] y_max[value] y_step[value]."
+            label.setText(
+                _format_preview_axis_summary(
+                    axis_suggestion,
+                    current_y_min=current_y_min,
+                    current_y_max=current_y_max,
+                    current_y_step=current_y_step,
                 )
-            else:
-                label.setText(
-                    f"Y axis autoscale is active by default. {axis_suggestion.get('summary', '').strip()}. Leave the fields as 'auto' if you want autoscale."
-                )
+            )
 
         for field_name in PLOT_Y_AUTOSCALE_FIELDS:
             widget = self.widgets.get(field_name)
@@ -1344,13 +1411,23 @@ class Pipeline29ConfigEditor(QMainWindow):
         y_text = str(y_col or "").strip()
         if not y_text:
             return None
+        mappings = _mapping_records_to_specs(self.mappings_table.records())
+        unit = ""
+        for spec in mappings.values():
+            if _norm_key_local(spec.get("mean", "")) == _norm_key_local(y_text):
+                unit = str(spec.get("unit", "")).strip()
+                break
         preview_df = self._current_preview_output_df()
         if preview_df is not None and not preview_df.empty:
             suggestion = _build_axis_suggestion(preview_df, y_text)
             if suggestion is not None:
+                suggestion["unit"] = unit
                 return suggestion
         if self.variable_preview_df is not None and not self.variable_preview_df.empty:
-            return _build_axis_suggestion(self.variable_preview_df, y_text)
+            suggestion = _build_axis_suggestion(self.variable_preview_df, y_text)
+            if suggestion is not None:
+                suggestion["unit"] = unit
+            return suggestion
         return None
 
     def _open_row_helper(

@@ -4606,17 +4606,17 @@ def _apply_y_tick_step(ax: plt.Axes, y_tick_step: Optional[float]) -> None:
         return
 
     eps = abs(step) * 1e-9
-    first = np.ceil((ymin - eps) / step) * step
-    last = np.floor((ymax + eps) / step) * step
-    if not (np.isfinite(first) and np.isfinite(last)) or last < first:
+    snapped_min = np.floor((ymin + eps) / step) * step
+    snapped_max = np.ceil((ymax - eps) / step) * step
+    if not (np.isfinite(snapped_min) and np.isfinite(snapped_max)) or snapped_max <= snapped_min:
         return
 
-    ticks = np.arange(first, last + (step * 0.5), step).tolist()
+    ticks = np.arange(snapped_min, snapped_max + (step * 0.5), step).tolist()
     if not ticks:
         return
 
     ax.set_yticks(ticks)
-    ax.set_ylim(ymin, ymax)
+    ax.set_ylim(snapped_min, snapped_max)
 
 
 def _blend_mask(df: pd.DataFrame, *, etoh_pct: float, h2o_pct: float, tol: float = 0.6) -> pd.Series:
