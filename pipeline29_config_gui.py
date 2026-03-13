@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -69,6 +69,7 @@ INSTRUMENT_SOURCE_DEFAULT = "User input"
 PLOT_X_DEFAULTS = {"x_min": "0", "x_max": "55", "x_step": "5"}
 PLOT_Y_AUTOSCALE_FIELDS = {"y_min", "y_max", "y_step"}
 PLOT_Y_AUTOSCALE_TOKEN = "auto"
+PIPELINE29_GUI_SAVE_RUN_EXIT_CODE = 1001
 
 DEFAULT_FIELD_SPECS_BY_SECTION: Dict[str, List[Dict[str, Any]]] = {
     "Mappings": [
@@ -978,7 +979,9 @@ class EditableTableSection(QWidget):
 
         toolbar = QHBoxLayout()
         toolbar.addWidget(QLabel(title))
-        if self.searchable_columns:
+        if self.add_row_dialog_factory is not None:
+            toolbar.addWidget(QLabel("Double-click a filled row to edit in helper"))
+        elif self.searchable_columns:
             toolbar.addWidget(QLabel("Double-click searchable cells to pick a variable"))
         toolbar.addStretch(1)
 
@@ -1028,6 +1031,20 @@ class EditableTableSection(QWidget):
         self._auto_sort_rows()
         self._auto_resize_columns()
 
+    def _update_row(self, row: int, values: Optional[Dict[str, Any]] = None) -> None:
+        if row < 0 or row >= self.table.rowCount():
+            return
+        values = values or {}
+        for col_idx, column in enumerate(self.columns):
+            text = "" if values.get(column) is None else str(values.get(column))
+            item = self.table.item(row, col_idx)
+            if item is None:
+                item = QTableWidgetItem("")
+                self.table.setItem(row, col_idx, item)
+            item.setText(text)
+        self._auto_sort_rows()
+        self._auto_resize_columns()
+
     def _prompt_add_row(self) -> None:
         values: Optional[Dict[str, Any]] = None
         if self.add_row_dialog_factory is not None:
@@ -1060,6 +1077,11 @@ class EditableTableSection(QWidget):
             out[column] = "" if item is None else item.text().strip()
         return out
 
+    def _row_has_values(self, row: int) -> bool:
+        if row < 0 or row >= self.table.rowCount():
+            return False
+        return any(str(value).strip() for value in self.record_at(row).values())
+
     def records(self) -> List[Dict[str, str]]:
         out: List[Dict[str, str]] = []
         for row in range(self.table.rowCount()):
@@ -1069,6 +1091,14 @@ class EditableTableSection(QWidget):
         return out
 
     def _handle_cell_double_click(self, row: int, col_idx: int) -> None:
+        if self.add_row_dialog_factory is not None and self._row_has_values(row):
+            updated = self.add_row_dialog_factory(self.record_at(row))
+            if updated is not None:
+                self._update_row(row, updated)
+                if self.status_callback is not None:
+                    self.status_callback(f"{self.title} row updated from helper.")
+            return
+
         column = self.columns[col_idx]
         if column not in self.searchable_columns or self.variable_catalog_provider is None:
             return
@@ -1129,6 +1159,7 @@ class Pipeline29ConfigEditor(QMainWindow):
             else (self.base_dir / "out" / "lv_kpis_clean.xlsx").resolve()
         )
         self._window_state_applied = False
+        self._requested_exit_code: Optional[int] = None
 
         self.setWindowTitle("Pipeline 29 Config Editor")
         self.resize(1700, 980)
@@ -1169,6 +1200,7 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.btn_reload_text = QPushButton("Reload text")
         self.btn_import_excel = QPushButton("Import Excel -> text")
         self.btn_save = QPushButton("Save")
+        self.btn_save_run = QPushButton("Save & Run")
         self.btn_save_as = QPushButton("Save As")
         self.btn_validate = QPushButton("Validate")
         self.btn_save_preset = QPushButton("Save preset")
@@ -1176,6 +1208,7 @@ class Pipeline29ConfigEditor(QMainWindow):
         actions.addWidget(self.btn_reload_text)
         actions.addWidget(self.btn_import_excel)
         actions.addWidget(self.btn_save)
+        actions.addWidget(self.btn_save_run)
         actions.addWidget(self.btn_save_as)
         actions.addWidget(self.btn_validate)
         actions.addWidget(self.btn_save_preset)
@@ -1231,6 +1264,7 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.btn_reload_text.clicked.connect(self.reload_text_bundle)
         self.btn_import_excel.clicked.connect(self.import_from_excel)
         self.btn_save.clicked.connect(self.save_text_bundle)
+        self.btn_save_run.clicked.connect(self.save_text_bundle_and_run)
         self.btn_save_as.clicked.connect(self.save_text_bundle_as)
         self.btn_validate.clicked.connect(self.validate_current_bundle)
         self.btn_save_preset.clicked.connect(self.save_preset)
@@ -1570,16 +1604,28 @@ class Pipeline29ConfigEditor(QMainWindow):
         QMessageBox.information(self, "Pipeline 29", "Config validated successfully.")
         self._show_status("Config validated successfully.")
 
-    def save_text_bundle(self) -> None:
+    def _save_text_bundle_internal(self) -> bool:
         bundle, errors = self._bundle_from_ui()
         if errors:
             QMessageBox.warning(self, "Pipeline 29", "\n".join(errors))
-            return
+            self._show_status("Save aborted. Fix validation errors first.")
+            return False
         config_dir = self._current_config_dir()
         saved = save_text_config_bundle(bundle, config_dir)
         self.config_dir_edit.setText(str(config_dir))
         self._load_bundle(saved)
         self._show_status(f"Saved text config to {config_dir}")
+        return True
+
+    def save_text_bundle(self) -> None:
+        self._save_text_bundle_internal()
+
+    def save_text_bundle_and_run(self) -> None:
+        if not self._save_text_bundle_internal():
+            return
+        self._requested_exit_code = PIPELINE29_GUI_SAVE_RUN_EXIT_CODE
+        self._show_status("Saved config. Closing GUI and continuing pipeline run.")
+        self.close()
 
     def save_text_bundle_as(self) -> None:
         parent_dir = QFileDialog.getExistingDirectory(
@@ -1661,6 +1707,11 @@ class Pipeline29ConfigEditor(QMainWindow):
             default_gui_state_path(),
         )
         super().closeEvent(event)
+        if event.isAccepted() and self._requested_exit_code is not None:
+            app = QApplication.instance()
+            if app is not None:
+                exit_code = self._requested_exit_code
+                QTimer.singleShot(0, lambda: app.exit(exit_code))
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
@@ -1704,7 +1755,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.excel_path
         else (base_dir / "config" / "config_incertezas_rev3.xlsx").resolve()
     )
-    return launch_config_gui(base_dir=base_dir, config_dir=config_dir, excel_path=excel_path)
+    exit_code = launch_config_gui(base_dir=base_dir, config_dir=config_dir, excel_path=excel_path)
+    if exit_code == PIPELINE29_GUI_SAVE_RUN_EXIT_CODE:
+        state = load_gui_state(default_gui_state_path())
+        state_config_dir = str(state.get("config_dir", "")).strip()
+        if state_config_dir:
+            config_dir = Path(state_config_dir).expanduser().resolve()
+        from nanum_pipeline_29 import main as run_pipeline29
+
+        run_pipeline29(
+            [
+                "--config-source",
+                "text",
+                "--config-dir",
+                str(config_dir),
+                "--skip-config-gui-prompt",
+            ]
+        )
+        return 0
+    return exit_code
 
 
 if __name__ == "__main__":

@@ -23,7 +23,9 @@ from matplotlib.ticker import FuncFormatter
 from pipeline29_config_backend import (
     Pipeline29ConfigBundle,
     bootstrap_text_config_from_excel,
+    default_gui_state_path,
     default_text_config_dir,
+    load_gui_state,
     load_text_config_bundle,
     text_config_exists,
 )
@@ -6623,24 +6625,43 @@ def main(argv: Optional[List[str]] = None) -> None:
     args = _parse_cli_args(argv)
     print(f"[INFO] Base do script: {BASE_DIR}")
     text_config_dir = _choose_text_config_dir(Path(args.config_dir) if args.config_dir else None)
+    gui_save_run_exit_code = 1001
 
     if args.config_gui:
         try:
-            from pipeline29_config_gui import launch_config_gui
+            from pipeline29_config_gui import PIPELINE29_GUI_SAVE_RUN_EXIT_CODE, launch_config_gui
         except Exception as exc:
             raise RuntimeError(f"Nao consegui abrir a GUI de configuracao do pipeline29: {exc}") from exc
-        launch_config_gui(base_dir=BASE_DIR, config_dir=text_config_dir, excel_path=_choose_config_path())
-        return
+        gui_save_run_exit_code = PIPELINE29_GUI_SAVE_RUN_EXIT_CODE
+        gui_exit_code = launch_config_gui(base_dir=BASE_DIR, config_dir=text_config_dir, excel_path=_choose_config_path())
+        state = load_gui_state(default_gui_state_path())
+        state_config_dir = str(state.get("config_dir", "")).strip()
+        if state_config_dir:
+            text_config_dir = Path(state_config_dir).expanduser().resolve()
+        if gui_exit_code != gui_save_run_exit_code:
+            return
+        print("[INFO] Save & Run selecionado na GUI; seguindo para o processamento.")
 
     skip_gui_prompt = norm_key(os.environ.get("PIPELINE29_SKIP_CONFIG_GUI_PROMPT", ""))
     if not args.skip_config_gui_prompt and skip_gui_prompt not in {"1", "true", "yes", "on"}:
         if _prompt_open_config_gui():
             try:
-                from pipeline29_config_gui import launch_config_gui
+                from pipeline29_config_gui import PIPELINE29_GUI_SAVE_RUN_EXIT_CODE, launch_config_gui
             except Exception as exc:
                 print(f"[WARN] Nao consegui abrir a GUI de configuracao do pipeline29: {exc}")
             else:
-                launch_config_gui(base_dir=BASE_DIR, config_dir=text_config_dir, excel_path=_choose_config_path())
+                gui_save_run_exit_code = PIPELINE29_GUI_SAVE_RUN_EXIT_CODE
+                gui_exit_code = launch_config_gui(
+                    base_dir=BASE_DIR,
+                    config_dir=text_config_dir,
+                    excel_path=_choose_config_path(),
+                )
+                state = load_gui_state(default_gui_state_path())
+                state_config_dir = str(state.get("config_dir", "")).strip()
+                if state_config_dir:
+                    text_config_dir = Path(state_config_dir).expanduser().resolve()
+                if gui_exit_code == gui_save_run_exit_code:
+                    print("[INFO] Save & Run selecionado na GUI; seguindo para o processamento.")
 
     config_bundle = load_pipeline29_config_bundle(
         config_source=args.config_source,
