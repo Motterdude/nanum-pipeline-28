@@ -139,6 +139,7 @@ Conversor `.open -> .csv` usando o `OpenToCSV.exe` ja instalado com o KiBox Cock
 ```
 
 Observacoes:
+- o repositorio canonico do wrapper agora e `https://github.com/Motterdude/kibox_open_to_csv`; a copia dentro de `Processamentos/` continua sendo um espelho operacional para uso direto com o pipeline;
 - o wrapper usa `type=res sep=tab cno` por padrao operacional para ficar proximo do formato `_i.csv` que o `pipeline28` ja le;
 - para um nome final explicito, por exemplo casar com um `.xlsx`, use `--output-name D85B15_45kW_i.csv`;
 - se a entrada for um diretorio, o utilitario varre os `.open` recursivamente e converte um a um.

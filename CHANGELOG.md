@@ -2,6 +2,18 @@
 
 Todas as mudancas relevantes deste repositorio devem ser registradas aqui.
 
+## 2026-03-16
+
+### Changed
+
+- Sincronizada a documentacao principal do projeto para refletir o estado atual do `pipeline29` no Git e a estrategia de publicacao dos repositorios auxiliares.
+- `kibox_open_to_csv.py` passa a ter repositorio dedicado em `Motterdude/kibox_open_to_csv`; a copia em `Processamentos/` continua como wrapper operacional local para uso junto do pipeline.
+
+### Documentation
+
+- `HANDOFF_GLOBAL.md` atualizado com o fechamento da publicacao do `pipeline29` e o split do conversor Kibox.
+- `README_EXECUCAO.md` atualizado para apontar o repositorio canonico do conversor `.open -> .csv`.
+
 ## 2026-03-13
 
 ### Added

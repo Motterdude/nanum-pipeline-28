@@ -1678,3 +1678,22 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
 
 - Ponto que nao foi revalidado end-to-end nesta ultima rodada:
   - nao houve rerun completo do processamento real para regenerar `lv_kpis_clean.xlsx` e todos os plots apos o patch final de `ETA_V_pct` e do filtro persistente.
+
+## Publicacao do pipeline29 e split do conversor Kibox - 2026-03-16
+- Objetivo:
+  - fechar a defasagem entre o estado local do `pipeline29` e o Git remoto;
+  - consolidar a estrategia de repositorios para o conversor `kibox_open_to_csv`.
+- Repositorios envolvidos:
+  - `Processamentos`
+  - `Knock_Distribution`
+  - `kibox_open_to_csv`
+- Decisoes tomadas:
+  - `Processamentos` continua sendo a casa do `pipeline28`/`pipeline29` e da copia operacional local do wrapper Kibox.
+  - O repositorio canonico do conversor passa a ser `https://github.com/Motterdude/kibox_open_to_csv`.
+  - `Knock_Distribution` continua podendo manter uma copia espelhada do wrapper em `tools/`, mas a referencia principal de manutencao do conversor deixa de ser o repo de Knock.
+- Impacto operacional:
+  - quem quiser evoluir apenas o fluxo `.open -> .csv` deve partir do repo dedicado;
+  - o `Processamentos` segue pronto para rodar sem depender de clone adicional do conversor;
+  - documentacao e handoffs passam a apontar explicitamente para a separacao entre pipeline, Knock e conversor Kibox.
+- Pendencia fechada neste handoff:
+  - o `pipeline29`, que estava apenas commitado localmente em `Processamentos`, entra na rodada de sincronizacao para o Git remoto junto dos demais artefatos atuais.
