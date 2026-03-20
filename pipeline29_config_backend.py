@@ -46,6 +46,8 @@ DEFAULT_INSTRUMENT_COLUMNS = [
 DEFAULT_REPORTING_COLUMNS = ["key", "report_resolution", "report_digits", "rule", "notes"]
 DEFAULT_PLOT_COLUMNS = [
     "enabled",
+    "with_uncertainty",
+    "without_uncertainty",
     "plot_type",
     "filename",
     "title",
@@ -80,6 +82,159 @@ DEFAULT_FUEL_PROPERTY_COLUMNS = [
     "notes",
 ]
 DEFAULT_KEY_VALUE_COLUMNS = ["param", "value", "notes"]
+
+REQUIRED_FLOW_PLOTS: List[Dict[str, str]] = [
+    {
+        "enabled": "1",
+        "with_uncertainty": "0",
+        "without_uncertainty": "1",
+        "plot_type": "all_fuels_yx",
+        "filename": "co2_g_kwh_vs_power_all.png",
+        "title": "CO2 specific emissions vs Power (all fuels)",
+        "x_col": "Load_kW",
+        "y_col": "CO2_g_kWh",
+        "yerr_col": "off",
+        "show_uncertainty": "off",
+        "x_label": "Power (kW)",
+        "y_label": "CO2 (g/kWh)",
+        "x_min": "0.0",
+        "x_max": "55.0",
+        "x_step": "5.0",
+        "y_min": "nan",
+        "y_max": "nan",
+        "y_step": "nan",
+        "y_tol_plus": "0.0",
+        "y_tol_minus": "0.0",
+        "filter_h2o_list": "0,6,25,35",
+        "label_variant": "nan",
+        "notes": "Auto-added by backend migration: specific CO2 emissions in the standard pipeline flow.",
+    },
+    {
+        "enabled": "1",
+        "with_uncertainty": "0",
+        "without_uncertainty": "1",
+        "plot_type": "all_fuels_yx",
+        "filename": "co_g_kwh_vs_power_all.png",
+        "title": "CO specific emissions vs Power (all fuels)",
+        "x_col": "Load_kW",
+        "y_col": "CO_g_kWh",
+        "yerr_col": "off",
+        "show_uncertainty": "off",
+        "x_label": "Power (kW)",
+        "y_label": "CO (g/kWh)",
+        "x_min": "0.0",
+        "x_max": "55.0",
+        "x_step": "5.0",
+        "y_min": "nan",
+        "y_max": "nan",
+        "y_step": "nan",
+        "y_tol_plus": "0.0",
+        "y_tol_minus": "0.0",
+        "filter_h2o_list": "0,6,25,35",
+        "label_variant": "nan",
+        "notes": "Auto-added by backend migration: specific CO emissions in the standard pipeline flow.",
+    },
+    {
+        "enabled": "1",
+        "with_uncertainty": "0",
+        "without_uncertainty": "1",
+        "plot_type": "all_fuels_yx",
+        "filename": "thc_g_kwh_vs_power_all.png",
+        "title": "THC specific emissions vs Power (all fuels)",
+        "x_col": "Load_kW",
+        "y_col": "THC_g_kWh",
+        "yerr_col": "off",
+        "show_uncertainty": "off",
+        "x_label": "Power (kW)",
+        "y_label": "THC (g/kWh, propane eq.)",
+        "x_min": "0.0",
+        "x_max": "55.0",
+        "x_step": "5.0",
+        "y_min": "nan",
+        "y_max": "nan",
+        "y_step": "nan",
+        "y_tol_plus": "0.0",
+        "y_tol_minus": "0.0",
+        "filter_h2o_list": "0,6,25,35",
+        "label_variant": "nan",
+        "notes": "Auto-added by backend migration: specific THC emissions in the standard pipeline flow.",
+    },
+    {
+        "enabled": "1",
+        "with_uncertainty": "0",
+        "without_uncertainty": "1",
+        "plot_type": "all_fuels_yx",
+        "filename": "nox_as_no_g_kwh_vs_power_all.png",
+        "title": "NOx specific emissions vs Power (NO equivalent, all fuels)",
+        "x_col": "Load_kW",
+        "y_col": "NOx_as_NO_g_kWh",
+        "yerr_col": "off",
+        "show_uncertainty": "off",
+        "x_label": "Power (kW)",
+        "y_label": "NOx (g/kWh as NO)",
+        "x_min": "0.0",
+        "x_max": "55.0",
+        "x_step": "5.0",
+        "y_min": "nan",
+        "y_max": "nan",
+        "y_step": "nan",
+        "y_tol_plus": "0.0",
+        "y_tol_minus": "0.0",
+        "filter_h2o_list": "0,6,25,35",
+        "label_variant": "nan",
+        "notes": "Auto-added by backend migration: specific NOx emissions as NO in the standard pipeline flow.",
+    },
+    {
+        "enabled": "1",
+        "with_uncertainty": "0",
+        "without_uncertainty": "1",
+        "plot_type": "all_fuels_yx",
+        "filename": "nox_as_no2_g_kwh_vs_power_all.png",
+        "title": "NOx specific emissions vs Power (NO2 equivalent, all fuels)",
+        "x_col": "Load_kW",
+        "y_col": "NOx_as_NO2_g_kWh",
+        "yerr_col": "off",
+        "show_uncertainty": "off",
+        "x_label": "Power (kW)",
+        "y_label": "NOx (g/kWh as NO2)",
+        "x_min": "0.0",
+        "x_max": "55.0",
+        "x_step": "5.0",
+        "y_min": "nan",
+        "y_max": "nan",
+        "y_step": "nan",
+        "y_tol_plus": "0.0",
+        "y_tol_minus": "0.0",
+        "filter_h2o_list": "0,6,25,35",
+        "label_variant": "nan",
+        "notes": "Auto-added by backend migration: specific NOx emissions as NO2 in the standard pipeline flow.",
+    },
+    {
+        "enabled": "1",
+        "with_uncertainty": "0",
+        "without_uncertainty": "1",
+        "plot_type": "all_fuels_yx",
+        "filename": "exhaust_h2o_kg_h_vs_power_all.png",
+        "title": "Exhaust water mass flow vs Power (all fuels)",
+        "x_col": "Load_kW",
+        "y_col": "Exhaust_H2O_kg_h",
+        "yerr_col": "off",
+        "show_uncertainty": "off",
+        "x_label": "Power (kW)",
+        "y_label": "Exhaust H2O (kg/h)",
+        "x_min": "0.0",
+        "x_max": "55.0",
+        "x_step": "5.0",
+        "y_min": "nan",
+        "y_max": "nan",
+        "y_step": "nan",
+        "y_tol_plus": "0.0",
+        "y_tol_minus": "0.0",
+        "filter_h2o_list": "0,6,25,35",
+        "label_variant": "nan",
+        "notes": "Auto-added by backend migration: exhaust water mass flow in the standard pipeline flow.",
+    },
+]
 
 REQUIRED_MAPPING_KEYS = {"power_kw", "fuel_kgh", "lhv_kj_kg"}
 
@@ -156,6 +311,63 @@ def _norm_key(value: Any) -> str:
     return "".join(ch for ch in text if not unicodedata.combining(ch))
 
 
+def _is_truthy_text(value: Any) -> bool:
+    text = _norm_text(value).lower()
+    return text in {"1", "true", "yes", "on", "y", "checked"}
+
+
+def _is_falsy_text(value: Any) -> bool:
+    text = _norm_text(value).lower()
+    return text in {"0", "false", "no", "off", "n", "unchecked"}
+
+
+def _normalize_plot_uncertainty_columns(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None:
+        return pd.DataFrame(columns=DEFAULT_PLOT_COLUMNS)
+
+    out = df.copy()
+    for column in ("with_uncertainty", "without_uncertainty", "show_uncertainty"):
+        if column not in out.columns:
+            out[column] = ""
+
+    for idx, row in out.iterrows():
+        with_raw = row.get("with_uncertainty", "")
+        without_raw = row.get("without_uncertainty", "")
+        mode = _norm_text(row.get("show_uncertainty", "")).lower()
+
+        with_flag = _is_truthy_text(with_raw)
+        without_flag = _is_truthy_text(without_raw)
+        with_defined = _is_truthy_text(with_raw) or _is_falsy_text(with_raw)
+        without_defined = _is_truthy_text(without_raw) or _is_falsy_text(without_raw)
+
+        if not with_defined and not without_defined:
+            if mode in {"off", "disable", "disabled", "none", "0", "false", "no", "na", "n/a"}:
+                with_flag, without_flag = False, True
+            elif mode in {"both", "all", "dual", "on_off"}:
+                with_flag, without_flag = True, True
+            else:
+                with_flag, without_flag = True, False
+        else:
+            if not with_defined:
+                with_flag = not without_flag
+            if not without_defined:
+                without_flag = False if with_flag else True
+
+        if not with_flag and not without_flag:
+            with_flag = True
+
+        out.at[idx, "with_uncertainty"] = "1" if with_flag else "0"
+        out.at[idx, "without_uncertainty"] = "1" if without_flag else "0"
+        if with_flag and without_flag:
+            out.at[idx, "show_uncertainty"] = "both"
+        elif with_flag:
+            out.at[idx, "show_uncertainty"] = "on"
+        else:
+            out.at[idx, "show_uncertainty"] = "off"
+
+    return out
+
+
 def _to_builtin_scalar(value: Any) -> Any:
     if _is_blank(value):
         return None
@@ -197,10 +409,36 @@ def _records_to_dataframe(records: List[Dict[str, Any]], columns: List[str]) -> 
     return df[columns + [c for c in df.columns if c not in columns]].copy()
 
 
+def _append_missing_required_flow_plots(df: pd.DataFrame) -> pd.DataFrame:
+    out = _records_to_dataframe(
+        [] if df is None else df.to_dict(orient="records"),
+        DEFAULT_PLOT_COLUMNS,
+    )
+    existing_filenames = {
+        _norm_text(value).lower()
+        for value in out.get("filename", pd.Series(dtype="object")).tolist()
+        if _norm_text(value)
+    }
+    missing_records = []
+    for record in REQUIRED_FLOW_PLOTS:
+        filename = _norm_text(record.get("filename", "")).lower()
+        if not filename or filename in existing_filenames:
+            continue
+        missing_records.append(dict(record))
+        existing_filenames.add(filename)
+    if not missing_records:
+        return out
+    add_df = _records_to_dataframe(missing_records, DEFAULT_PLOT_COLUMNS)
+    return pd.concat([out, add_df], ignore_index=True)
+
+
 def _normalize_bundle_shapes(bundle: Pipeline29ConfigBundle) -> Pipeline29ConfigBundle:
     inst = _records_to_dataframe(bundle.instruments_df.to_dict(orient="records"), DEFAULT_INSTRUMENT_COLUMNS)
     rep = _records_to_dataframe(bundle.reporting_df.to_dict(orient="records"), DEFAULT_REPORTING_COLUMNS)
     plots = _records_to_dataframe(bundle.plots_df.to_dict(orient="records"), DEFAULT_PLOT_COLUMNS)
+    plots = _normalize_plot_uncertainty_columns(plots)
+    plots = _append_missing_required_flow_plots(plots)
+    plots = _normalize_plot_uncertainty_columns(plots)
     fuel_properties = _records_to_dataframe(
         bundle.fuel_properties_df.to_dict(orient="records"),
         DEFAULT_FUEL_PROPERTY_COLUMNS,
@@ -512,10 +750,33 @@ def _infer_fuel_label(dies_pct: Any, biod_pct: Any, etoh_pct: Any, h2o_pct: Any)
     except Exception:
         return ""
 
-    if math.isfinite(dies_num) and math.isfinite(biod_num) and abs(etoh_num or 0.0) < 1e-9 and abs(h2o_num or 0.0) < 1e-9:
+    def _near_zero(value: float) -> bool:
+        return (not math.isfinite(value)) or abs(value) < 1e-9
+
+    if math.isfinite(dies_num) and math.isfinite(biod_num) and _near_zero(etoh_num) and _near_zero(h2o_num):
+        if abs(dies_num) < 1e-9:
+            return f"B{_format_pct_for_label(biod_num)}"
+        if abs(biod_num) < 1e-9:
+            return f"D{_format_pct_for_label(dies_num)}"
         return f"D{_format_pct_for_label(dies_num)}B{_format_pct_for_label(biod_num)}"
-    if math.isfinite(etoh_num) and math.isfinite(h2o_num) and abs(dies_num or 0.0) < 1e-9 and abs(biod_num or 0.0) < 1e-9:
+    if math.isfinite(etoh_num) and math.isfinite(h2o_num) and _near_zero(dies_num) and _near_zero(biod_num):
+        if abs(h2o_num) < 1e-9:
+            return f"E{_format_pct_for_label(etoh_num)}"
+        if abs(etoh_num) < 1e-9:
+            return f"H{_format_pct_for_label(h2o_num)}"
         return f"E{_format_pct_for_label(etoh_num)}H{_format_pct_for_label(h2o_num)}"
+    if math.isfinite(biod_num) and math.isfinite(etoh_num) and _near_zero(dies_num) and _near_zero(h2o_num):
+        if abs(etoh_num) < 1e-9:
+            return f"B{_format_pct_for_label(biod_num)}"
+        if abs(biod_num) < 1e-9:
+            return f"E{_format_pct_for_label(etoh_num)}"
+        return f"B{_format_pct_for_label(biod_num)}E{_format_pct_for_label(etoh_num)}"
+    if math.isfinite(dies_num) and math.isfinite(etoh_num) and _near_zero(biod_num) and _near_zero(h2o_num):
+        if abs(etoh_num) < 1e-9:
+            return f"D{_format_pct_for_label(dies_num)}"
+        if abs(dies_num) < 1e-9:
+            return f"E{_format_pct_for_label(etoh_num)}"
+        return f"D{_format_pct_for_label(dies_num)}E{_format_pct_for_label(etoh_num)}"
     return ""
 
 
@@ -677,6 +938,10 @@ def _excel_rows_to_bundle(excel_path: Path) -> Pipeline29ConfigBundle:
 def bootstrap_text_config_from_excel(excel_path: Path, config_dir: Path) -> Pipeline29ConfigBundle:
     bundle = _excel_rows_to_bundle(excel_path)
     return save_text_config_bundle(bundle, config_dir, bootstrapped_from=excel_path)
+
+
+def load_excel_config_bundle(excel_path: Path) -> Pipeline29ConfigBundle:
+    return _excel_rows_to_bundle(excel_path)
 
 
 def bundle_to_preset_payload(bundle: Pipeline29ConfigBundle) -> Dict[str, Any]:

@@ -14,6 +14,7 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -72,6 +73,13 @@ PLOT_Y_AUTOSCALE_FIELDS = {"y_min", "y_max", "y_step"}
 PLOT_Y_AUTOSCALE_TOKEN = "auto"
 PIPELINE29_GUI_SAVE_RUN_EXIT_CODE = 1001
 
+CHECKBOX_COLUMNS_BY_SECTION: Dict[str, set[str]] = {
+    "Plots": {"with_uncertainty", "without_uncertainty"},
+}
+HIDDEN_COLUMNS_BY_SECTION: Dict[str, set[str]] = {
+    "Plots": {"show_uncertainty"},
+}
+
 DEFAULT_FIELD_SPECS_BY_SECTION: Dict[str, List[Dict[str, Any]]] = {
     "Mappings": [
         {"name": "key", "kind": "text"},
@@ -98,13 +106,14 @@ DEFAULT_FIELD_SPECS_BY_SECTION: Dict[str, List[Dict[str, Any]]] = {
     ],
     "Plots": [
         {"name": "enabled", "kind": "combo", "options": ["1", "0"]},
+        {"name": "with_uncertainty", "kind": "checkbox"},
+        {"name": "without_uncertainty", "kind": "checkbox"},
         {"name": "plot_type", "kind": "combo", "options": ["all_fuels_yx", "all_fuels_xy", "all_fuels_labels", "kibox_all"]},
         {"name": "filename", "kind": "text"},
         {"name": "title", "kind": "text"},
         {"name": "x_col", "kind": "variable"},
         {"name": "y_col", "kind": "variable"},
         {"name": "yerr_col", "kind": "variable"},
-        {"name": "show_uncertainty", "kind": "combo", "options": ["auto", "on", "off"]},
         {"name": "x_label", "kind": "text"},
         {"name": "y_label", "kind": "text"},
         {"name": "x_min", "kind": "text"},
@@ -147,6 +156,10 @@ def _infer_sd_from_mean(col_mean: str) -> str:
         if old in text:
             return text.replace(old, new)
     return ""
+
+
+def _is_truthy_checkbox_value(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "y", "checked"}
 
 
 def _safe_name(text: str) -> str:
@@ -523,6 +536,44 @@ def _sanitize_plot_record(record: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _normalize_plot_uncertainty_fields(record: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(record or {})
+    with_raw = str(out.get("with_uncertainty", "")).strip()
+    without_raw = str(out.get("without_uncertainty", "")).strip()
+    mode = str(out.get("show_uncertainty", "")).strip().lower()
+
+    with_defined = with_raw.lower() in {"1", "0", "true", "false", "yes", "no", "on", "off", "checked", "unchecked"}
+    without_defined = without_raw.lower() in {"1", "0", "true", "false", "yes", "no", "on", "off", "checked", "unchecked"}
+    with_flag = _is_truthy_checkbox_value(with_raw)
+    without_flag = _is_truthy_checkbox_value(without_raw)
+
+    if not with_defined and not without_defined:
+        if mode in {"off", "disable", "disabled", "none", "0", "false", "no", "na", "n/a"}:
+            with_flag, without_flag = False, True
+        elif mode in {"both", "all", "dual", "on_off"}:
+            with_flag, without_flag = True, True
+        else:
+            with_flag, without_flag = True, False
+    else:
+        if not with_defined:
+            with_flag = not without_flag
+        if not without_defined:
+            without_flag = False if with_flag else True
+
+    if not with_flag and not without_flag:
+        with_flag = True
+
+    out["with_uncertainty"] = "1" if with_flag else "0"
+    out["without_uncertainty"] = "1" if without_flag else "0"
+    if with_flag and without_flag:
+        out["show_uncertainty"] = "both"
+    elif with_flag:
+        out["show_uncertainty"] = "on"
+    else:
+        out["show_uncertainty"] = "off"
+    return out
+
+
 class VariableSelectorDialog(QDialog):
     def __init__(
         self,
@@ -702,8 +753,7 @@ class ConfigRowDialog(QDialog):
                 prepared["enabled"] = "1"
             if not str(prepared.get("plot_type", "")).strip():
                 prepared["plot_type"] = "all_fuels_yx"
-            if not str(prepared.get("show_uncertainty", "")).strip():
-                prepared["show_uncertainty"] = "on"
+            prepared = _normalize_plot_uncertainty_fields(prepared)
             if not str(prepared.get("x_col", "")).strip():
                 prepared["x_col"] = "Load_kW"
             if not str(prepared.get("x_label", "")).strip():
@@ -760,6 +810,12 @@ class ConfigRowDialog(QDialog):
             combo.setCurrentText(value_text)
             self.widgets[field_name] = combo
             return combo
+
+        if kind == "checkbox":
+            checkbox = QCheckBox(self)
+            checkbox.setChecked(_is_truthy_checkbox_value(value_text))
+            self.widgets[field_name] = checkbox
+            return checkbox
 
         if kind == "variable":
             container = QWidget(self)
@@ -955,6 +1011,8 @@ class ConfigRowDialog(QDialog):
         for field_name, widget in self.widgets.items():
             if isinstance(widget, QComboBox):
                 out[field_name] = widget.currentText().strip()
+            elif isinstance(widget, QCheckBox):
+                out[field_name] = "1" if widget.isChecked() else "0"
             elif isinstance(widget, QLineEdit):
                 out[field_name] = widget.text().strip()
             else:
@@ -969,6 +1027,7 @@ class ConfigRowDialog(QDialog):
                 out["source"] = INSTRUMENT_SOURCE_DEFAULT
         if self.section_title == "Plots":
             out = _sanitize_plot_record(out)
+            out = _normalize_plot_uncertainty_fields(out)
         return out
 
 
@@ -978,6 +1037,8 @@ class EditableTableSection(QWidget):
         title: str,
         columns: List[str],
         *,
+        checkbox_columns: Optional[set[str]] = None,
+        hidden_columns: Optional[set[str]] = None,
         searchable_columns: Optional[set[str]] = None,
         variable_catalog_provider: Optional[Callable[[], List[str]]] = None,
         mapping_key_provider: Optional[Callable[[], List[str]]] = None,
@@ -989,6 +1050,8 @@ class EditableTableSection(QWidget):
         super().__init__(parent)
         self.title = title
         self.columns = columns
+        self.checkbox_columns = checkbox_columns or set()
+        self.hidden_columns = hidden_columns or set()
         self.searchable_columns = searchable_columns or set()
         self.variable_catalog_provider = variable_catalog_provider
         self.mapping_key_provider = mapping_key_provider
@@ -1025,6 +1088,9 @@ class EditableTableSection(QWidget):
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)
         header.setStretchLastSection(True)
+        for col_idx, column in enumerate(self.columns):
+            if column in self.hidden_columns:
+                self.table.setColumnHidden(col_idx, True)
         layout.addWidget(self.table, 1)
 
         self.btn_add.clicked.connect(self._prompt_add_row)
@@ -1044,13 +1110,31 @@ class EditableTableSection(QWidget):
         sort_col_idx = self.columns.index(self.auto_sort_column)
         self.table.sortItems(sort_col_idx, Qt.AscendingOrder)
 
+    def _set_table_value(self, row: int, col_idx: int, column: str, value: Any) -> None:
+        item = self.table.item(row, col_idx)
+        if item is None:
+            item = QTableWidgetItem("")
+            self.table.setItem(row, col_idx, item)
+        if column in self.checkbox_columns:
+            item.setFlags((item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable) & ~Qt.ItemIsEditable)
+            item.setText("")
+            item.setCheckState(Qt.Checked if _is_truthy_checkbox_value(value) else Qt.Unchecked)
+        else:
+            item.setText("" if value is None else str(value))
+
+    def _item_text(self, column: str, item: Optional[QTableWidgetItem]) -> str:
+        if column in self.checkbox_columns:
+            if item is None:
+                return "0"
+            return "1" if item.checkState() == Qt.Checked else "0"
+        return "" if item is None else item.text().strip()
+
     def _insert_row(self, values: Optional[Dict[str, Any]] = None) -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
         values = values or {}
         for col_idx, column in enumerate(self.columns):
-            text = "" if values.get(column) is None else str(values.get(column))
-            self.table.setItem(row, col_idx, QTableWidgetItem(text))
+            self._set_table_value(row, col_idx, column, values.get(column))
         self._auto_sort_rows()
         self._auto_resize_columns()
 
@@ -1059,12 +1143,7 @@ class EditableTableSection(QWidget):
             return
         values = values or {}
         for col_idx, column in enumerate(self.columns):
-            text = "" if values.get(column) is None else str(values.get(column))
-            item = self.table.item(row, col_idx)
-            if item is None:
-                item = QTableWidgetItem("")
-                self.table.setItem(row, col_idx, item)
-            item.setText(text)
+            self._set_table_value(row, col_idx, column, values.get(column))
         self._auto_sort_rows()
         self._auto_resize_columns()
 
@@ -1097,7 +1176,7 @@ class EditableTableSection(QWidget):
         out: Dict[str, str] = {}
         for col_idx, column in enumerate(self.columns):
             item = self.table.item(row, col_idx)
-            out[column] = "" if item is None else item.text().strip()
+            out[column] = self._item_text(column, item)
         return out
 
     def _row_has_values(self, row: int) -> bool:
@@ -1114,6 +1193,10 @@ class EditableTableSection(QWidget):
         return out
 
     def _handle_cell_double_click(self, row: int, col_idx: int) -> None:
+        column = self.columns[col_idx]
+        if column in self.checkbox_columns:
+            return
+
         if self.add_row_dialog_factory is not None and self._row_has_values(row):
             updated = self.add_row_dialog_factory(self.record_at(row))
             if updated is not None:
@@ -1122,7 +1205,6 @@ class EditableTableSection(QWidget):
                     self.status_callback(f"{self.title} row updated from helper.")
             return
 
-        column = self.columns[col_idx]
         if column not in self.searchable_columns or self.variable_catalog_provider is None:
             return
 
@@ -1274,6 +1356,8 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.plots_table = EditableTableSection(
             "Plots",
             DEFAULT_PLOT_COLUMNS,
+            checkbox_columns=CHECKBOX_COLUMNS_BY_SECTION.get("Plots", set()),
+            hidden_columns=HIDDEN_COLUMNS_BY_SECTION.get("Plots", set()),
             searchable_columns=SEARCHABLE_COLUMNS_BY_SECTION.get("Plots", set()),
             variable_catalog_provider=self._available_variable_catalog,
             auto_sort_column="filename",

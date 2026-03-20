@@ -2,6 +2,70 @@
 
 Todas as mudancas relevantes deste repositorio devem ser registradas aqui.
 
+## 2026-03-20
+
+### Added
+
+- Calculo de emissoes especificas no `pipeline29` para:
+  - `CO2_g_kWh`
+  - `CO_g_kWh`
+  - `THC_g_kWh`
+  - `NOx_as_NO_g_kWh`
+  - `NOx_as_NO2_g_kWh`
+- Colunas intermediarias de debug no `lv_kpis_clean.xlsx` para a cadeia de emissoes e base seca/umida, incluindo:
+  - fracoes secas/umidas
+  - `MW_dry_kg_kmol`
+  - `MW_wet_kg_kmol`
+  - `Exhaust_kg_h`
+  - `Exhaust_Dry_kg_h`
+  - `Exhaust_H2O_kg_h`
+  - parcelas de agua de admissao/combustivel/combustao
+- Novos plots versionados e/ou auto-injetados no fluxo padrao do `pipeline29`:
+  - `co2_g_kwh_vs_power_all.png`
+  - `co_g_kwh_vs_power_all.png`
+  - `thc_g_kwh_vs_power_all.png`
+  - `nox_as_no_g_kwh_vs_power_all.png`
+  - `nox_as_no2_g_kwh_vs_power_all.png`
+  - `exhaust_h2o_kg_h_vs_power_all.png`
+  - `umidade_relativa_pct_vs_power_all.png`
+- Checkboxes na aba `Plots` da GUI para escolher diretamente:
+  - plot com incerteza
+  - plot sem incerteza
+  - ambos na mesma linha
+
+### Changed
+
+- `nanum_pipeline_29.py` passou a reconhecer corretamente os blends do Wagner no parse/nomeacao:
+  - `B100`
+  - `D85B15`
+  - `B40E60`
+  - `B50E50`
+  - `B90E10`
+- O seletor de pontos para plots foi corrigido para deduplicar colunas por combustivel e nao repetir cargas inexistentes por erro de agrupamento.
+- O fluxo de airflow foi revisado para:
+  - priorizar `MAF` por ponto quando valido;
+  - cair para `fuel + lambda` apenas no fallback;
+  - usar `lambda = 1.0` somente quando a lambda medida nao existir;
+  - imprimir no terminal qual metodo foi usado e um resumo final sucinto do processamento.
+- Os plots com e sem incerteza agora compartilham a mesma escala de Y quando representam o mesmo grafico base.
+- `T_E_COMP` e `T_S_COMP` passaram a reutilizar a mesma pilha de incerteza do termopar tipo K + `NI9213` usada em `T_S_AGUA`.
+- `UMIDADE_ABS_g_m3` passou a usar `T_E_COMP` em vez de `T_ADMISSAO`.
+- O `pipeline29` agora integra os plots obrigatorios de emissoes e de agua no proprio fluxo, inclusive quando a configuracao vem direto do Excel legado, por meio da normalizacao do backend.
+- `pipeline29_config_backend.py` passou a migrar automaticamente configs antigas para:
+  - campos `with_uncertainty` / `without_uncertainty`
+  - plots obrigatorios de emissoes/agua
+- `config/config_incertezas_rev3.xlsx` foi sincronizada com os caminhos operacionais atuais:
+  - `RAW_INPUT_DIR = C:\Users\SC61730\Downloads\raw_wagnao`
+  - `OUT_DIR = C:\Users\SC61730\Downloads\out_wagnao`
+
+### Validation
+
+- `python -m py_compile nanum_pipeline_29.py`
+- `python -m py_compile pipeline29_config_backend.py`
+- `python -m py_compile pipeline29_config_gui.py`
+- Execucao completa do `pipeline29` com `--config-source excel` e `--skip-config-gui-prompt` confirmou geracao dos plots novos no fluxo normal.
+- Sanity check dos resultados de `CO2_g_kWh` e `Exhaust_H2O_kg_h` contra estequiometria do combustivel e literatura aberta de motores diesel/biodiesel nao indicou erro evidente de calculo.
+
 ## 2026-03-16
 
 ### Changed

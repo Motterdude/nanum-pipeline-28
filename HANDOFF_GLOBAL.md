@@ -13,6 +13,103 @@ Arquivos de referencia:
 - O nome oficial daqui para frente e `HANDOFF_GLOBAL.md`. Nao criar novos arquivos de handoff paralelos sem necessidade objetiva.
 - Arquivos grandes de aquisicao bruta em formato `.open` podem ser mantidos localmente para reproducao, mas nao entram no Git comum quando excedem o limite operacional do GitHub. Quando isso acontecer, a decisao deve ser registrada aqui.
 
+## Consolidacao pipeline 29 para o dataset Wagner - 2026-03-20
+- Objetivo:
+  - consolidar no Git a rodada de evolucao do `pipeline29` focada nos combustiveis do Wagner, no novo fluxo de plots pela GUI, no calculo de airflow e nas emissoes especificas em `g/kWh`.
+- Arquivos afetados:
+  - `nanum_pipeline_29.py`
+  - `pipeline29_config_backend.py`
+  - `pipeline29_config_gui.py`
+  - `config/pipeline29_text/mappings.toml`
+  - `config/pipeline29_text/plots.toml`
+  - `config/config_incertezas_rev3.xlsx`
+  - `CHANGELOG.md`
+  - `HANDOFF_GLOBAL.md`
+- Escopo funcional consolidado:
+  - parse e rotulagem de combustiveis expandidos para o Wagner:
+    - `B100`
+    - `D85B15`
+    - `B40E60`
+    - `B50E50`
+    - `B90E10`
+  - correcao do filtro/seletor de pontos para plots, evitando duplicacao de colunas por `Fuel_Label` repetido;
+  - checkboxes na aba `Plots` para escolher diretamente:
+    - com incerteza
+    - sem incerteza
+    - ambos
+  - expansao do runner para gerar as duas variantes sem sobrescrever arquivos;
+  - travamento de escala comum entre plots com e sem incerteza da mesma serie;
+  - airflow refeito com prioridade operacional:
+    - `MAF` valido por ponto primeiro;
+    - fallback `fuel + lambda`;
+    - fallback final com `lambda = 1.0` somente quando a lambda medida nao existir;
+  - resumo final de terminal com:
+    - metodo de airflow usado;
+    - quantidades calculadas;
+    - quantidades nao calculadas e motivo;
+    - plots gerados/pulados e motivo;
+  - incertezas de `T_E_COMP` e `T_S_COMP` herdando a mesma pilha instrumental de `T_S_AGUA` (termopar tipo K + `NI9213`);
+  - `UMIDADE_ABS_g_m3` corrigida para usar `T_E_COMP` no lugar de `T_ADMISSAO`;
+  - plot novo de `UMIDADE_mean_of_windows` na GUI, sem incerteza;
+  - calculo de emissoes especificas em `g/kWh` para:
+    - `CO2`
+    - `CO`
+    - `THC`
+    - `NOx` como `NO`
+    - `NOx` como `NO2`
+  - calculo indireto de `H2O_wet_frac` e de `Exhaust_H2O_kg_h`, com colunas intermediarias no `lv_kpis_clean.xlsx` para debug;
+  - plots novos no fluxo padrao para:
+    - `CO2_g_kWh`
+    - `CO_g_kWh`
+    - `THC_g_kWh`
+    - `NOx_as_NO_g_kWh`
+    - `NOx_as_NO2_g_kWh`
+    - `Exhaust_H2O_kg_h`
+- Integracao de configuracao:
+  - o caminho `--config-source excel` do `pipeline29` estava pulando a normalizacao do backend e por isso ignorava os plots novos;
+  - isso foi corrigido ao fazer o loader Excel usar o mesmo bundle normalizado que a GUI/texto usam;
+  - o backend agora injeta automaticamente os plots obrigatorios de emissoes e agua quando a config antiga ainda nao os tiver.
+- Estado atual da `config_incertezas_rev3.xlsx` versionada:
+  - a planilha sofreu somente sincronizacao dos paths de runtime na aba `Defaults`;
+  - valores atuais:
+    - `RAW_INPUT_DIR = C:\Users\SC61730\Downloads\raw_wagnao`
+    - `OUT_DIR = C:\Users\SC61730\Downloads\out_wagnao`
+  - nao houve inclusao manual adicional de regras/metadados nessa planilha nesta rodada.
+- Validacao executada:
+  - compilacao por `py_compile` de:
+    - `nanum_pipeline_29.py`
+    - `pipeline29_config_backend.py`
+    - `pipeline29_config_gui.py`
+  - execucoes completas do `pipeline29` em `raw_wagnao`, tanto via config textual quanto via `--config-source excel`;
+  - confirmacao de geracao dos PNGs:
+    - `co2_g_kwh_vs_power_all.png`
+    - `co_g_kwh_vs_power_all.png`
+    - `thc_g_kwh_vs_power_all.png`
+    - `nox_as_no_g_kwh_vs_power_all.png`
+    - `nox_as_no2_g_kwh_vs_power_all.png`
+    - `exhaust_h2o_kg_h_vs_power_all.png`
+  - confirmacao de que o terminal resume:
+    - `Airflow`
+    - calculos validos/faltantes
+    - plots gerados/pulados
+- Leitura operacional mais recente do Wagner:
+  - `Airflow`: todos os `46` pontos processados sairam por `MAF`; nao houve `lambda` medida disponivel na MoTeC nessa rodada;
+  - `THC`: todos os `46` pontos ficaram em faixa baixa de sinal e `30` ficaram negativos; o pipeline preserva calculo/plot e acusa `WARN` no terminal;
+  - `Consumo_L_h` e `Custo_R_h` continuam faltando para:
+    - `B100`
+    - `B40E60`
+    - `B50E50`
+    - `B90E10`
+  - motivo:
+    - ainda faltam densidade/custo desses blends em `Fuel Properties` / `Defaults`.
+- Sanity check de emissoes realizado nesta data:
+  - `CO2_g_kWh` do Wagner caiu na faixa aproximada `735..931 g/kWh`;
+  - a comparacao com estequiometria do carbono do combustivel e `BSFC` deixou os pontos entre cerca de `89%` e `103%` do valor teorico;
+  - a agua no escape ficou na ordem de `1.11..1.54 kg H2O/kg fuel`, o que foi considerado plausivel para diesel/biodiesel/etanol quando se soma:
+    - agua formada pelo H do combustivel
+    - umidade do ar admitido
+  - nesta checagem nao foi identificada correcao obrigatoria adicional de codigo.
+
 ## Snapshot congelado do pipeline 28 e abertura do pipeline 29 - 2026-03-13
 - Objetivo:
   - congelar o estado atual do `nanum_pipeline_28.py` antes da migracao planejada de configuracao via Excel para GUI + texto;

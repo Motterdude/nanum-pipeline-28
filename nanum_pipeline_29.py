@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
@@ -25,6 +26,7 @@ from pipeline29_config_backend import (
     Pipeline29ConfigBundle,
     bootstrap_text_config_from_excel,
     default_gui_state_path,
+    load_excel_config_bundle,
     default_text_config_dir,
     load_gui_state,
     load_text_config_bundle,
@@ -175,10 +177,13 @@ MACHINE_SCENARIO_SPECS = [
 ]
 
 # =========================
-# Airflow assumptions (E94H6 reference)
+# Airflow assumptions
 # =========================
 AFR_STOICH_E94H6 = 8.4
 ETHANOL_FRAC_E94H6 = 0.94
+AFR_STOICH_ETHANOL = 9.0
+AFR_STOICH_BIODIESEL = 12.5
+AFR_STOICH_DIESEL = 14.5
 LAMBDA_DEFAULT = 1.0
 R_AIR_DRY_J_KG_K = 287.058
 
@@ -188,6 +193,27 @@ R_AIR_DRY_J_KG_K = 287.058
 # =========================
 R_V_WATER = 461.5  # J/(kg*K)
 CP_WATER_VAPOR_KJ_KG_K = 1.86  # kJ/(kg*K), engineering approximation
+
+
+# =========================
+# Exhaust emissions helpers
+# =========================
+MW_CO2_KG_KMOL = 44.0095
+MW_CO_KG_KMOL = 28.0101
+MW_O2_KG_KMOL = 31.9988
+MW_N2_KG_KMOL = 28.0134
+MW_H2O_KG_KMOL = 18.0153
+MW_C3H8_KG_KMOL = 44.097
+MW_NO_KG_KMOL = 30.006
+MW_NO2_KG_KMOL = 46.0055
+
+# Fuel surrogates used only to estimate hydrogen-derived water formation.
+# They are explicit so we can swap them later if the project adopts measured
+# elemental analyses for the bench fuels.
+H_MASS_FRAC_DIESEL = 0.1385641540557986       # surrogate C12H23
+H_MASS_FRAC_BIODIESEL = 0.12238992225838548   # surrogate C19H36O2
+H_MASS_FRAC_ETHANOL = 0.1312813388612733      # ethanol C2H6O
+THC_LOW_SIGNAL_WARN_PPM = 10.0
 
 
 # =========================
@@ -394,6 +420,63 @@ def _to_float(x: object, default: float = 0.0) -> float:
         return float(s)
     except Exception:
         return default
+
+
+def _format_pct_for_label(value: object) -> str:
+    numeric = _to_float(value, default=float("nan"))
+    if not np.isfinite(numeric):
+        return _to_str_or_empty(value)
+    if abs(numeric - round(numeric)) <= 1e-9:
+        return str(int(round(numeric)))
+    return f"{numeric:g}"
+
+
+def _fuel_label_from_components(
+    dies_pct: object,
+    biod_pct: object,
+    etoh_pct: object,
+    h2o_pct: object,
+    tol: float = 0.6,
+) -> str:
+    dies = _to_float(dies_pct, default=float("nan"))
+    biod = _to_float(biod_pct, default=float("nan"))
+    etoh = _to_float(etoh_pct, default=float("nan"))
+    h2o = _to_float(h2o_pct, default=float("nan"))
+
+    def _near_zero(value: float) -> bool:
+        return (not np.isfinite(value)) or abs(value) <= tol
+
+    if np.isfinite(dies) and np.isfinite(biod) and abs(dies - 85.0) <= tol and abs(biod - 15.0) <= tol and _near_zero(etoh) and _near_zero(h2o):
+        return "D85B15"
+    if np.isfinite(etoh) and np.isfinite(h2o) and abs(etoh - 94.0) <= tol and abs(h2o - 6.0) <= tol and _near_zero(dies) and _near_zero(biod):
+        return "E94H6"
+    if np.isfinite(etoh) and np.isfinite(h2o) and abs(etoh - 75.0) <= tol and abs(h2o - 25.0) <= tol and _near_zero(dies) and _near_zero(biod):
+        return "E75H25"
+    if np.isfinite(etoh) and np.isfinite(h2o) and abs(etoh - 65.0) <= tol and abs(h2o - 35.0) <= tol and _near_zero(dies) and _near_zero(biod):
+        return "E65H35"
+
+    if np.isfinite(dies) and np.isfinite(biod) and _near_zero(etoh) and _near_zero(h2o):
+        if abs(dies) <= tol:
+            return f"B{_format_pct_for_label(biod)}"
+        if abs(biod) <= tol:
+            return f"D{_format_pct_for_label(dies)}"
+        return f"D{_format_pct_for_label(dies)}B{_format_pct_for_label(biod)}"
+
+    if np.isfinite(biod) and np.isfinite(etoh) and _near_zero(dies) and _near_zero(h2o):
+        if abs(etoh) <= tol:
+            return f"B{_format_pct_for_label(biod)}"
+        if abs(biod) <= tol:
+            return f"E{_format_pct_for_label(etoh)}"
+        return f"B{_format_pct_for_label(biod)}E{_format_pct_for_label(etoh)}"
+
+    if np.isfinite(dies) and np.isfinite(etoh) and _near_zero(biod) and _near_zero(h2o):
+        if abs(etoh) <= tol:
+            return f"D{_format_pct_for_label(dies)}"
+        if abs(dies) <= tol:
+            return f"E{_format_pct_for_label(etoh)}"
+        return f"D{_format_pct_for_label(dies)}E{_format_pct_for_label(etoh)}"
+
+    return ""
 
 
 def _canon_unit_token(text: object) -> str:
@@ -859,6 +942,85 @@ def _ethanol_mass_fraction_from_etoh_pct(etoh_pct: pd.Series) -> pd.Series:
     return pd.to_numeric(etoh_pct, errors="coerce") / 100.0
 
 
+def _nan_series(index: pd.Index) -> pd.Series:
+    return pd.Series(np.nan, index=index, dtype="float64")
+
+
+def _airflow_component_fraction(df: pd.DataFrame, column: str) -> pd.Series:
+    return pd.to_numeric(df.get(column, _nan_series(df.index)), errors="coerce") / 100.0
+
+
+def _airflow_stoich_blend_from_composition(df: pd.DataFrame) -> pd.Series:
+    dies_frac = _airflow_component_fraction(df, "DIES_pct")
+    biod_frac = _airflow_component_fraction(df, "BIOD_pct")
+    etoh_frac = _airflow_component_fraction(df, "EtOH_pct")
+    h2o_frac = _airflow_component_fraction(df, "H2O_pct")
+
+    valid_components = dies_frac.notna() | biod_frac.notna() | etoh_frac.notna() | h2o_frac.notna()
+    blend_afr = (
+        dies_frac.fillna(0.0) * AFR_STOICH_DIESEL
+        + biod_frac.fillna(0.0) * AFR_STOICH_BIODIESEL
+        + etoh_frac.fillna(0.0) * AFR_STOICH_ETHANOL
+    )
+    return blend_afr.where(valid_components & blend_afr.gt(0), pd.NA)
+
+
+def _find_preferred_column(
+    df: pd.DataFrame,
+    *,
+    preferred_names: List[str],
+    include_tokens: List[str],
+    exclude_tokens: Optional[List[str]] = None,
+) -> Optional[str]:
+    for requested in preferred_names:
+        req = _to_str_or_empty(requested)
+        if not req:
+            continue
+        try:
+            return resolve_col(df, req)
+        except Exception:
+            continue
+
+    exclude_tokens = exclude_tokens or []
+    for column in df.columns:
+        canon = _canon_name(column)
+        if any(_canon_name(token) not in canon for token in include_tokens):
+            continue
+        if any(_canon_name(token) in canon for token in exclude_tokens):
+            continue
+        return column
+    return None
+
+
+def _resolve_airflow_lambda_col(df: pd.DataFrame, mappings: dict) -> Optional[str]:
+    preferred_names: List[str] = []
+    if "lambda" in mappings and mappings["lambda"].get("mean"):
+        preferred_names.append(mappings["lambda"]["mean"])
+    preferred_names.extend(
+        [
+            "Motec_Exhaust Lambda_mean_of_windows",
+            "Exhaust Lambda_mean_of_windows",
+            "Lambda_mean_of_windows",
+        ]
+    )
+    return _find_preferred_column(
+        df,
+        preferred_names=preferred_names,
+        include_tokens=["lambda", "mean"],
+        exclude_tokens=["sd", "diagnostic", "normalised", "normalized"],
+    )
+
+
+def _resolve_airflow_maf_col(df: pd.DataFrame, defaults_cfg: Dict[str, str]) -> Optional[str]:
+    preferred_name = _to_str_or_empty(defaults_cfg.get(norm_key("VOL_EFF_DIESEL_MAF_COL"), "")) or "MAF_mean_of_windows"
+    return _find_preferred_column(
+        df,
+        preferred_names=[preferred_name, "MAF_mean_of_windows", "Motec_MAF_mean_of_windows"],
+        include_tokens=["maf"],
+        exclude_tokens=["sd"],
+    )
+
+
 def add_airflow_channels_inplace(df: pd.DataFrame, lambda_col: str | None = None) -> pd.DataFrame:
     out = df.copy()
 
@@ -894,6 +1056,94 @@ def add_airflow_channels_inplace(df: pd.DataFrame, lambda_col: str | None = None
     out["Air_kg_h"] = out["AFR_real"] * out["Fuel_E94H6_eq_kg_h"]
     out["Air_kg_s"] = out["Air_kg_h"] / 3600.0
     out["Air_g_s"] = out["Air_kg_s"] * 1000.0
+
+    return out
+
+
+def _static_maf_mask_by_fuel(maf: pd.Series, fuel_labels: pd.Series, *, min_points: int = 4) -> Tuple[pd.Series, List[str]]:
+    invalid_mask = pd.Series(False, index=maf.index, dtype="bool")
+    static_labels: List[str] = []
+    labels = fuel_labels.map(_to_str_or_empty).replace("", pd.NA)
+    for label in sorted(v for v in labels.dropna().unique().tolist() if _to_str_or_empty(v)):
+        label_mask = labels.eq(label)
+        label_maf = pd.to_numeric(maf.where(label_mask), errors="coerce").dropna()
+        if len(label_maf) < min_points:
+            continue
+        if _series_is_static(label_maf):
+            invalid_mask = invalid_mask | (label_mask & maf.notna())
+            static_labels.append(str(label))
+    return invalid_mask, static_labels
+
+
+def add_airflow_channels_prefer_maf_inplace(
+    df: pd.DataFrame,
+    lambda_col: str | None = None,
+    maf_col: str | None = None,
+    *,
+    maf_min_kgh: float = 0.0,
+    maf_max_kgh: float = 300.0,
+) -> pd.DataFrame:
+    out = df.copy()
+    nan_series = _nan_series(out.index)
+
+    fuel_col = None
+    for c in ["Consumo_kg_h_mean_of_windows", "Consumo_kg_h", "Fuel_kg_h", "fuel_kgh_mean_of_windows"]:
+        if c in out.columns:
+            fuel_col = c
+            break
+    if fuel_col is None and not out.empty:
+        candidates = [c for c in out.columns if "consumo" in c.lower() and "mean_of_windows" in c.lower()]
+        fuel_col = candidates[0] if candidates else None
+
+    fuel_mix_kg_h = pd.to_numeric(out[fuel_col], errors="coerce") if fuel_col else nan_series.copy()
+
+    x_etoh = _ethanol_mass_fraction_from_etoh_pct(out.get("EtOH_pct", nan_series))
+    out["EtOH_pure_mass_frac"] = x_etoh
+    out["Fuel_EtOH_pure_kg_h"] = fuel_mix_kg_h * x_etoh
+    out["Fuel_E94H6_eq_kg_h"] = out["Fuel_EtOH_pure_kg_h"] / ETHANOL_FRAC_E94H6
+
+    lambda_measured = pd.to_numeric(out[lambda_col], errors="coerce") if lambda_col and lambda_col in out.columns else nan_series.copy()
+    lambda_valid = lambda_measured.gt(0)
+    out["lambda_used"] = lambda_measured.where(lambda_valid, LAMBDA_DEFAULT)
+    out["LAMBDA_SOURCE"] = pd.Series("default_1.0", index=out.index, dtype="object")
+    out.loc[lambda_valid, "LAMBDA_SOURCE"] = "measured"
+
+    out["AFR_stoich_blend"] = _airflow_stoich_blend_from_composition(out)
+    out["AFR_stoich_E94H6"] = AFR_STOICH_E94H6
+    out["AFR_real"] = out["lambda_used"] * out["AFR_stoich_blend"]
+
+    out["Air_kg_h_from_Fuel_Lambda"] = (
+        pd.to_numeric(out["AFR_real"], errors="coerce") * fuel_mix_kg_h
+    ).where(fuel_mix_kg_h.gt(0) & pd.to_numeric(out["AFR_real"], errors="coerce").gt(0), pd.NA)
+
+    maf = pd.to_numeric(out[maf_col], errors="coerce") if maf_col and maf_col in out.columns else nan_series.copy()
+    fuel_labels = out.get("Fuel_Label", pd.Series(pd.NA, index=out.index, dtype="object"))
+    fuel_labels = fuel_labels.where(fuel_labels.notna(), _fuel_blend_labels(out))
+    static_maf_mask, static_maf_labels = _static_maf_mask_by_fuel(maf, fuel_labels)
+    if static_maf_labels:
+        static_txt = ", ".join(static_maf_labels)
+        print(f"[WARN] Airflow: ignorei MAF estatico para {static_txt}. Vou usar fuel+lambda nesses combustiveis.")
+    maf_valid = maf.gt(0) & maf.between(maf_min_kgh, maf_max_kgh, inclusive="both") & ~static_maf_mask
+    invalid_maf_mask = maf.notna() & ~maf_valid & ~static_maf_mask
+    if bool(invalid_maf_mask.any()):
+        print(
+            f"[WARN] Airflow: {int(invalid_maf_mask.sum())} ponto(s) com MAF fora de {maf_min_kgh:g}..{maf_max_kgh:g} kg/h; "
+            "vou usar fuel+lambda nesses pontos."
+        )
+    out["Air_kg_h_from_MAF"] = maf.where(maf_valid, pd.NA)
+
+    out["Air_kg_h"] = out["Air_kg_h_from_MAF"].where(out["Air_kg_h_from_MAF"].notna(), out["Air_kg_h_from_Fuel_Lambda"])
+    out["Air_kg_s"] = out["Air_kg_h"] / 3600.0
+    out["Air_g_s"] = out["Air_kg_s"] * 1000.0
+
+    out["Airflow_Method"] = pd.Series("unavailable", index=out.index, dtype="object")
+    out.loc[out["Air_kg_h_from_MAF"].notna(), "Airflow_Method"] = "MAF"
+    fuel_lambda_mask = out["Air_kg_h_from_MAF"].isna() & out["Air_kg_h_from_Fuel_Lambda"].notna()
+    out.loc[fuel_lambda_mask & out["LAMBDA_SOURCE"].eq("measured"), "Airflow_Method"] = "fuel_lambda"
+    out.loc[fuel_lambda_mask & out["LAMBDA_SOURCE"].ne("measured"), "Airflow_Method"] = "fuel_lambda_default"
+
+    if fuel_col is None and not bool(maf_valid.any()):
+        print("[WARN] Airflow: nao achei consumo em kg/h nem MAF valido. Canais de ar ficaram vazios.")
 
     return out
 
@@ -1003,6 +1253,64 @@ def add_volumetric_efficiency_channels_inplace(df: pd.DataFrame, defaults_cfg: D
     return out
 
 
+def add_volumetric_efficiency_from_airflow_method_inplace(df: pd.DataFrame, defaults_cfg: Dict[str, str]) -> pd.DataFrame:
+    out = df.copy()
+
+    displacement_l = _to_float(defaults_cfg.get(norm_key("ENGINE_DISPLACEMENT_L"), ""), default=3.992)
+    ref_pressure_kpa = _to_float(defaults_cfg.get(norm_key("VOL_EFF_REF_PRESSURE_kPa"), ""), default=101.3)
+    rpm_col_name = _to_str_or_empty(defaults_cfg.get(norm_key("VOL_EFF_RPM_COL"), "")) or "Rotação_mean_of_windows"
+
+    for column in (
+        "VOL_EFF_AIR_kg_h_USED",
+        "VOL_EFF_THEORETICAL_AIR_kg_h",
+        "VOL_EFF_RHO_REF_kg_m3",
+        "VOL_EFF_RPM_USED",
+        "ETA_V",
+        "ETA_V_pct",
+    ):
+        if column not in out.columns:
+            out[column] = pd.NA
+    out["VOL_EFF_AIR_SOURCE"] = pd.Series(pd.NA, index=out.index, dtype="object")
+    out["VOL_EFF_REF_PRESSURE_kPa"] = ref_pressure_kpa if np.isfinite(ref_pressure_kpa) else pd.NA
+
+    if not np.isfinite(displacement_l) or displacement_l <= 0:
+        print("[WARN] ENGINE_DISPLACEMENT_L invalida; nao calculei eficiencia volumetrica.")
+        return out
+    if not np.isfinite(ref_pressure_kpa) or ref_pressure_kpa <= 0:
+        print("[WARN] VOL_EFF_REF_PRESSURE_kPa invalida; nao calculei eficiencia volumetrica.")
+        return out
+
+    t_col = _resolve_existing_column(out, "T_ADMISSAO_mean_of_windows", ["t", "admiss"])
+    rpm_col = _resolve_existing_column(out, rpm_col_name, ["rotação", "rotacao", "rpm motor", "rpm"])
+    if t_col is None or rpm_col is None:
+        print(f"[WARN] Nao calculei eficiencia volumetrica: t_col={t_col}, rpm_col={rpm_col}.")
+        return out
+
+    displacement_m3 = displacement_l / 1000.0
+    intake_t_k = pd.to_numeric(out[t_col], errors="coerce") + 273.15
+    rpm = pd.to_numeric(out[rpm_col], errors="coerce")
+    rho_ref = (ref_pressure_kpa * 1000.0) / (R_AIR_DRY_J_KG_K * intake_t_k)
+    theoretical_air_kg_h = rho_ref * displacement_m3 * (rpm / 2.0) * 60.0
+
+    out["VOL_EFF_RHO_REF_kg_m3"] = rho_ref
+    out["VOL_EFF_THEORETICAL_AIR_kg_h"] = theoretical_air_kg_h
+    out["VOL_EFF_RPM_USED"] = rpm
+
+    air_used = pd.to_numeric(out.get("Air_kg_h", pd.NA), errors="coerce")
+    airflow_method = out.get("Airflow_Method", pd.Series(pd.NA, index=out.index, dtype="object"))
+    valid_air_mask = air_used.gt(0)
+    out.loc[valid_air_mask, "VOL_EFF_AIR_SOURCE"] = airflow_method.loc[valid_air_mask]
+    out.loc[valid_air_mask & out["VOL_EFF_AIR_SOURCE"].isna(), "VOL_EFF_AIR_SOURCE"] = "Air_kg_h"
+
+    valid = air_used.gt(0) & theoretical_air_kg_h.gt(0) & intake_t_k.gt(0) & rpm.gt(0)
+    eta_v = (air_used / theoretical_air_kg_h).where(valid, pd.NA)
+
+    out["VOL_EFF_AIR_kg_h_USED"] = air_used
+    out["ETA_V"] = eta_v
+    out["ETA_V_pct"] = eta_v * 100.0
+    return out
+
+
 # =========================
 # Psychrometrics helpers
 # =========================
@@ -1050,6 +1358,326 @@ def _cp_moist_air_kj_kgk(T_C: pd.Series, RH_pct: pd.Series, P_kPa_abs: pd.Series
     return pd.to_numeric(cp_mix, errors="coerce")
 
 
+def _as_numeric_series(value: object, index: pd.Index) -> pd.Series:
+    if isinstance(value, pd.Series):
+        return pd.to_numeric(value.reindex(index), errors="coerce")
+    return pd.to_numeric(pd.Series(value, index=index, dtype="float64"), errors="coerce")
+
+
+def _percent_to_fraction(value: object, index: pd.Index) -> pd.Series:
+    return _as_numeric_series(value, index) / 100.0
+
+
+def _ppm_to_fraction(value: object, index: pd.Index) -> pd.Series:
+    return _as_numeric_series(value, index) / 1_000_000.0
+
+
+def _clip_fraction(value: pd.Series, *, lower: float = 0.0, upper: float = 1.0) -> pd.Series:
+    s = pd.to_numeric(value, errors="coerce")
+    return s.clip(lower=lower, upper=upper)
+
+
+def specific_emissions_from_analyzer(
+    *,
+    air_kg_h: object,
+    fuel_kg_h: object,
+    power_kW: object,
+    co2_pct_dry: object,
+    co_pct_dry: object,
+    o2_pct_dry: object,
+    nox_ppm_dry: object,
+    thc_ppm_dry: object,
+    h2o_wet_frac: object,
+    nox_basis: str = "NO",
+) -> pd.DataFrame:
+    for candidate in (power_kW, air_kg_h, fuel_kg_h, co2_pct_dry, co_pct_dry, o2_pct_dry, nox_ppm_dry, thc_ppm_dry, h2o_wet_frac):
+        if isinstance(candidate, pd.Series):
+            index = candidate.index
+            break
+    else:
+        raise ValueError("specific_emissions_from_analyzer precisa de pelo menos uma Series para inferir o index.")
+
+    air = _as_numeric_series(air_kg_h, index)
+    fuel = _as_numeric_series(fuel_kg_h, index)
+    power = _as_numeric_series(power_kW, index)
+    co2_dry = _percent_to_fraction(co2_pct_dry, index)
+    co_dry = _percent_to_fraction(co_pct_dry, index)
+    o2_dry = _percent_to_fraction(o2_pct_dry, index)
+    nox_dry = _ppm_to_fraction(nox_ppm_dry, index)
+    thc_dry = _ppm_to_fraction(thc_ppm_dry, index)
+    h2o_frac = _clip_fraction(_as_numeric_series(h2o_wet_frac, index), lower=0.0, upper=0.999)
+
+    nox_basis_norm = _to_str_or_empty(nox_basis).upper()
+    if nox_basis_norm not in {"NO", "NO2"}:
+        raise ValueError(f"nox_basis invalido: {nox_basis}")
+    mw_nox = MW_NO_KG_KMOL if nox_basis_norm == "NO" else MW_NO2_KG_KMOL
+
+    co2_dry_mix = _clip_fraction(co2_dry)
+    co_dry_mix = _clip_fraction(co_dry)
+    o2_dry_mix = _clip_fraction(o2_dry)
+    nox_dry_mix = _clip_fraction(nox_dry)
+    thc_dry_mix = _clip_fraction(thc_dry, lower=0.0)
+
+    dry_known_sum = co2_dry_mix + co_dry_mix + o2_dry_mix + nox_dry_mix + thc_dry_mix
+    n2_dry = (1.0 - dry_known_sum).clip(lower=0.0)
+
+    mw_dry = (
+        co2_dry_mix * MW_CO2_KG_KMOL
+        + co_dry_mix * MW_CO_KG_KMOL
+        + o2_dry_mix * MW_O2_KG_KMOL
+        + nox_dry_mix * mw_nox
+        + thc_dry_mix * MW_C3H8_KG_KMOL
+        + n2_dry * MW_N2_KG_KMOL
+    )
+
+    exhaust_kg_h = air + fuel
+    exhaust_dry_kg_h = exhaust_kg_h * (1.0 - h2o_frac)
+    dry_kmol_h = exhaust_dry_kg_h / mw_dry
+    wet_kmol_h = dry_kmol_h / (1.0 - h2o_frac)
+    h2o_kmol_h = wet_kmol_h * h2o_frac
+    mw_wet = (1.0 - h2o_frac) * mw_dry + h2o_frac * MW_H2O_KG_KMOL
+
+    co2_wet = co2_dry * (1.0 - h2o_frac)
+    co_wet = co_dry * (1.0 - h2o_frac)
+    o2_wet = o2_dry * (1.0 - h2o_frac)
+    nox_wet = nox_dry * (1.0 - h2o_frac)
+    thc_wet = thc_dry * (1.0 - h2o_frac)
+    n2_wet = n2_dry * (1.0 - h2o_frac)
+
+    def _mass_fraction(x_wet: pd.Series, mw_species: float) -> pd.Series:
+        return (x_wet * mw_species / mw_wet).where(mw_wet.gt(0), pd.NA)
+
+    co2_mass_frac = _mass_fraction(co2_wet, MW_CO2_KG_KMOL)
+    co_mass_frac = _mass_fraction(co_wet, MW_CO_KG_KMOL)
+    nox_mass_frac = _mass_fraction(nox_wet, mw_nox)
+    thc_mass_frac = _mass_fraction(thc_wet, MW_C3H8_KG_KMOL)
+
+    dry_valid = exhaust_kg_h.gt(0) & mw_dry.gt(0)
+    valid_specific = dry_valid & power.gt(0) & mw_wet.gt(0) & h2o_frac.notna()
+
+    def _g_h(mass_fraction: pd.Series) -> pd.Series:
+        return (mass_fraction * exhaust_kg_h * 1000.0).where(valid_specific, pd.NA)
+
+    co2_g_h = _g_h(co2_mass_frac)
+    co_g_h = _g_h(co_mass_frac)
+    nox_g_h = _g_h(nox_mass_frac)
+    thc_g_h = _g_h(thc_mass_frac)
+
+    out = pd.DataFrame(index=index)
+    out["CO2_dry_frac"] = co2_dry
+    out["CO_dry_frac"] = co_dry
+    out["O2_dry_frac"] = o2_dry
+    out["NOx_dry_frac"] = nox_dry
+    out["THC_dry_frac"] = thc_dry
+    out["N2_dry_frac"] = n2_dry
+    out["CO2_wet_frac"] = co2_wet
+    out["CO_wet_frac"] = co_wet
+    out["O2_wet_frac"] = o2_wet
+    out["NOx_wet_frac"] = nox_wet
+    out["THC_wet_frac"] = thc_wet
+    out["N2_wet_frac"] = n2_wet
+    out["MW_dry_kg_kmol"] = mw_dry.where(dry_valid, pd.NA)
+    out["MW_wet_kg_kmol"] = mw_wet.where(valid_specific, pd.NA)
+    out["Exhaust_kg_h"] = exhaust_kg_h.where(exhaust_kg_h.gt(0), pd.NA)
+    out["Exhaust_Dry_kg_h"] = exhaust_dry_kg_h.where(dry_valid, pd.NA)
+    out["Exhaust_Dry_kmol_h"] = dry_kmol_h.where(dry_valid, pd.NA)
+    out["Exhaust_H2O_kmol_h"] = h2o_kmol_h.where(valid_specific, pd.NA)
+    out["CO2_g_h"] = co2_g_h
+    out["CO_g_h"] = co_g_h
+    out["NOx_g_h"] = nox_g_h
+    out["THC_g_h"] = thc_g_h
+    out["CO2_g_kWh"] = (co2_g_h / power).where(valid_specific, pd.NA)
+    out["CO_g_kWh"] = (co_g_h / power).where(valid_specific, pd.NA)
+    out["NOx_g_kWh"] = (nox_g_h / power).where(valid_specific, pd.NA)
+    out["THC_g_kWh"] = (thc_g_h / power).where(valid_specific, pd.NA)
+    return out
+
+
+def _resolve_intake_humidity_ratio_for_emissions(
+    df: pd.DataFrame,
+    defaults_cfg: Optional[Dict[str, str]] = None,
+) -> Tuple[pd.Series, str]:
+    t_amb_col = _resolve_existing_column(df, "T_AMBIENTE_mean_of_windows", ["t_ambiente", "amb"])
+    rh_col = _resolve_existing_column(df, "UMIDADE_mean_of_windows", ["umidade"])
+    p_baro_col = _resolve_existing_column(df, "P_BARO_mean_of_windows", ["p_baro", "baro"])
+
+    default_pressure_kpa = _to_float(
+        (defaults_cfg or {}).get(norm_key("VOL_EFF_REF_PRESSURE_kPa"), ""),
+        default=101.3,
+    )
+    pressure = (
+        pd.to_numeric(df[p_baro_col], errors="coerce")
+        if p_baro_col
+        else pd.Series(default_pressure_kpa, index=df.index, dtype="float64")
+    )
+    pressure_source = "P_BARO"
+    pressure_valid = pressure.dropna()
+    if not pressure_valid.empty and float(pressure_valid.median()) > 200.0:
+        pressure = pressure / 10.0
+        pressure_source = "P_BARO_mbar->kPa"
+    if t_amb_col and rh_col:
+        return _humidity_ratio_w_from_rh(df[t_amb_col], df[rh_col], pressure), f"T_AMBIENTE+UMIDADE+{pressure_source}"
+    if rh_col:
+        t_e_comp_col = _resolve_existing_column(df, "T_E_COMP_mean_of_windows", ["t_e_comp"])
+        if t_e_comp_col:
+            return _humidity_ratio_w_from_rh(df[t_e_comp_col], df[rh_col], pressure), f"T_E_COMP+UMIDADE+{pressure_source}"
+    return pd.Series(0.0, index=df.index, dtype="float64"), "fallback_seco"
+
+
+def add_specific_emissions_channels_inplace(
+    df: pd.DataFrame,
+    *,
+    power_kW: pd.Series,
+    fuel_kg_h: pd.Series,
+    defaults_cfg: Optional[Dict[str, str]] = None,
+) -> pd.DataFrame:
+    out = df.copy()
+    idx = out.index
+
+    air_kg_h = pd.to_numeric(out.get("Air_kg_h", pd.Series(pd.NA, index=idx)), errors="coerce")
+    fuel_kg_h = pd.to_numeric(fuel_kg_h.reindex(idx), errors="coerce")
+    power_kW = pd.to_numeric(power_kW.reindex(idx), errors="coerce")
+
+    dies_frac = _airflow_component_fraction(out, "DIES_pct").fillna(0.0)
+    biod_frac = _airflow_component_fraction(out, "BIOD_pct").fillna(0.0)
+    etoh_frac = _airflow_component_fraction(out, "EtOH_pct").fillna(0.0)
+    fuel_h2o_frac = _airflow_component_fraction(out, "H2O_pct").fillna(0.0)
+
+    intake_humidity_ratio, humidity_source = _resolve_intake_humidity_ratio_for_emissions(out, defaults_cfg)
+    intake_humidity_ratio = pd.to_numeric(intake_humidity_ratio, errors="coerce").clip(lower=0.0)
+    air_h2o_kg_h = (air_kg_h * intake_humidity_ratio / (1.0 + intake_humidity_ratio)).where(air_kg_h.gt(0), pd.NA)
+    fuel_h2o_kg_h = (fuel_kg_h * fuel_h2o_frac).where(fuel_kg_h.ge(0), pd.NA)
+
+    fuel_h_mass_frac = (
+        dies_frac * H_MASS_FRAC_DIESEL
+        + biod_frac * H_MASS_FRAC_BIODIESEL
+        + etoh_frac * H_MASS_FRAC_ETHANOL
+    )
+    fuel_h_kg_h = (fuel_kg_h * fuel_h_mass_frac).where(fuel_kg_h.ge(0), pd.NA)
+    combustion_h2o_kg_h = fuel_h_kg_h * 9.0
+
+    exhaust_kg_h = air_kg_h + fuel_kg_h
+    exhaust_h2o_kg_h = air_h2o_kg_h + fuel_h2o_kg_h + combustion_h2o_kg_h
+    exhaust_dry_kg_h = exhaust_kg_h - exhaust_h2o_kg_h
+
+    out["Intake_Humidity_Ratio_kgkg"] = intake_humidity_ratio
+    out["Intake_Air_H2O_kg_h"] = air_h2o_kg_h
+    out["Fuel_H2O_kg_h"] = fuel_h2o_kg_h
+    out["Fuel_H_kg_h"] = fuel_h_kg_h
+    out["Combustion_H2O_kg_h"] = combustion_h2o_kg_h
+    out["Exhaust_H2O_kg_h"] = exhaust_h2o_kg_h
+    out["Exhaust_Dry_kg_h"] = exhaust_dry_kg_h
+
+    co2_col = _resolve_existing_column(out, "CO2_mean_of_windows", ["co2"])
+    co_col = _resolve_existing_column(out, "CO_mean_of_windows", ["co"])
+    o2_col = _resolve_existing_column(out, "O2_mean_of_windows", ["o2"])
+    nox_col = _resolve_existing_column(out, "NOX_mean_of_windows", ["nox"])
+    thc_col = _resolve_existing_column(out, "THC_mean_of_windows", ["thc"])
+
+    co2 = pd.to_numeric(out.get(co2_col, pd.Series(pd.NA, index=idx)), errors="coerce")
+    co = pd.to_numeric(out.get(co_col, pd.Series(pd.NA, index=idx)), errors="coerce")
+    o2 = pd.to_numeric(out.get(o2_col, pd.Series(pd.NA, index=idx)), errors="coerce")
+    nox = pd.to_numeric(out.get(nox_col, pd.Series(pd.NA, index=idx)), errors="coerce")
+    thc = pd.to_numeric(out.get(thc_col, pd.Series(pd.NA, index=idx)), errors="coerce")
+
+    low_thc_mask = thc.abs().lt(THC_LOW_SIGNAL_WARN_PPM)
+    negative_thc_mask = thc.lt(0)
+    out["THC_LOW_SIGNAL_FLAG"] = low_thc_mask.astype("Int64")
+    out["THC_NEGATIVE_FLAG"] = negative_thc_mask.astype("Int64")
+
+    emissions_ref = specific_emissions_from_analyzer(
+        air_kg_h=air_kg_h,
+        fuel_kg_h=fuel_kg_h,
+        power_kW=power_kW,
+        co2_pct_dry=co2,
+        co_pct_dry=co,
+        o2_pct_dry=o2,
+        nox_ppm_dry=nox,
+        thc_ppm_dry=thc,
+        h2o_wet_frac=pd.Series(np.nan, index=idx, dtype="float64"),
+        nox_basis="NO",
+    )
+
+    dry_valid = pd.to_numeric(emissions_ref["MW_dry_kg_kmol"], errors="coerce").gt(0)
+    h2o_wet_frac = (
+        pd.to_numeric(exhaust_h2o_kg_h, errors="coerce") / MW_H2O_KG_KMOL
+    ) / (
+        (pd.to_numeric(exhaust_h2o_kg_h, errors="coerce") / MW_H2O_KG_KMOL)
+        + (pd.to_numeric(exhaust_dry_kg_h, errors="coerce") / pd.to_numeric(emissions_ref["MW_dry_kg_kmol"], errors="coerce"))
+    )
+    h2o_wet_frac = h2o_wet_frac.where(dry_valid & exhaust_dry_kg_h.gt(0) & exhaust_h2o_kg_h.ge(0), pd.NA)
+    h2o_wet_frac = h2o_wet_frac.clip(lower=0.0, upper=0.999)
+
+    out["H2O_wet_frac"] = h2o_wet_frac
+
+    emissions_no = specific_emissions_from_analyzer(
+        air_kg_h=air_kg_h,
+        fuel_kg_h=fuel_kg_h,
+        power_kW=power_kW,
+        co2_pct_dry=co2,
+        co_pct_dry=co,
+        o2_pct_dry=o2,
+        nox_ppm_dry=nox,
+        thc_ppm_dry=thc,
+        h2o_wet_frac=h2o_wet_frac,
+        nox_basis="NO",
+    )
+    emissions_no2 = specific_emissions_from_analyzer(
+        air_kg_h=air_kg_h,
+        fuel_kg_h=fuel_kg_h,
+        power_kW=power_kW,
+        co2_pct_dry=co2,
+        co_pct_dry=co,
+        o2_pct_dry=o2,
+        nox_ppm_dry=nox,
+        thc_ppm_dry=thc,
+        h2o_wet_frac=h2o_wet_frac,
+        nox_basis="NO2",
+    )
+
+    shared_cols = [
+        "CO2_dry_frac",
+        "CO_dry_frac",
+        "O2_dry_frac",
+        "NOx_dry_frac",
+        "THC_dry_frac",
+        "N2_dry_frac",
+        "CO2_wet_frac",
+        "CO_wet_frac",
+        "O2_wet_frac",
+        "NOx_wet_frac",
+        "THC_wet_frac",
+        "N2_wet_frac",
+        "MW_dry_kg_kmol",
+        "MW_wet_kg_kmol",
+        "Exhaust_kg_h",
+        "Exhaust_Dry_kg_h",
+        "Exhaust_Dry_kmol_h",
+        "Exhaust_H2O_kmol_h",
+        "CO2_g_h",
+        "CO_g_h",
+        "THC_g_h",
+        "CO2_g_kWh",
+        "CO_g_kWh",
+        "THC_g_kWh",
+    ]
+    for column in shared_cols:
+        out[column] = emissions_no[column]
+
+    out["MW_dry_kg_kmol_as_NO"] = emissions_no["MW_dry_kg_kmol"]
+    out["MW_wet_kg_kmol_as_NO"] = emissions_no["MW_wet_kg_kmol"]
+    out["MW_dry_kg_kmol_as_NO2"] = emissions_no2["MW_dry_kg_kmol"]
+    out["MW_wet_kg_kmol_as_NO2"] = emissions_no2["MW_wet_kg_kmol"]
+    out["NOx_g_h_as_NO"] = emissions_no["NOx_g_h"]
+    out["NOx_g_kWh_as_NO"] = emissions_no["NOx_g_kWh"]
+    out["NOx_g_h_as_NO2"] = emissions_no2["NOx_g_h"]
+    out["NOx_g_kWh_as_NO2"] = emissions_no2["NOx_g_kWh"]
+    out["NOx_as_NO_g_kWh"] = emissions_no["NOx_g_kWh"]
+    out["NOx_as_NO2_g_kWh"] = emissions_no2["NOx_g_kWh"]
+    out["EMISSIONS_H2O_SOURCE"] = humidity_source
+    return out
+
+
 # =========================
 # File meta
 # =========================
@@ -1061,8 +1689,8 @@ class FileMeta:
     load_kw: Optional[float]
     dies_pct: Optional[float]
     biod_pct: Optional[float]
-    etoh_pct: Optional[int]
-    h2o_pct: Optional[int]
+    etoh_pct: Optional[float]
+    h2o_pct: Optional[float]
     load_parse: str = ""
     composition_parse: str = ""
 
@@ -1079,13 +1707,15 @@ def _to_pct_or_none(x: object) -> Optional[float]:
     return v
 
 
-def _parse_filename_composition(stem: str) -> Tuple[Optional[float], Optional[float], Optional[int], Optional[int], str]:
+def _parse_filename_composition(stem: str) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float], str]:
     m_eh = re.search(r"E(\d+)\s*H(\d+)", stem, flags=re.IGNORECASE)
     if m_eh:
-        return None, None, int(m_eh.group(1)), int(m_eh.group(2)), "filename_ethanol"
+        return None, None, _to_pct_or_none(m_eh.group(1)), _to_pct_or_none(m_eh.group(2)), "filename_ethanol"
 
     dies_pct = None
     biod_pct = None
+    etoh_pct = None
+    h2o_pct = None
 
     m_db = re.search(r"(?:^|[^A-Za-z0-9])D(\d+(?:[.,]\d+)?)\s*B(\d+(?:[.,]\d+)?)(?:$|[^A-Za-z0-9])", stem, flags=re.IGNORECASE)
     if m_db:
@@ -1098,6 +1728,42 @@ def _parse_filename_composition(stem: str) -> Tuple[Optional[float], Optional[fl
         biod_pct = _to_pct_or_none(m_bd.group(1))
         dies_pct = _to_pct_or_none(m_bd.group(2))
         return dies_pct, biod_pct, None, None, "filename_diesel_reversed"
+
+    m_be = re.search(r"(?:^|[^A-Za-z0-9])B(\d+(?:[.,]\d+)?)\s*E(\d+(?:[.,]\d+)?)(?:$|[^A-Za-z0-9])", stem, flags=re.IGNORECASE)
+    if m_be:
+        biod_pct = _to_pct_or_none(m_be.group(1))
+        etoh_pct = _to_pct_or_none(m_be.group(2))
+        return 0.0, biod_pct, etoh_pct, 0.0, "filename_biodiesel_ethanol"
+
+    m_eb = re.search(r"(?:^|[^A-Za-z0-9])E(\d+(?:[.,]\d+)?)\s*B(\d+(?:[.,]\d+)?)(?:$|[^A-Za-z0-9])", stem, flags=re.IGNORECASE)
+    if m_eb:
+        etoh_pct = _to_pct_or_none(m_eb.group(1))
+        biod_pct = _to_pct_or_none(m_eb.group(2))
+        return 0.0, biod_pct, etoh_pct, 0.0, "filename_ethanol_biodiesel"
+
+    m_de = re.search(r"(?:^|[^A-Za-z0-9])D(\d+(?:[.,]\d+)?)\s*E(\d+(?:[.,]\d+)?)(?:$|[^A-Za-z0-9])", stem, flags=re.IGNORECASE)
+    if m_de:
+        dies_pct = _to_pct_or_none(m_de.group(1))
+        etoh_pct = _to_pct_or_none(m_de.group(2))
+        return dies_pct, 0.0, etoh_pct, 0.0, "filename_diesel_ethanol"
+
+    m_ed = re.search(r"(?:^|[^A-Za-z0-9])E(\d+(?:[.,]\d+)?)\s*D(\d+(?:[.,]\d+)?)(?:$|[^A-Za-z0-9])", stem, flags=re.IGNORECASE)
+    if m_ed:
+        etoh_pct = _to_pct_or_none(m_ed.group(1))
+        dies_pct = _to_pct_or_none(m_ed.group(2))
+        return dies_pct, 0.0, etoh_pct, 0.0, "filename_ethanol_diesel"
+
+    m_b = re.match(r"^B(\d+(?:[.,]\d+)?)(?:$|[^A-Za-z0-9])", stem, flags=re.IGNORECASE)
+    if m_b:
+        biod_pct = _to_pct_or_none(m_b.group(1))
+        if biod_pct is not None:
+            return 0.0, biod_pct, 0.0, 0.0, "filename_biodiesel"
+
+    m_d = re.match(r"^D(\d+(?:[.,]\d+)?)(?:$|[^A-Za-z0-9])", stem, flags=re.IGNORECASE)
+    if m_d:
+        dies_pct = _to_pct_or_none(m_d.group(1))
+        if dies_pct is not None:
+            return dies_pct, 0.0, 0.0, 0.0, "filename_diesel_only"
 
     m_dies = re.search(r"(?:dies_pct|diesel|dies)\s*[-_ ]*(\d+(?:[.,]\d+)?)", stem, flags=re.IGNORECASE)
     if m_dies:
@@ -1689,7 +2355,7 @@ def plot_time_delta_all_samples(
     time_df: pd.DataFrame,
     filename: str = "time_delta_to_next_all_samples.png",
     plot_dir: Optional[Path] = None,
-) -> None:
+) -> Dict[str, object]:
     if time_df is None or time_df.empty:
         print("[WARN] Sem dados para plot de delta T do TIME.")
         return
@@ -1760,6 +2426,7 @@ def plot_time_delta_by_file(time_df: pd.DataFrame, plot_dir: Optional[Path] = No
         valid = x.notna() & y.notna()
         if valid.sum() == 0:
             n_skip += 1
+            skipped_items.append((plot_label, "plot_type vazio"))
             continue
 
         source_folder = str(d.get("SourceFolder", pd.Series([""])).iloc[0] or "")
@@ -2033,19 +2700,11 @@ def load_pipeline29_config_bundle(
             raise FileNotFoundError(f"Nao encontrei config textual completa em {text_dir}")
 
     excel_path = _choose_config_path()
-    mappings, instruments_df, reporting_df, plots_df, data_quality_cfg, defaults_cfg = load_config_excel(excel_path)
-    return _prepare_config_bundle_for_pipeline(Pipeline29ConfigBundle(
-        mappings=mappings,
-        instruments_df=instruments_df,
-        reporting_df=reporting_df,
-        plots_df=plots_df,
-        fuel_properties_df=pd.DataFrame(columns=DEFAULT_FUEL_PROPERTY_COLUMNS),
-        data_quality_cfg=data_quality_cfg,
-        defaults_cfg=defaults_cfg,
-        source_kind="excel",
-        source_path=excel_path,
-        text_dir=text_dir if text_config_exists(text_dir) else None,
-    ))
+    bundle = load_excel_config_bundle(excel_path)
+    bundle.source_kind = "excel"
+    bundle.source_path = excel_path
+    bundle.text_dir = text_dir if text_config_exists(text_dir) else None
+    return _prepare_config_bundle_for_pipeline(bundle)
 
 
 def _try_read_sheet(xlsx_path: Path, sheet: str) -> Optional[pd.DataFrame]:
@@ -2716,26 +3375,21 @@ def _fuel_label_from_composition_values(
     h2o_pct: object,
     tol: float = 0.6,
 ) -> str:
-    dies = _to_float(dies_pct, default=float("nan"))
-    biod = _to_float(biod_pct, default=float("nan"))
-    etoh = _to_float(etoh_pct, default=float("nan"))
-    h2o = _to_float(h2o_pct, default=float("nan"))
-
-    if np.isfinite(dies) and np.isfinite(biod) and abs(dies - 85.0) <= tol and abs(biod - 15.0) <= tol:
-        return "D85B15"
-    if np.isfinite(etoh) and np.isfinite(h2o) and abs(etoh - 94.0) <= tol and abs(h2o - 6.0) <= tol:
-        return "E94H6"
-    if np.isfinite(etoh) and np.isfinite(h2o) and abs(etoh - 75.0) <= tol and abs(h2o - 25.0) <= tol:
-        return "E75H25"
-    if np.isfinite(etoh) and np.isfinite(h2o) and abs(etoh - 65.0) <= tol and abs(h2o - 35.0) <= tol:
-        return "E65H35"
-    return ""
+    return _fuel_label_from_components(dies_pct, biod_pct, etoh_pct, h2o_pct, tol=tol)
 
 
 def _preferred_fuel_label_order(labels: List[str]) -> List[str]:
     preferred = ["D85B15", "E94H6", "E75H25", "E65H35"]
-    uniq = [str(v).strip() for v in labels if str(v).strip()]
-    ordered = [label for label in preferred if label in uniq]
+    uniq: List[str] = []
+    seen: set[str] = set()
+    for value in labels:
+        label = str(value).strip()
+        if not label or label in seen:
+            continue
+        uniq.append(label)
+        seen.add(label)
+
+    ordered = [label for label in preferred if label in seen]
     extras = sorted([label for label in uniq if label not in ordered], key=_canon_name)
     return ordered + extras
 
@@ -3383,6 +4037,8 @@ def load_config_excel(xlsx_path: Optional[Path] = None) -> Tuple[dict, pd.DataFr
         plots = pd.DataFrame(
             columns=[
                 "enabled",
+                "with_uncertainty",
+                "without_uncertainty",
                 "plot_type",
                 "filename",
                 "title",
@@ -3405,6 +4061,9 @@ def load_config_excel(xlsx_path: Optional[Path] = None) -> Tuple[dict, pd.DataFr
                 "notes",
             ]
         )
+    for column in ("with_uncertainty", "without_uncertainty", "show_uncertainty"):
+        if column not in plots.columns:
+            plots[column] = pd.NA
     if "show_uncertainty" not in plots.columns:
         plots["show_uncertainty"] = pd.NA
     if "yerr_col" in plots.columns:
@@ -3413,6 +4072,31 @@ def load_config_excel(xlsx_path: Optional[Path] = None) -> Tuple[dict, pd.DataFr
                 continue
             yerr_value = _to_str_or_empty(plots.at[idx, "yerr_col"])
             plots.at[idx, "show_uncertainty"] = "off" if _yerr_disabled_token(yerr_value) else "auto"
+    for idx, row in plots.iterrows():
+        with_raw = _to_str_or_empty(row.get("with_uncertainty", ""))
+        without_raw = _to_str_or_empty(row.get("without_uncertainty", ""))
+        mode = _to_str_or_empty(row.get("show_uncertainty", "auto")).lower()
+        with_flag = with_raw in {"1", "true", "yes", "on", "y", "checked"}
+        without_flag = without_raw in {"1", "true", "yes", "on", "y", "checked"}
+        with_defined = with_raw in {"1", "0", "true", "false", "yes", "no", "on", "off", "y", "n", "checked", "unchecked"}
+        without_defined = without_raw in {"1", "0", "true", "false", "yes", "no", "on", "off", "y", "n", "checked", "unchecked"}
+        if not with_defined and not without_defined:
+            if mode == "off":
+                with_flag, without_flag = False, True
+            elif mode in {"both", "all", "dual", "on_off"}:
+                with_flag, without_flag = True, True
+            else:
+                with_flag, without_flag = True, False
+        elif not with_flag and not without_flag:
+            with_flag = True
+        plots.at[idx, "with_uncertainty"] = "1" if with_flag else "0"
+        plots.at[idx, "without_uncertainty"] = "1" if without_flag else "0"
+        if with_flag and without_flag:
+            plots.at[idx, "show_uncertainty"] = "both"
+        elif with_flag:
+            plots.at[idx, "show_uncertainty"] = "on"
+        else:
+            plots.at[idx, "show_uncertainty"] = "off"
 
     data_quality_cfg = _load_data_quality_config(p)
     defaults_cfg = _load_defaults_config(p)
@@ -3497,15 +4181,16 @@ def _normalize_fuel_properties_df(df: Optional[pd.DataFrame]) -> pd.DataFrame:
     if "Fuel_Label" in out.columns:
         missing_label = out["Fuel_Label"].isna() | out["Fuel_Label"].map(lambda value: not _to_str_or_empty(value).strip())
         if bool(missing_label.any()):
-            dies = pd.to_numeric(out.get("DIES_pct", pd.Series(pd.NA, index=out.index)), errors="coerce")
-            biod = pd.to_numeric(out.get("BIOD_pct", pd.Series(pd.NA, index=out.index)), errors="coerce")
-            etoh = pd.to_numeric(out.get("EtOH_pct", pd.Series(pd.NA, index=out.index)), errors="coerce")
-            h2o = pd.to_numeric(out.get("H2O_pct", pd.Series(pd.NA, index=out.index)), errors="coerce")
-            inferred = pd.Series(pd.NA, index=out.index, dtype="object")
-            inferred = inferred.mask((dies.sub(85.0).abs() <= 0.6) & (biod.sub(15.0).abs() <= 0.6), "D85B15")
-            inferred = inferred.mask((etoh.sub(94.0).abs() <= 0.6) & (h2o.sub(6.0).abs() <= 0.6), "E94H6")
-            inferred = inferred.mask((etoh.sub(75.0).abs() <= 0.6) & (h2o.sub(25.0).abs() <= 0.6), "E75H25")
-            inferred = inferred.mask((etoh.sub(65.0).abs() <= 0.6) & (h2o.sub(35.0).abs() <= 0.6), "E65H35")
+            inferred = out.apply(
+                lambda row: _fuel_label_from_components(
+                    row.get("DIES_pct", pd.NA),
+                    row.get("BIOD_pct", pd.NA),
+                    row.get("EtOH_pct", pd.NA),
+                    row.get("H2O_pct", pd.NA),
+                ),
+                axis=1,
+            )
+            inferred = inferred.map(lambda value: value or pd.NA).astype("object")
             out.loc[missing_label, "Fuel_Label"] = inferred.loc[missing_label]
     for column in ("Fuel_Label", "reference", "notes"):
         out[column] = out[column].map(lambda value: _to_str_or_empty(value) or pd.NA)
@@ -3624,23 +4309,26 @@ def _lookup_lhv_for_blend(
 
 def _fuel_blend_labels(df: pd.DataFrame, tol: float = 0.6) -> pd.Series:
     idx = df.index
-    labels = pd.Series(pd.NA, index=idx, dtype="object")
-
-    dies = pd.to_numeric(df.get("DIES_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
-    biod = pd.to_numeric(df.get("BIOD_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
-    etoh = pd.to_numeric(df.get("EtOH_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
-    h2o = pd.to_numeric(df.get("H2O_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
-
-    blend_masks = [
-        ("D85B15", (dies.sub(85.0).abs() <= tol) & (biod.sub(15.0).abs() <= tol)),
-        ("E94H6", (etoh.sub(94.0).abs() <= tol) & (h2o.sub(6.0).abs() <= tol)),
-        ("E75H25", (etoh.sub(75.0).abs() <= tol) & (h2o.sub(25.0).abs() <= tol)),
-        ("E65H35", (etoh.sub(65.0).abs() <= tol) & (h2o.sub(35.0).abs() <= tol)),
-    ]
-    for label, mask in blend_masks:
-        labels = labels.mask(mask & labels.isna(), label)
-
-    return labels
+    comps = pd.DataFrame(
+        {
+            "DIES_pct": pd.to_numeric(df.get("DIES_pct", pd.Series(pd.NA, index=idx)), errors="coerce"),
+            "BIOD_pct": pd.to_numeric(df.get("BIOD_pct", pd.Series(pd.NA, index=idx)), errors="coerce"),
+            "EtOH_pct": pd.to_numeric(df.get("EtOH_pct", pd.Series(pd.NA, index=idx)), errors="coerce"),
+            "H2O_pct": pd.to_numeric(df.get("H2O_pct", pd.Series(pd.NA, index=idx)), errors="coerce"),
+        },
+        index=idx,
+    )
+    labels = comps.apply(
+        lambda row: _fuel_label_from_components(
+            row["DIES_pct"],
+            row["BIOD_pct"],
+            row["EtOH_pct"],
+            row["H2O_pct"],
+            tol=tol,
+        ),
+        axis=1,
+    )
+    return labels.map(lambda value: value or pd.NA).astype("object")
 
 
 def _fuel_default_lookup_series(
@@ -3653,12 +4341,20 @@ def _fuel_default_lookup_series(
     values = pd.Series(np.nan, index=df.index, dtype="float64")
     missing: List[str] = []
 
-    for label, spec in FUEL_BLEND_DEFAULTS.items():
+    field_prefix = {
+        "density_param": "FUEL_DENSITY_KG_M3_",
+        "cost_param": "FUEL_COST_R_L_",
+    }.get(field, "")
+    if not field_prefix:
+        raise KeyError(f"Campo de lookup de combustivel nao suportado: {field}")
+
+    unique_labels = sorted({str(label).strip() for label in labels.dropna().tolist() if str(label).strip()})
+    for label in unique_labels:
         mask = labels.eq(label)
         if not bool(mask.any()):
             continue
 
-        param_name = spec[field]
+        param_name = f"{field_prefix}{label}"
         param_value = _to_float(defaults_cfg.get(norm_key(param_name), ""), default=float("nan"))
         if np.isfinite(param_value) and (param_value > 0):
             values.loc[mask] = float(param_value)
@@ -4039,8 +4735,8 @@ def _expand_legacy_all_fuels_filter(df: pd.DataFrame, fuels_override: Optional[L
     if set(normalized) != set(FUEL_H2O_LEVELS):
         return normalized
 
-    labels = _fuel_blend_labels(df)
-    if not bool(labels.eq("D85B15").any()):
+    h2o = pd.to_numeric(df.get("H2O_pct", pd.Series(pd.NA, index=df.index)), errors="coerce")
+    if not bool((h2o.abs() <= 0.6).any()):
         return normalized
 
     return [0] + normalized
@@ -4106,6 +4802,13 @@ def _instrument_rows_for_key(
         return pd.DataFrame()
 
     rows = instruments_df[instruments_df["key_norm"].eq(key_norm)].copy()
+    if rows.empty:
+        fallback_key = {
+            "t_e_comp_c": "t_s_agua_c",
+            "t_s_comp_c": "t_s_agua_c",
+        }.get(key_norm, "")
+        if fallback_key:
+            rows = instruments_df[instruments_df["key_norm"].eq(fallback_key)].copy()
     if rows.empty:
         return rows
     return _filter_instrument_rows_by_defaults(rows, defaults_cfg=defaults_cfg)
@@ -4788,13 +5491,78 @@ def build_final_table(
 
     df.loc[invalid_bsfc, ["uA_BSFC_g_kWh", "uB_BSFC_g_kWh", "uc_BSFC_g_kWh", "U_BSFC_g_kWh"]] = pd.NA
 
-    lambda_col = None
-    if "lambda" in mappings and mappings["lambda"].get("mean"):
-        try:
-            lambda_col = resolve_col(df, mappings["lambda"]["mean"])
-        except Exception:
-            lambda_col = None
-    df = add_airflow_channels_inplace(df, lambda_col=lambda_col)
+    lambda_col = _resolve_airflow_lambda_col(df, mappings)
+    maf_col = _resolve_airflow_maf_col(df, defaults_cfg)
+    maf_min_kgh = _to_float(defaults_cfg.get(norm_key("VOL_EFF_DIESEL_MAF_MIN_KGH"), ""), default=0.0)
+    maf_max_kgh = _to_float(defaults_cfg.get(norm_key("VOL_EFF_DIESEL_MAF_MAX_KGH"), ""), default=300.0)
+
+    if lambda_col:
+        print(f"[INFO] Airflow: lambda da MoTeC = '{lambda_col}'.")
+    else:
+        print("[INFO] Airflow: lambda da MoTeC nao encontrada; vou priorizar MAF e usar lambda default=1.0 apenas no fallback fuel+lambda.")
+    if maf_col:
+        print(f"[INFO] Airflow: MAF = '{maf_col}' (faixa valida {maf_min_kgh:g}..{maf_max_kgh:g} kg/h).")
+    else:
+        print("[INFO] Airflow: MAF nao encontrado; airflow ficara no modo fuel+lambda.")
+
+    df = add_airflow_channels_prefer_maf_inplace(
+        df,
+        lambda_col=lambda_col,
+        maf_col=maf_col,
+        maf_min_kgh=maf_min_kgh,
+        maf_max_kgh=maf_max_kgh,
+    )
+
+    airflow_methods = df.get("Airflow_Method", pd.Series(pd.NA, index=df.index, dtype="object")).fillna("unavailable")
+    airflow_counts = airflow_methods.value_counts(dropna=False)
+    airflow_summary = ", ".join(
+        f"{label}={int(count)}"
+        for label, count in [
+            ("MAF", airflow_counts.get("MAF", 0)),
+            ("fuel+lambda", airflow_counts.get("fuel_lambda", 0)),
+            ("fuel+lambda_default", airflow_counts.get("fuel_lambda_default", 0)),
+            ("indisponivel", airflow_counts.get("unavailable", 0)),
+        ]
+        if int(count) > 0
+    )
+    lambda_source_counts = df.get("LAMBDA_SOURCE", pd.Series(pd.NA, index=df.index, dtype="object")).fillna("default_1.0").value_counts(dropna=False)
+    print(
+        "[INFO] Airflow por ponto: "
+        + (airflow_summary if airflow_summary else "nenhum ponto valido")
+        + f" | lambda medida={int(lambda_source_counts.get('measured', 0))}, default_1.0={int(lambda_source_counts.get('default_1.0', 0))}"
+    )
+
+    df = add_specific_emissions_channels_inplace(
+        df,
+        power_kW=PkW,
+        fuel_kg_h=Fkgh,
+        defaults_cfg=defaults_cfg,
+    )
+
+    humidity_source_counts = (
+        df.get("EMISSIONS_H2O_SOURCE", pd.Series(pd.NA, index=df.index, dtype="object"))
+        .fillna("indisponivel")
+        .value_counts(dropna=False)
+    )
+    humidity_source_summary = ", ".join(f"{label}={int(count)}" for label, count in humidity_source_counts.items() if int(count) > 0)
+    print(
+        "[INFO] Emissoes g/kWh: H2O_wet_frac indireto via "
+        + (humidity_source_summary if humidity_source_summary else "indisponivel")
+        + " | agua no escape = agua do ar + agua no combustivel + agua formada pelo H do combustivel."
+    )
+
+    thc_low_mask = pd.to_numeric(df.get("THC_LOW_SIGNAL_FLAG", pd.NA), errors="coerce").fillna(0).gt(0)
+    thc_neg_mask = pd.to_numeric(df.get("THC_NEGATIVE_FLAG", pd.NA), errors="coerce").fillna(0).gt(0)
+    if bool(thc_low_mask.any()):
+        print(
+            f"[WARN] THC muito baixo em {int(thc_low_mask.sum())} ponto(s) (|THC| < {THC_LOW_SIGNAL_WARN_PPM:g} ppm); "
+            "vou calcular e plotar THC_g_kWh mesmo assim."
+        )
+    if bool(thc_neg_mask.any()):
+        print(
+            f"[WARN] THC negativo em {int(thc_neg_mask.sum())} ponto(s); "
+            "vou calcular e plotar THC_g_kWh mesmo assim para preservar o diagnostico do analisador."
+        )
 
     # Thermal efficiency based on E94H6 equivalent flow:
     # n_th_E94H6_eq_flow = P / (m_dot_eq_E94H6 * LHV_E94H6)
@@ -4829,12 +5597,13 @@ def build_final_table(
         target_prefix="T_E_CIL_AVG_C",
     )
 
+    t_e_comp_col = _resolve_existing_column(df, "T_E_COMP_mean_of_windows", ["t_e_comp"])
     t_adm_col = _find_first_col_by_substrings(df, ["t", "admiss"])
     p_col = _find_first_col_by_substrings(df, ["p", "coletor"])
     rh_col = _find_first_col_by_substrings(df, ["umidade"])
 
-    if t_adm_col and rh_col:
-        df["UMIDADE_ABS_g_m3"] = _absolute_humidity_g_m3(df[t_adm_col], df[rh_col])
+    if t_e_comp_col and rh_col:
+        df["UMIDADE_ABS_g_m3"] = _absolute_humidity_g_m3(df[t_e_comp_col], df[rh_col])
     else:
         df["UMIDADE_ABS_g_m3"] = pd.NA
 
@@ -4875,7 +5644,7 @@ def build_final_table(
     else:
         df["Q_EVAP_NET_kW"] = pd.NA
 
-    df = add_volumetric_efficiency_channels_inplace(df, defaults_cfg)
+    df = add_volumetric_efficiency_from_airflow_method_inplace(df, defaults_cfg)
 
     # ECT control error sign convention:
     # positive error => coolant outlet temperature hotter than commanded setpoint.
@@ -4961,44 +5730,58 @@ def _fuel_plot_groups(df: pd.DataFrame, fuels_override: Optional[List[int]] = No
     h2o = pd.to_numeric(df.get("H2O_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
     fuel_labels = df.get("Fuel_Label", pd.Series(pd.NA, index=idx, dtype="object"))
     fuel_labels = fuel_labels.where(fuel_labels.notna(), _fuel_blend_labels(df))
+    fuel_labels = fuel_labels.map(lambda value: _to_str_or_empty(value) or pd.NA).astype("object")
 
     fuels = _expand_legacy_all_fuels_filter(df, fuels_override)
-    if fuels is None:
-        fuels = sorted(float(v) for v in h2o.dropna().unique())
-        for label, level in FUEL_H2O_LEVEL_BY_LABEL.items():
-            if bool(fuel_labels.eq(label).any()) and (level not in fuels):
-                fuels.append(level)
-        fuels = sorted(fuels)
+    selected_h2o_levels: Optional[List[float]] = None
+    if fuels is not None:
+        try:
+            selected_h2o_levels = [float(v) for v in fuels]
+        except Exception:
+            selected_h2o_levels = None
 
-    if not fuels:
-        return [(None, df.copy())]
-
+    labeled_fuels = _preferred_fuel_label_order(fuel_labels.dropna().astype(str).tolist())
     groups: List[Tuple[Optional[str], pd.DataFrame]] = []
-    seen_labels: set[str] = set()
 
-    for h in fuels:
+    if labeled_fuels:
+        selected_labels = labeled_fuels
+        if selected_h2o_levels is not None:
+            selected_labels = []
+            for label in labeled_fuels:
+                label_mask = fuel_labels.eq(label)
+                label_h2o = h2o.where(label_mask)
+                matches_level = any(bool((label_h2o.sub(level).abs() <= 0.6).any()) for level in selected_h2o_levels)
+                if matches_level:
+                    selected_labels.append(label)
+
+        for label in selected_labels:
+            d = df[fuel_labels.eq(label)].copy()
+            if not d.empty:
+                groups.append((label, d))
+
+    unlabeled = df[fuel_labels.isna()].copy()
+    if unlabeled.empty:
+        return groups or [(None, df.copy())]
+
+    unlabeled_h2o = pd.to_numeric(unlabeled.get("H2O_pct", pd.Series(pd.NA, index=unlabeled.index)), errors="coerce")
+    fallback_levels = selected_h2o_levels
+    if fallback_levels is None:
+        fallback_levels = sorted(float(v) for v in unlabeled_h2o.dropna().unique())
+
+    if not fallback_levels:
+        return groups or [(None, df.copy())]
+
+    for h in fallback_levels:
         hv = float(h)
-        mapped_label = None
-        if float(hv).is_integer():
-            mapped_label = FUEL_LABEL_BY_H2O_LEVEL.get(int(hv))
-        if mapped_label and bool(fuel_labels.eq(mapped_label).any()):
-            if mapped_label in seen_labels:
-                continue
-            d = df[fuel_labels.eq(mapped_label)].copy()
-            label = mapped_label
-            seen_labels.add(mapped_label)
-        else:
-            d = df[h2o.sub(hv).abs() <= 0.6].copy()
-            label = _fuel_label_for_group(d)
-
+        d = unlabeled[unlabeled_h2o.sub(hv).abs() <= 0.6].copy()
         if d.empty:
             continue
-
+        label = _fuel_label_for_group(d)
         if not label:
             label = f"H2O={int(hv)}%" if hv.is_integer() else f"H2O={hv:g}%"
         groups.append((label, d))
 
-    return groups
+    return groups or [(None, df.copy())]
 
 
 def _series_fuel_plot_groups(
@@ -5972,7 +6755,7 @@ def plot_all_fuels(
     plot_dir: Optional[Path] = None,
     y_tol_plus: object = 0.0,
     y_tol_minus: object = 0.0,
-) -> None:
+) -> bool:
     target_dir = PLOTS_DIR if plot_dir is None else plot_dir
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -6014,7 +6797,7 @@ def plot_all_fuels(
     if not any_curve:
         plt.close()
         print(f"[WARN] Sem dados para plot {filename}")
-        return
+        return False
 
     if fixed_x is not None:
         xmin, xmax, xstep = fixed_x
@@ -6054,6 +6837,7 @@ def plot_all_fuels(
     plt.savefig(outpath, dpi=200)
     plt.close()
     print(f"[OK] Salvei {outpath}")
+    return True
 
 
 def plot_all_fuels_xy(
@@ -6074,7 +6858,7 @@ def plot_all_fuels_xy(
     plot_dir: Optional[Path] = None,
     y_tol_plus: object = 0.0,
     y_tol_minus: object = 0.0,
-) -> None:
+) -> bool:
     target_dir = PLOTS_DIR if plot_dir is None else plot_dir
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -6115,7 +6899,7 @@ def plot_all_fuels_xy(
     if not any_curve:
         plt.close()
         print(f"[WARN] Sem dados para plot {filename}")
-        return
+        return False
 
     if fixed_x is not None:
         xmin, xmax, xstep = fixed_x
@@ -6155,6 +6939,7 @@ def plot_all_fuels_xy(
     plt.savefig(outpath, dpi=200)
     plt.close()
     print(f"[OK] Salvei {outpath}")
+    return True
 
 
 def _annotate_points_variants(ax, x: np.ndarray, y: np.ndarray, variant: str) -> None:
@@ -6197,7 +6982,7 @@ def plot_all_fuels_with_value_labels(
     plot_dir: Optional[Path] = None,
     y_tol_plus: object = 0.0,
     y_tol_minus: object = 0.0,
-) -> None:
+) -> bool:
     target_dir = PLOTS_DIR if plot_dir is None else plot_dir
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -6231,7 +7016,7 @@ def plot_all_fuels_with_value_labels(
     if not any_curve:
         plt.close(fig)
         print(f"[WARN] Sem dados para plot {filename}")
-        return
+        return False
 
     if fixed_x is not None:
         xmin, xmax, xstep = fixed_x
@@ -6271,6 +7056,7 @@ def plot_all_fuels_with_value_labels(
     fig.savefig(outpath, dpi=220)
     plt.close(fig)
     print(f"[OK] Salvei {outpath}")
+    return True
 
 
 def _prepare_machine_scenario_plot_df(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[str], str]:
@@ -6644,6 +7430,60 @@ def _plot_uncertainty_mode(v: object) -> str:
     return "on"
 
 
+def _plot_uncertainty_flags(row: pd.Series) -> Tuple[bool, bool]:
+    with_raw = _to_str_or_empty(row.get("with_uncertainty", "")).lower()
+    without_raw = _to_str_or_empty(row.get("without_uncertainty", "")).lower()
+    with_flag = with_raw in {"1", "true", "yes", "on", "y", "checked"}
+    without_flag = without_raw in {"1", "true", "yes", "on", "y", "checked"}
+    with_defined = with_raw in {"1", "0", "true", "false", "yes", "no", "on", "off", "y", "n", "checked", "unchecked"}
+    without_defined = without_raw in {"1", "0", "true", "false", "yes", "no", "on", "off", "y", "n", "checked", "unchecked"}
+
+    if not with_defined and not without_defined:
+        mode = _to_str_or_empty(row.get("show_uncertainty", "auto")).lower()
+        if mode in {"off", "disable", "disabled", "none", "0", "false", "no", "na", "n/a"}:
+            return False, True
+        if mode in {"both", "all", "dual", "on_off"}:
+            return True, True
+        return True, False
+
+    if not with_flag and not without_flag:
+        return True, False
+    return with_flag, without_flag
+
+
+def _plot_uncertainty_variants(row: pd.Series) -> List[Tuple[str, str, bool]]:
+    with_flag, without_flag = _plot_uncertainty_flags(row)
+    both_selected = with_flag and without_flag
+    variants: List[Tuple[str, str, bool]] = []
+    if with_flag:
+        variants.append(("with_uncertainty", "on", both_selected))
+    if without_flag:
+        variants.append(("without_uncertainty", "off", both_selected))
+    if not variants:
+        variants.append(("with_uncertainty", "on", False))
+    return variants
+
+
+def _decorate_plot_variant_output(filename: str, title: str, variant_key: str, dual_variant: bool) -> Tuple[str, str]:
+    if not dual_variant:
+        return filename, title
+
+    filename_suffix = "with_uncertainty" if variant_key == "with_uncertainty" else "without_uncertainty"
+    title_suffix = "with uncertainty" if variant_key == "with_uncertainty" else "without uncertainty"
+
+    fn = _strip_leading_raw_plot_name(filename)
+    if fn.lower().endswith(".png"):
+        fn = f"{fn[:-4]}_{filename_suffix}.png"
+    elif fn:
+        fn = f"{fn}_{filename_suffix}"
+
+    tt = _strip_leading_raw_plot_name(title)
+    if tt:
+        tt = f"{tt} | {title_suffix}"
+
+    return fn, tt
+
+
 def _resolve_plot_yerr_col(
     out_df: pd.DataFrame,
     row: pd.Series,
@@ -6671,6 +7511,86 @@ def _resolve_plot_yerr_col(
     if yerr_req and not _yerr_disabled_token(yerr_req):
         print(f"[INFO] Plot '{plot_label}': fallback sem yerr, porque '{yerr_req}' nao existe no output.")
     return None
+
+
+def _shared_plot_y_limits_for_variants(
+    df: pd.DataFrame,
+    *,
+    x_col: str,
+    y_col: str,
+    variant_yerr_cols: List[Optional[str]],
+    fuels_override: Optional[List[int]] = None,
+    series_col: Optional[str] = None,
+    y_tol_plus: object = 0.0,
+    y_tol_minus: object = 0.0,
+) -> Optional[Tuple[float, float]]:
+    values: List[float] = []
+
+    for yerr_col in variant_yerr_cols:
+        for _, d in _series_fuel_plot_groups(df, fuels_override=fuels_override, series_col=series_col):
+            work = d.copy()
+            work[x_col] = pd.to_numeric(work[x_col], errors="coerce")
+            work[y_col] = pd.to_numeric(work[y_col], errors="coerce")
+            if yerr_col:
+                work[yerr_col] = pd.to_numeric(work[yerr_col], errors="coerce")
+                work = work.dropna(subset=[x_col, y_col, yerr_col]).sort_values(x_col)
+            else:
+                work = work.dropna(subset=[x_col, y_col]).sort_values(x_col)
+
+            if work.empty:
+                continue
+
+            y = pd.to_numeric(work[y_col], errors="coerce")
+            values.extend(float(v) for v in y.dropna().tolist() if np.isfinite(v))
+            if yerr_col:
+                yerr = pd.to_numeric(work[yerr_col], errors="coerce").abs()
+                low = y - yerr
+                high = y + yerr
+                values.extend(float(v) for v in low.dropna().tolist() if np.isfinite(v))
+                values.extend(float(v) for v in high.dropna().tolist() if np.isfinite(v))
+
+    tp = _normalize_tol_value(y_tol_plus)
+    tm = _normalize_tol_value(y_tol_minus)
+    if tp > 0:
+        values.append(float(tp))
+    if tm > 0:
+        values.append(float(-tm))
+
+    finite_values = [float(v) for v in values if np.isfinite(v)]
+    if not finite_values:
+        return None
+
+    ymin = min(finite_values)
+    ymax = max(finite_values)
+    if ymax <= ymin:
+        span_ref = max(abs(ymax), abs(ymin), 1.0)
+        pad = span_ref * 0.05
+    else:
+        pad = (ymax - ymin) * 0.05
+    return ymin - pad, ymax + pad
+
+
+def _new_plot_run_summary() -> Dict[str, object]:
+    return {
+        "generated": 0,
+        "skipped": 0,
+        "disabled": 0,
+        "generated_files": [],
+        "generated_labels": [],
+        "skipped_items": [],
+    }
+
+
+def _merge_plot_run_summary(total: Dict[str, object], partial: Optional[Dict[str, object]]) -> Dict[str, object]:
+    if not partial:
+        return total
+    total["generated"] = int(total.get("generated", 0)) + int(partial.get("generated", 0))
+    total["skipped"] = int(total.get("skipped", 0)) + int(partial.get("skipped", 0))
+    total["disabled"] = int(total.get("disabled", 0)) + int(partial.get("disabled", 0))
+    total.setdefault("generated_files", []).extend(partial.get("generated_files", []))
+    total.setdefault("generated_labels", []).extend(partial.get("generated_labels", []))
+    total.setdefault("skipped_items", []).extend(partial.get("skipped_items", []))
+    return total
 
 
 def _strip_leading_raw_plot_name(value: object) -> str:
@@ -6738,7 +7658,7 @@ def make_plots_from_config(
     mappings: dict,
     plot_dir: Optional[Path] = None,
     series_col: Optional[str] = None,
-) -> None:
+) -> Dict[str, object]:
     """
     Config-driven plotting (rev3):
       - Each row defines one plot.
@@ -6758,14 +7678,20 @@ def make_plots_from_config(
 
     n_ok = 0
     n_skip = 0
+    n_disabled = 0
+    generated_files: List[str] = []
+    generated_labels: List[str] = []
+    skipped_items: List[Tuple[str, str]] = []
 
     for _, r in plots_df.iterrows():
         if not _row_enabled(r.get("enabled", 0)):
+            n_disabled += 1
             continue
 
         plot_type = _to_str_or_empty(r.get("plot_type", ""))
         filename = _strip_leading_raw_plot_name(r.get("filename", ""))
         title = _strip_leading_raw_plot_name(r.get("title", ""))
+        plot_label = filename or title or _to_str_or_empty(r.get("y_col", "")) or _to_str_or_empty(r.get("plot_type", "")) or "plot_sem_nome"
 
         if not plot_type:
             print("[ERROR] Plots row invÃ¡lida: plot_type vazio. Pulei.")
@@ -6883,14 +7809,6 @@ def make_plots_from_config(
                 n_skip += 1
                 continue
 
-            yerr_col = _resolve_plot_yerr_col(
-                out_df,
-                r,
-                y_col=y_col,
-                mappings=mappings,
-                plot_label=filename or title or y_col,
-            )
-
             x_label = _runtime_plot_x_label(x_label, x_col_base, x_col, mestrado_x_override)
             if not y_label:
                 y_label = y_col
@@ -6899,26 +7817,38 @@ def make_plots_from_config(
             if not filename:
                 filename = f"{_safe_name(y_col)}_vs_{_safe_name(x_col)}_all.png"
 
-            plot_all_fuels(
-                out_df,
-                y_col=y_col,
-                yerr_col=yerr_col,
-                title=title,
-                filename=filename,
-                y_label=y_label,
-                fixed_y=fixed_y,
-                fixed_y_limits=fixed_y_limits,
-                y_tick_step=y_tick_step,
-                fixed_x=fixed_x,
-                x_col=x_col,
-                x_label=x_label,
-                fuels_override=fuels_override,
-                series_col=series_col,
-                plot_dir=plot_dir,
-                y_tol_plus=y_tol_plus,
-                y_tol_minus=y_tol_minus,
-            )
-            n_ok += 1
+            for variant_key, uncertainty_mode, dual_variant in _plot_uncertainty_variants(r):
+                variant_row = r.copy()
+                variant_row["show_uncertainty"] = uncertainty_mode
+                variant_filename, variant_title = _decorate_plot_variant_output(filename, title, variant_key, dual_variant)
+                yerr_col = _resolve_plot_yerr_col(
+                    out_df,
+                    variant_row,
+                    y_col=y_col,
+                    mappings=mappings,
+                    plot_label=variant_filename or variant_title or y_col,
+                )
+
+                plot_all_fuels(
+                    out_df,
+                    y_col=y_col,
+                    yerr_col=yerr_col,
+                    title=variant_title,
+                    filename=variant_filename,
+                    y_label=y_label,
+                    fixed_y=fixed_y,
+                    fixed_y_limits=fixed_y_limits,
+                    y_tick_step=y_tick_step,
+                    fixed_x=fixed_x,
+                    x_col=x_col,
+                    x_label=x_label,
+                    fuels_override=fuels_override,
+                    series_col=series_col,
+                    plot_dir=plot_dir,
+                    y_tol_plus=y_tol_plus,
+                    y_tol_minus=y_tol_minus,
+                )
+                n_ok += 1
             continue
 
         if pt in {"all_fuels_xy", "xy"}:
@@ -6942,14 +7872,6 @@ def make_plots_from_config(
                 n_skip += 1
                 continue
 
-            yerr_col = _resolve_plot_yerr_col(
-                out_df,
-                r,
-                y_col=y_col,
-                mappings=mappings,
-                plot_label=filename or title or y_col,
-            )
-
             x_label = _runtime_plot_x_label(x_label, x_col_base, x_col, mestrado_x_override)
             if not y_label:
                 y_label = y_col
@@ -6958,26 +7880,38 @@ def make_plots_from_config(
             if not filename:
                 filename = f"{_safe_name(y_col)}_vs_{_safe_name(x_col)}_all.png"
 
-            plot_all_fuels_xy(
-                out_df,
-                x_col=x_col,
-                y_col=y_col,
-                yerr_col=yerr_col,
-                title=title,
-                filename=filename,
-                x_label=x_label,
-                y_label=y_label,
-                fixed_y=fixed_y,
-                fixed_y_limits=fixed_y_limits,
-                y_tick_step=y_tick_step,
-                fixed_x=fixed_x,
-                fuels_override=fuels_override,
-                series_col=series_col,
-                plot_dir=plot_dir,
-                y_tol_plus=y_tol_plus,
-                y_tol_minus=y_tol_minus,
-            )
-            n_ok += 1
+            for variant_key, uncertainty_mode, dual_variant in _plot_uncertainty_variants(r):
+                variant_row = r.copy()
+                variant_row["show_uncertainty"] = uncertainty_mode
+                variant_filename, variant_title = _decorate_plot_variant_output(filename, title, variant_key, dual_variant)
+                yerr_col = _resolve_plot_yerr_col(
+                    out_df,
+                    variant_row,
+                    y_col=y_col,
+                    mappings=mappings,
+                    plot_label=variant_filename or variant_title or y_col,
+                )
+
+                plot_all_fuels_xy(
+                    out_df,
+                    x_col=x_col,
+                    y_col=y_col,
+                    yerr_col=yerr_col,
+                    title=variant_title,
+                    filename=variant_filename,
+                    x_label=x_label,
+                    y_label=y_label,
+                    fixed_y=fixed_y,
+                    fixed_y_limits=fixed_y_limits,
+                    y_tick_step=y_tick_step,
+                    fixed_x=fixed_x,
+                    fuels_override=fuels_override,
+                    series_col=series_col,
+                    plot_dir=plot_dir,
+                    y_tol_plus=y_tol_plus,
+                    y_tol_minus=y_tol_minus,
+                )
+                n_ok += 1
             continue
 
         if pt in {"all_fuels_labels", "labels"}:
@@ -7034,6 +7968,490 @@ def make_plots_from_config(
         n_skip += 1
 
     print(f"[OK] Plots-config: {n_ok} gerados; {n_skip} pulados.")
+
+
+def make_plots_from_config_with_summary(
+    out_df: pd.DataFrame,
+    plots_df: pd.DataFrame,
+    mappings: dict,
+    plot_dir: Optional[Path] = None,
+    series_col: Optional[str] = None,
+) -> Dict[str, object]:
+    summary = _new_plot_run_summary()
+    target_dir = PLOTS_DIR if plot_dir is None else plot_dir
+
+    def mark_generated(label: str, filename_value: str) -> None:
+        summary["generated"] = int(summary.get("generated", 0)) + 1
+        summary.setdefault("generated_labels", []).append(label)
+        if filename_value:
+            summary.setdefault("generated_files", []).append(str((target_dir / filename_value).resolve()))
+
+    def mark_skipped(label: str, reason: str) -> None:
+        summary["skipped"] = int(summary.get("skipped", 0)) + 1
+        summary.setdefault("skipped_items", []).append((label, reason))
+
+    if plots_df is None or plots_df.empty:
+        print("[WARN] Plots config vazio; não gerei plots via planilha.")
+        return summary
+
+    for _, r in plots_df.iterrows():
+        if not _row_enabled(r.get("enabled", 0)):
+            summary["disabled"] = int(summary.get("disabled", 0)) + 1
+            continue
+
+        plot_type = _to_str_or_empty(r.get("plot_type", ""))
+        filename = _strip_leading_raw_plot_name(r.get("filename", ""))
+        title = _strip_leading_raw_plot_name(r.get("title", ""))
+        plot_label = filename or title or _to_str_or_empty(r.get("y_col", "")) or _to_str_or_empty(r.get("plot_type", "")) or "plot_sem_nome"
+
+        if not plot_type:
+            print("[ERROR] Plots row inválida: plot_type vazio. Pulei.")
+            mark_skipped(plot_label, "plot_type vazio")
+            continue
+
+        x_col_req = _to_str_or_empty(r.get("x_col", ""))
+        y_col_req = _to_str_or_empty(r.get("y_col", ""))
+        x_label = _to_str_or_empty(r.get("x_label", ""))
+        y_label = _to_str_or_empty(r.get("y_label", ""))
+
+        y_axis_unit = _mapping_unit_for_y_col(y_col_req, mappings)
+        fixed_x = _parse_axis_spec(r.get("x_min", pd.NA), r.get("x_max", pd.NA), r.get("x_step", pd.NA))
+        fixed_y = _parse_axis_spec(
+            r.get("y_min", pd.NA),
+            r.get("y_max", pd.NA),
+            r.get("y_step", pd.NA),
+            target_unit=y_axis_unit,
+        )
+        fixed_y_limits = _parse_axis_limits(
+            r.get("y_min", pd.NA),
+            r.get("y_max", pd.NA),
+            target_unit=y_axis_unit,
+        )
+        y_tick_step = _parse_axis_value(r.get("y_step", pd.NA), target_unit=y_axis_unit, default=np.nan)
+        if not np.isfinite(y_tick_step) or y_tick_step <= 0:
+            y_tick_step = None
+        if fixed_y is not None:
+            y_tick_step = None
+        y_tol_plus = _to_float(r.get("y_tol_plus", r.get("tol_plus", 0.0)), 0.0)
+        y_tol_minus = _to_float(r.get("y_tol_minus", r.get("tol_minus", 0.0)), 0.0)
+
+        fuels = _parse_csv_list_ints(r.get("filter_h2o_list", pd.NA))
+        fuels_override = fuels if fuels is not None else None
+        label_variant = _to_str_or_empty(r.get("label_variant", "box")).lower() or "box"
+        pt = plot_type.lower().strip()
+
+        if pt in {"kibox_all", "all_kibox"}:
+            kibox_cols = [c for c in out_df.columns if str(c).startswith("KIBOX_") and c != "KIBOX_N_files"]
+            if not kibox_cols:
+                print("[WARN] kibox_all: não há colunas KIBOX_* no output. Pulei expansão.")
+                mark_skipped(plot_label, "sem colunas KIBOX_* no output")
+                continue
+
+            x_col_base, mestrado_x_override = _resolve_plot_x_request(x_col_req)
+            try:
+                x_col = resolve_col(out_df, x_col_base)
+            except Exception as e:
+                print(f"[ERROR] kibox_all: x_col '{x_col_base}' não encontrado. Pulei expansão. ({e})")
+                mark_skipped(plot_label, f"x_col ausente: {x_col_base}")
+                continue
+
+            xlab = _runtime_plot_x_label(x_label, x_col_base, x_col, mestrado_x_override)
+            seen_filenames: set[str] = set()
+            for yc in sorted(kibox_cols):
+                fn = _derive_filename_for_expansion(filename, yc)
+                fn_key = norm_key(fn)
+                item_label = fn or yc
+                if fn_key in seen_filenames:
+                    print(f"[INFO] kibox_all: filename duplicado apos normalizacao ('{fn}'). Pulei a expansao de '{yc}'.")
+                    mark_skipped(item_label, "filename duplicado após normalização")
+                    continue
+                seen_filenames.add(fn_key)
+                tt = _derive_title_for_expansion(title, x_col=x_col, y_col=yc)
+                ylab = y_label if y_label else yc
+                ok = plot_all_fuels(
+                    out_df,
+                    y_col=yc,
+                    yerr_col=None,
+                    title=tt,
+                    filename=fn,
+                    y_label=ylab,
+                    fixed_y=fixed_y,
+                    fixed_y_limits=fixed_y_limits,
+                    y_tick_step=y_tick_step,
+                    fixed_x=fixed_x,
+                    x_col=x_col,
+                    x_label=xlab,
+                    fuels_override=fuels_override,
+                    series_col=series_col,
+                    plot_dir=plot_dir,
+                    y_tol_plus=y_tol_plus,
+                    y_tol_minus=y_tol_minus,
+                )
+                if ok:
+                    mark_generated(item_label, fn)
+                else:
+                    mark_skipped(item_label, "sem dados válidos para plot")
+            continue
+
+        if pt in {"all_fuels_yx", "all_fuels", "all_fuels_y_vs_x"}:
+            x_col_base, mestrado_x_override = _resolve_plot_x_request(x_col_req)
+            try:
+                x_col = resolve_col(out_df, x_col_base)
+            except Exception as e:
+                print(f"[ERROR] Plot '{filename or title}': x_col '{x_col_base}' não encontrado. Pulei. ({e})")
+                mark_skipped(plot_label, f"x_col ausente: {x_col_base}")
+                continue
+
+            if not y_col_req:
+                print(f"[ERROR] Plot '{filename or title}': y_col vazio. Pulei.")
+                mark_skipped(plot_label, "y_col vazio")
+                continue
+            try:
+                y_col = resolve_col(out_df, y_col_req)
+            except Exception as e:
+                print(f"[ERROR] Plot '{filename or title}': y_col '{y_col_req}' não encontrado. Pulei. ({e})")
+                mark_skipped(plot_label, f"y_col ausente: {y_col_req}")
+                continue
+
+            x_label = _runtime_plot_x_label(x_label, x_col_base, x_col, mestrado_x_override)
+            if not y_label:
+                y_label = y_col
+            if not title:
+                title = f"{y_col} vs {x_col} (all fuels)"
+            if not filename:
+                filename = f"{_safe_name(y_col)}_vs_{_safe_name(x_col)}_all.png"
+
+            variant_specs: List[Tuple[str, str, Optional[str], str]] = []
+            for variant_key, uncertainty_mode, dual_variant in _plot_uncertainty_variants(r):
+                variant_row = r.copy()
+                variant_row["show_uncertainty"] = uncertainty_mode
+                variant_filename, variant_title = _decorate_plot_variant_output(filename, title, variant_key, dual_variant)
+                yerr_col = _resolve_plot_yerr_col(
+                    out_df,
+                    variant_row,
+                    y_col=y_col,
+                    mappings=mappings,
+                    plot_label=variant_filename or variant_title or y_col,
+                )
+                variant_specs.append((variant_filename, variant_title, yerr_col, variant_key))
+
+            variant_fixed_y_limits = fixed_y_limits
+            if fixed_y is None and fixed_y_limits is None and len(variant_specs) > 1:
+                shared_limits = _shared_plot_y_limits_for_variants(
+                    out_df,
+                    x_col=x_col,
+                    y_col=y_col,
+                    variant_yerr_cols=[spec[2] for spec in variant_specs],
+                    fuels_override=fuels_override,
+                    series_col=series_col,
+                    y_tol_plus=y_tol_plus,
+                    y_tol_minus=y_tol_minus,
+                )
+                if shared_limits is not None:
+                    variant_fixed_y_limits = shared_limits
+
+            for variant_filename, variant_title, yerr_col, _variant_key in variant_specs:
+                item_label = variant_filename or variant_title or plot_label
+                ok = plot_all_fuels(
+                    out_df,
+                    y_col=y_col,
+                    yerr_col=yerr_col,
+                    title=variant_title,
+                    filename=variant_filename,
+                    y_label=y_label,
+                    fixed_y=fixed_y,
+                    fixed_y_limits=variant_fixed_y_limits,
+                    y_tick_step=y_tick_step,
+                    fixed_x=fixed_x,
+                    x_col=x_col,
+                    x_label=x_label,
+                    fuels_override=fuels_override,
+                    series_col=series_col,
+                    plot_dir=plot_dir,
+                    y_tol_plus=y_tol_plus,
+                    y_tol_minus=y_tol_minus,
+                )
+                if ok:
+                    mark_generated(item_label, variant_filename)
+                else:
+                    mark_skipped(item_label, "sem dados válidos para plot")
+            continue
+
+        if pt in {"all_fuels_xy", "xy"}:
+            if not y_col_req:
+                print(f"[ERROR] Plot '{filename or title}': y_col vazio (plot_type=all_fuels_xy). Pulei.")
+                mark_skipped(plot_label, "y_col vazio")
+                continue
+
+            x_col_base, mestrado_x_override = _resolve_plot_x_request(x_col_req)
+            try:
+                x_col = resolve_col(out_df, x_col_base)
+            except Exception as e:
+                print(f"[ERROR] Plot '{filename or title}': x_col '{x_col_base}' não encontrado. Pulei. ({e})")
+                mark_skipped(plot_label, f"x_col ausente: {x_col_base}")
+                continue
+
+            try:
+                y_col = resolve_col(out_df, y_col_req)
+            except Exception as e:
+                print(f"[ERROR] Plot '{filename or title}': y_col '{y_col_req}' não encontrado. Pulei. ({e})")
+                mark_skipped(plot_label, f"y_col ausente: {y_col_req}")
+                continue
+
+            x_label = _runtime_plot_x_label(x_label, x_col_base, x_col, mestrado_x_override)
+            if not y_label:
+                y_label = y_col
+            if not title:
+                title = f"{y_col} vs {x_col} (all fuels)"
+            if not filename:
+                filename = f"{_safe_name(y_col)}_vs_{_safe_name(x_col)}_all.png"
+
+            variant_specs = []
+            for variant_key, uncertainty_mode, dual_variant in _plot_uncertainty_variants(r):
+                variant_row = r.copy()
+                variant_row["show_uncertainty"] = uncertainty_mode
+                variant_filename, variant_title = _decorate_plot_variant_output(filename, title, variant_key, dual_variant)
+                yerr_col = _resolve_plot_yerr_col(
+                    out_df,
+                    variant_row,
+                    y_col=y_col,
+                    mappings=mappings,
+                    plot_label=variant_filename or variant_title or y_col,
+                )
+                variant_specs.append((variant_filename, variant_title, yerr_col, variant_key))
+
+            variant_fixed_y_limits = fixed_y_limits
+            if fixed_y is None and fixed_y_limits is None and len(variant_specs) > 1:
+                shared_limits = _shared_plot_y_limits_for_variants(
+                    out_df,
+                    x_col=x_col,
+                    y_col=y_col,
+                    variant_yerr_cols=[spec[2] for spec in variant_specs],
+                    fuels_override=fuels_override,
+                    series_col=series_col,
+                    y_tol_plus=y_tol_plus,
+                    y_tol_minus=y_tol_minus,
+                )
+                if shared_limits is not None:
+                    variant_fixed_y_limits = shared_limits
+
+            for variant_filename, variant_title, yerr_col, _variant_key in variant_specs:
+                item_label = variant_filename or variant_title or plot_label
+                ok = plot_all_fuels_xy(
+                    out_df,
+                    x_col=x_col,
+                    y_col=y_col,
+                    yerr_col=yerr_col,
+                    title=variant_title,
+                    filename=variant_filename,
+                    x_label=x_label,
+                    y_label=y_label,
+                    fixed_y=fixed_y,
+                    fixed_y_limits=variant_fixed_y_limits,
+                    y_tick_step=y_tick_step,
+                    fixed_x=fixed_x,
+                    fuels_override=fuels_override,
+                    series_col=series_col,
+                    plot_dir=plot_dir,
+                    y_tol_plus=y_tol_plus,
+                    y_tol_minus=y_tol_minus,
+                )
+                if ok:
+                    mark_generated(item_label, variant_filename)
+                else:
+                    mark_skipped(item_label, "sem dados válidos para plot")
+            continue
+
+        if pt in {"all_fuels_labels", "labels"}:
+            x_col_base, mestrado_x_override = _resolve_plot_x_request(x_col_req)
+            try:
+                x_col = resolve_col(out_df, x_col_base)
+            except Exception as e:
+                print(f"[ERROR] Plot '{filename or title}': x_col '{x_col_base}' não encontrado. Pulei. ({e})")
+                mark_skipped(plot_label, f"x_col ausente: {x_col_base}")
+                continue
+
+            if not y_col_req:
+                print(f"[ERROR] Plot '{filename or title}': y_col vazio (plot_type=all_fuels_labels). Pulei.")
+                mark_skipped(plot_label, "y_col vazio")
+                continue
+            try:
+                y_col = resolve_col(out_df, y_col_req)
+            except Exception as e:
+                print(f"[ERROR] Plot '{filename or title}': y_col '{y_col_req}' não encontrado. Pulei. ({e})")
+                mark_skipped(plot_label, f"y_col ausente: {y_col_req}")
+                continue
+
+            x_label = _runtime_plot_x_label(x_label, x_col_base, x_col, mestrado_x_override)
+            if not y_label:
+                y_label = y_col
+            if not title:
+                title = f"{y_col} vs {x_col} (labels)"
+            if not filename:
+                filename = f"{_safe_name(y_col)}_vs_{_safe_name(x_col)}_labels.png"
+
+            ok = plot_all_fuels_with_value_labels(
+                out_df,
+                y_col=y_col,
+                title=title,
+                filename=filename,
+                y_label=y_label,
+                label_variant=label_variant,
+                fixed_y=fixed_y,
+                fixed_y_limits=fixed_y_limits,
+                y_tick_step=y_tick_step,
+                fixed_x=fixed_x,
+                x_col=x_col,
+                x_label=x_label,
+                fuels_override=fuels_override,
+                series_col=series_col,
+                plot_dir=plot_dir,
+                y_tol_plus=y_tol_plus,
+                y_tol_minus=y_tol_minus,
+            )
+            if ok:
+                mark_generated(filename or plot_label, filename)
+            else:
+                mark_skipped(filename or plot_label, "sem dados válidos para plot")
+            continue
+
+        print(f"[ERROR] Plot '{filename or title}': plot_type '{plot_type}' não suportado. Pulei.")
+        mark_skipped(plot_label, f"plot_type não suportado: {plot_type}")
+
+    print(
+        f"[OK] Plots-config: {int(summary.get('generated', 0))} gerados; "
+        f"{int(summary.get('skipped', 0))} pulados; "
+        f"{int(summary.get('disabled', 0))} desabilitados."
+    )
+    return summary
+
+
+def _snapshot_png_files(root: Path) -> set[str]:
+    if not root.exists():
+        return set()
+    return {str(p.resolve()) for p in root.rglob("*.png") if p.is_file()}
+
+
+def _run_plot_job_with_snapshot(
+    label: str,
+    func,
+    *,
+    snapshot_dir: Path,
+    no_output_reason: str,
+    **kwargs,
+) -> Dict[str, object]:
+    summary = _new_plot_run_summary()
+    before = _snapshot_png_files(snapshot_dir)
+    func(**kwargs)
+    after = _snapshot_png_files(snapshot_dir)
+    created = sorted(after - before)
+    if created:
+        summary["generated"] = len(created)
+        summary["generated_labels"] = [label]
+        summary["generated_files"] = created
+    else:
+        summary["skipped"] = 1
+        summary["skipped_items"] = [(label, no_output_reason)]
+    return summary
+
+
+def _top_label_counts(df: pd.DataFrame, mask: pd.Series, *, limit: int = 5) -> str:
+    if df is None or df.empty:
+        return ""
+    valid_mask = mask.fillna(False)
+    if not bool(valid_mask.any()):
+        return ""
+    if "Fuel_Label" not in df.columns:
+        return ""
+    labels = df.loc[valid_mask, "Fuel_Label"].map(_to_str_or_empty).replace("", "(sem Fuel_Label)")
+    counts = labels.value_counts(dropna=False)
+    parts = [f"{label} ({int(count)})" for label, count in counts.head(limit).items()]
+    return ", ".join(parts)
+
+
+def _print_processing_summary(
+    out: pd.DataFrame,
+    plot_out: pd.DataFrame,
+    plot_summary: Optional[Dict[str, object]],
+) -> None:
+    total_points = int(len(out))
+    plotted_points = int(len(plot_out)) if isinstance(plot_out, pd.DataFrame) else 0
+
+    airflow_method = out.get("Airflow_Method", pd.Series(pd.NA, index=out.index, dtype="object")).fillna("unavailable")
+    airflow_counts = airflow_method.value_counts(dropna=False)
+    lambda_counts = out.get("LAMBDA_SOURCE", pd.Series(pd.NA, index=out.index, dtype="object")).fillna("default_1.0").value_counts(dropna=False)
+    airflow_parts = [
+        f"MAF={int(airflow_counts.get('MAF', 0))}",
+        f"fuel+lambda={int(airflow_counts.get('fuel_lambda', 0))}",
+        f"fuel+lambda_default={int(airflow_counts.get('fuel_lambda_default', 0))}",
+        f"indisponivel={int(airflow_counts.get('unavailable', 0))}",
+    ]
+    print(
+        "[SUMMARY] Airflow: "
+        + ", ".join(airflow_parts)
+        + f" | lambda medida={int(lambda_counts.get('measured', 0))}, default_1.0={int(lambda_counts.get('default_1.0', 0))}"
+    )
+
+    bsfc_valid = int(pd.to_numeric(out.get("BSFC_g_kWh", pd.NA), errors="coerce").notna().sum())
+    bsfc_missing = pd.to_numeric(out.get("BSFC_g_kWh", pd.NA), errors="coerce").isna()
+    bsfc_labels = _top_label_counts(out, bsfc_missing)
+    print(
+        f"[SUMMARY] Calculos: BSFC_g_kWh={bsfc_valid}/{total_points}"
+        + (f" | faltou por potencia/consumo invalidos em {bsfc_labels}" if bsfc_labels else "")
+    )
+
+    for emission_col in [
+        "CO2_g_kWh",
+        "CO_g_kWh",
+        "THC_g_kWh",
+        "NOx_as_NO_g_kWh",
+        "NOx_as_NO2_g_kWh",
+    ]:
+        emission_values = pd.to_numeric(out.get(emission_col, pd.NA), errors="coerce")
+        valid_count = int(emission_values.notna().sum())
+        missing_mask = emission_values.isna()
+        missing_labels = _top_label_counts(out, missing_mask)
+        print(
+            f"[SUMMARY] Calculos: {emission_col}={valid_count}/{total_points}"
+            + (f" | faltou por potencia/airflow/gases/H2O_wet_frac invalidos em {missing_labels}" if missing_labels else "")
+        )
+
+    ve_valid = int(pd.to_numeric(out.get("ETA_V_pct", pd.NA), errors="coerce").notna().sum())
+    ve_missing = pd.to_numeric(out.get("ETA_V_pct", pd.NA), errors="coerce").isna()
+    ve_labels = _top_label_counts(out, ve_missing)
+    print(
+        f"[SUMMARY] Calculos: ETA_V_pct={ve_valid}/{total_points}"
+        + (f" | faltou por airflow/RPM/T_admissao invalidos em {ve_labels}" if ve_labels else "")
+    )
+
+    consumo_l_valid = int(pd.to_numeric(out.get("Consumo_L_h", pd.NA), errors="coerce").notna().sum())
+    density_missing = pd.to_numeric(out.get("Consumo_L_h", pd.NA), errors="coerce").isna() & pd.to_numeric(out.get("Consumo_kg_h_mean_of_windows", pd.NA), errors="coerce").gt(0)
+    density_labels = _top_label_counts(out, density_missing)
+    print(
+        f"[SUMMARY] Calculos: Consumo_L_h={consumo_l_valid}/{total_points}"
+        + (f" | faltou por densidade ausente/invalida em {density_labels}" if density_labels else "")
+    )
+
+    cost_valid = int(pd.to_numeric(out.get("Custo_R_h", pd.NA), errors="coerce").notna().sum())
+    cost_missing = pd.to_numeric(out.get("Custo_R_h", pd.NA), errors="coerce").isna() & pd.to_numeric(out.get("Consumo_kg_h_mean_of_windows", pd.NA), errors="coerce").gt(0)
+    cost_labels = _top_label_counts(out, cost_missing)
+    print(
+        f"[SUMMARY] Calculos: Custo_R_h={cost_valid}/{total_points}"
+        + (f" | faltou por custo/densidade do combustivel em {cost_labels}" if cost_labels else "")
+    )
+
+    if plot_summary is None:
+        return
+
+    skip_counter = Counter(reason for _label, reason in plot_summary.get("skipped_items", []))
+    skip_parts = [f"{reason} ({count})" for reason, count in skip_counter.most_common(4)]
+    print(
+        f"[SUMMARY] Plots: gerados={int(plot_summary.get('generated', 0))}, "
+        f"pulados={int(plot_summary.get('skipped', 0))}, "
+        f"desabilitados={int(plot_summary.get('disabled', 0))}, "
+        f"pontos filtrados={plotted_points}/{total_points}"
+        + (f" | motivos: {', '.join(skip_parts)}" if skip_parts else "")
+    )
 
 
 # =========================
@@ -7294,16 +8712,70 @@ def main(argv: Optional[List[str]] = None) -> None:
     if selected_plot_points is None:
         selected_plot_points = prompt_plot_point_filter(out)
     plot_out = _apply_plot_point_filter(out, selected_plot_points)
+    plot_summary_total = _new_plot_run_summary()
 
     for source_folder, plot_dir, out_group in iter_source_plot_groups(plot_out):
         source_label = source_folder if source_folder else "(raiz PROCESSAR)"
         print(f"[INFO] Gerando plots finais em {plot_dir} para {source_label}.")
-        make_plots_from_config(out_group, plots_df, mappings=mappings, plot_dir=plot_dir)
-        _plot_ethanol_equivalent_consumption_overlay(out_group, plot_dir=plot_dir)
-        _plot_ethanol_equivalent_ratio(out_group, plot_dir=plot_dir)
-        _plot_nth_e94h6_eq_flow(out_group, plot_dir=plot_dir)
-        _plot_nth_lhv_vs_eq6(out_group, plot_dir=plot_dir)
-        _plot_machine_scenario_suite(out_group, plot_dir=plot_dir)
+        _merge_plot_run_summary(
+            plot_summary_total,
+            make_plots_from_config_with_summary(out_group, plots_df, mappings=mappings, plot_dir=plot_dir),
+        )
+        _merge_plot_run_summary(
+            plot_summary_total,
+            _run_plot_job_with_snapshot(
+                "consumo_equiv_etanol_overlay",
+                _plot_ethanol_equivalent_consumption_overlay,
+                snapshot_dir=plot_dir,
+                no_output_reason="faltaram blends alvo do overlay E94H6/E75H25/E65H35",
+                df=out_group,
+                plot_dir=plot_dir,
+            ),
+        )
+        _merge_plot_run_summary(
+            plot_summary_total,
+            _run_plot_job_with_snapshot(
+                "consumo_equiv_etanol_ratio",
+                _plot_ethanol_equivalent_ratio,
+                snapshot_dir=plot_dir,
+                no_output_reason="faltaram pares válidos para razão de consumo equivalente",
+                df=out_group,
+                plot_dir=plot_dir,
+            ),
+        )
+        _merge_plot_run_summary(
+            plot_summary_total,
+            _run_plot_job_with_snapshot(
+                "nth_e94h6_eq_flow",
+                _plot_nth_e94h6_eq_flow,
+                snapshot_dir=plot_dir,
+                no_output_reason="faltaram blends alvo para n_th_E94H6_eq_flow",
+                df=out_group,
+                plot_dir=plot_dir,
+            ),
+        )
+        _merge_plot_run_summary(
+            plot_summary_total,
+            _run_plot_job_with_snapshot(
+                "nth_lhv_vs_e94h6_eq_flow",
+                _plot_nth_lhv_vs_eq6,
+                snapshot_dir=plot_dir,
+                no_output_reason="faltaram curvas válidas para comparação n_th",
+                df=out_group,
+                plot_dir=plot_dir,
+            ),
+        )
+        _merge_plot_run_summary(
+            plot_summary_total,
+            _run_plot_job_with_snapshot(
+                "machine_scenario_suite",
+                _plot_machine_scenario_suite,
+                snapshot_dir=plot_dir,
+                no_output_reason="faltaram dados do cenário de máquinas baseados em E94H6",
+                df=out_group,
+                plot_dir=plot_dir,
+            ),
+        )
 
     compare_groups = iter_compare_plot_groups(plot_out, root=PLOTS_DIR)
     if compare_groups:
@@ -7315,22 +8787,37 @@ def main(argv: Optional[List[str]] = None) -> None:
             )
             series_txt = ", ".join(series_vals) if series_vals else "origens desconhecidas"
             print(f"[INFO] Gerando plots de comparacao em {plot_dir} para '{compare_key}' ({series_txt}).")
-            make_plots_from_config(
-                cmp_group,
-                plots_df,
-                mappings=mappings,
-                plot_dir=plot_dir,
-                series_col="_COMPARE_SERIES",
+            _merge_plot_run_summary(
+                plot_summary_total,
+                make_plots_from_config_with_summary(
+                    cmp_group,
+                    plots_df,
+                    mappings=mappings,
+                    plot_dir=plot_dir,
+                    series_col="_COMPARE_SERIES",
+                ),
             )
     else:
         print("[INFO] Nenhum par subida/descida detectado para gerar plots em compare/.")
 
-    _plot_compare_iteracoes_bl_vs_adtv(plot_out, root_plot_dir=PLOTS_DIR)
+    _merge_plot_run_summary(
+        plot_summary_total,
+        _run_plot_job_with_snapshot(
+            "compare_iteracoes_bl_vs_adtv",
+            _plot_compare_iteracoes_bl_vs_adtv,
+            snapshot_dir=PLOTS_DIR,
+            no_output_reason="faltaram pares baseline/aditivado subida/descida para comparação",
+            df=plot_out,
+            root_plot_dir=PLOTS_DIR,
+        ),
+    )
 
     if kibox_files:
         print("[INFO] Kibox csv em raw/ detectado. (Histogramas KPEAK continuam fora do workflow por enquanto.)")
     else:
         print("[WARN] Sem Kibox csv em raw/.")
+
+    _print_processing_summary(out, plot_out, plot_summary_total)
 
 
 if __name__ == "__main__":

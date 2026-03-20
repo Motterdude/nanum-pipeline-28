@@ -84,6 +84,18 @@ schema_version = 1
 "unit" = "?C"
 "notes" = "Thermocouple type K + NI9213 selected mode."
 
+[mappings."T_E_COMP_C"]
+"mean" = "T_E_COMP_mean_of_windows"
+"sd" = "T_E_COMP_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type K + NI9213 selected mode. Reuses T_S_AGUA_C instrument stack."
+
+[mappings."T_S_COMP_C"]
+"mean" = "T_S_COMP_mean_of_windows"
+"sd" = "T_S_COMP_sd_of_windows"
+"unit" = "?C"
+"notes" = "Thermocouple type K + NI9213 selected mode. Reuses T_S_AGUA_C instrument stack."
+
 [mappings."P_E_TURB_RAW_kPa"]
 "mean" = "P_E_TURB_RAW_mean_of_windows"
 "sd" = "P_E_TURB_RAW_sd_of_windows"
