@@ -13,6 +13,72 @@ Arquivos de referencia:
 - O nome oficial daqui para frente e `HANDOFF_GLOBAL.md`. Nao criar novos arquivos de handoff paralelos sem necessidade objetiva.
 - Arquivos grandes de aquisicao bruta em formato `.open` podem ser mantidos localmente para reproducao, mas nao entram no Git comum quando excedem o limite operacional do GitHub. Quando isso acontecer, a decisao deve ser registrada aqui.
 
+## Regra permanente de airflow para ensaios com etanol no pipeline29 - 2026-03-22
+- Contexto:
+  - depois da correcao do diesel nos plots `all_fuels_*`, o usuario reportou `ETA_V` anomala no `E75H25` apesar de o ponto existir no `lv_kpis_clean.xlsx`;
+  - a rodada real continuou sendo a salva em `C:\Users\Rafael\AppData\Local\nanum_pipeline_29\pipeline29_runtime_paths.json`, com:
+    - `RAW_INPUT_DIR = G:\raw_pyton\raw_mestrado\raw`
+    - `OUT_DIR = G:\raw_pyton\raw_mestrado\out_mestrado`
+- Diagnostico fechado:
+  - o problema nascia no proprio dataframe final, nao no plot;
+  - no ponto `E75H25` a `50 kW`, o output estava com:
+    - `Airflow_Method = MAF`
+    - `Air_kg_h_from_MAF = 13.388889`
+    - `Air_kg_h_from_Fuel_Lambda = 171.092726`
+    - `ETA_V_pct = 5.901185`
+  - no bruto `G:\raw_pyton\raw_mestrado\raw\50KW_E75H25 (1).xlsx`, o canal `MAF` vinha contaminado:
+    - `180` amostras com `MAF = 10`
+    - `1` amostra com `MAF = 620`
+    - isso gerava `MAF_mean_of_windows = 13.388889 kg/h`, que era aceito como valido pela regra antiga.
+- Causa raiz:
+  - `add_airflow_channels_prefer_maf_inplace()` aceitava `MAF` para qualquer combustivel quando o valor caia dentro de `0..300 kg/h`;
+  - a deteccao de `MAF` estatico era feita por combustivel agregado, entao o `E75H25` inteiro deixava de parecer travado por causa desse unico arquivo espurio de `50 kW`;
+  - com isso, um ensaio etanolico acabava roubando o airflow de `consumo + lambda` e contaminando `ETA_V`.
+- Correcao aplicada:
+  - nova regra permanente no `pipeline29`: todo ensaio com etanol (`EtOH_pct > 0` ou `H2O_pct > 0`) usa sempre `consumo + lambda` para vazao de ar;
+  - `MAF` ficou restrito a combustiveis diesel-like sem etanol (`DIES_pct > 0` ou `BIOD_pct > 0`, com `EtOH_pct/H2O_pct = 0`);
+  - a rotina passou a logar explicitamente quando ignora `MAF` em combustiveis etanolicos;
+  - a rotina antiga de `ETA_V` baseada em `MAF` tambem foi alinhada ao mesmo mascaramento diesel-like sem etanol.
+- Validacao executada:
+  - checagem dirigida do `E75H25` a `50 kW` apos o patch:
+    - `Airflow_Method = fuel_lambda`
+    - `Air_kg_h = 171.092726`
+    - `ETA_V_pct = 75.409528`
+  - `python -m py_compile nanum_pipeline_29.py`
+  - rerun completo do `pipeline29` no dataset real:
+    - `[INFO] Airflow: MAF ignorado em 30 ponto(s) com etanol (E65H35, E75H25, E94H6); vou usar consumo+lambda por regra.`
+    - `[INFO] Airflow por ponto: MAF=19, fuel+lambda=30 | lambda medida=30, default_1.0=19`
+    - `[SUMMARY] Calculos: ETA_V_pct=49/49`
+    - `plots-config: 115 gerados; 0 pulados; 0 desabilitados`
+    - outputs finais atualizados em `G:\raw_pyton\raw_mestrado\out_mestrado` e `G:\raw_pyton\raw_mestrado\out_mestrado\plots`.
+
+## Correcao do filtro legacy `all_fuels` para diesel no pipeline29 - 2026-03-22
+- Contexto:
+  - no runtime real salvo em `C:\Users\Rafael\AppData\Local\nanum_pipeline_29\pipeline29_runtime_paths.json`, o `pipeline29` foi executado com:
+    - `RAW_INPUT_DIR = G:\raw_pyton\raw_mestrado\raw`
+    - `OUT_DIR = G:\raw_pyton\raw_mestrado\out_mestrado`
+  - o `lv_kpis_clean.xlsx` dessa rodada continha `D85B15`, mas os plots `all_fuels_*` nao mostravam a curva do diesel.
+- Diagnostico fechado:
+  - o filtro salvo de pontos para plots em `C:\Users\Rafael\AppData\Local\nanum_pipeline_29\plot_point_filter_last.json` ainda mantinha `9` pontos `D85B15` (`5, 10, 15, 20, 25, 30, 35, 40, 45 kW`);
+  - portanto o diesel nao estava sendo perdido no seletor de pontos;
+  - a perda acontecia dentro de `_fuel_plot_groups()` em `nanum_pipeline_29.py`.
+- Causa raiz:
+  - quando `filter_h2o_list` vinha como `0,6,25,35`, o agrupamento dos plots `all_fuels_*` filtrava combustiveis rotulados olhando apenas `H2O_pct`;
+  - como os pontos diesel/biodiesel (`D85B15`) nao carregam `H2O_pct`, eles nao casavam com o nivel `0` e eram excluidos de todos os `all_fuels_*`, apesar de o label `Fuel_Label = D85B15` existir no dataframe final.
+- Correcao aplicada:
+  - `_fuel_plot_groups()` passou a:
+    - respeitar `FUEL_H2O_LEVEL_BY_LABEL` para labels conhecidos (`D85B15`, `E94H6`, `E75H25`, `E65H35`);
+    - tratar pontos diesel-like (`DIES_pct > 0` ou `BIOD_pct > 0`) como pertencentes ao nivel `0` do filtro legado.
+- Validacao executada:
+  - reproducao direta do bug com `lv_kpis_clean.xlsx` de `G:\raw_pyton\raw_mestrado\out_mestrado`:
+    - antes da correcao, `_fuel_plot_groups(..., fuels_override=[0,6,25,35])` retornava apenas `E94H6`, `E75H25` e `E65H35`;
+    - apos a correcao, a mesma chamada passou a retornar tambem `D85B15` com `9` pontos selecionados.
+  - `py_compile` de `nanum_pipeline_29.py`.
+  - reprocessamento completo do `pipeline29` no mesmo dataset:
+    - `lv_kpis_clean.xlsx` regenerado em `G:\raw_pyton\raw_mestrado\out_mestrado`;
+    - `plots-config: 115 gerados; 0 pulados; 0 desabilitados`;
+    - plots finais atualizados em `G:\raw_pyton\raw_mestrado\out_mestrado\plots`.
+
 ## Consolidacao pipeline 29 para o dataset Wagner - 2026-03-20
 - Objetivo:
   - consolidar no Git a rodada de evolucao do `pipeline29` focada nos combustiveis do Wagner, no novo fluxo de plots pela GUI, no calculo de airflow e nas emissoes especificas em `g/kWh`.

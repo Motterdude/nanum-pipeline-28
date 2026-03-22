@@ -2,6 +2,44 @@
 
 Todas as mudancas relevantes deste repositorio devem ser registradas aqui.
 
+## 2026-03-22
+
+### Changed
+
+- `nanum_pipeline_29.py` passou a usar `consumo + lambda` como regra fixa de vazao de ar para todos os ensaios com etanol (`E94H6`, `E75H25`, `E65H35` e equivalentes).
+- `MAF` agora fica restrito a pontos diesel-like sem etanol (`DIES_pct > 0` ou `BIOD_pct > 0`, com `EtOH_pct/H2O_pct = 0`).
+- Causa raiz fechada para o desvio de `ETA_V` no `E75H25`:
+  - no bruto `50KW_E75H25 (1).xlsx`, o canal `MAF` vinha praticamente travado em `10`, com um espurio `620`, gerando `MAF_mean_of_windows = 13.388889 kg/h`;
+  - a logica anterior aceitava esse `MAF` para o ponto `50 kW`, desviava o airflow para `MAF` e derrubava `ETA_V_pct` para `5.90%` em vez de `75.41%`.
+
+### Fixed
+
+- `nanum_pipeline_29.py` passou a manter `D85B15` nos plots `all_fuels_*` mesmo quando `filter_h2o_list` vem como `0,6,25,35`.
+- Causa raiz corrigida:
+  - `_fuel_plot_groups()` filtrava combustiveis rotulados usando apenas `H2O_pct`;
+  - como o diesel/biodiesel nao carrega `H2O_pct`, o label `D85B15` era excluido dos `all_fuels_*` apesar de continuar presente no `lv_kpis_clean.xlsx` e no filtro salvo de pontos para plots.
+- O agrupamento agora:
+  - respeita `FUEL_H2O_LEVEL_BY_LABEL` para labels conhecidos como `D85B15`, `E94H6`, `E75H25`, `E65H35`;
+  - trata combustiveis diesel-like (`DIES_pct > 0` ou `BIOD_pct > 0`) como pertencentes ao nivel `0` do filtro legado.
+
+### Validation
+
+- Checagem dirigida do ponto `E75H25` a `50 kW` apos o patch:
+  - `Airflow_Method = fuel_lambda`
+  - `Air_kg_h = 171.092726`
+  - `ETA_V_pct = 75.409528`
+- Reprocessamento completo do `pipeline29` no dataset real confirmou a nova regra:
+  - `[INFO] Airflow: MAF ignorado em 30 ponto(s) com etanol (E65H35, E75H25, E94H6); vou usar consumo+lambda por regra.`
+  - `[INFO] Airflow por ponto: MAF=19, fuel+lambda=30 | lambda medida=30, default_1.0=19`
+  - `[SUMMARY] Calculos: ETA_V_pct=49/49`
+- Reproducao local do bug com a saida real em `G:\raw_pyton\raw_mestrado\out_mestrado\lv_kpis_clean.xlsx` confirmou que, antes da correcao, `_fuel_plot_groups(..., fuels_override=[0,6,25,35])` retornava apenas `E94H6`, `E75H25` e `E65H35`.
+- A mesma checagem apos a correcao passou a retornar tambem `D85B15` com `9` pontos selecionados (`5..45 kW`).
+- `python -m py_compile nanum_pipeline_29.py`
+- Reprocessamento completo do `pipeline29` em `G:\raw_pyton\raw_mestrado\out_mestrado` concluiu com:
+  - `lv_kpis_clean.xlsx` regenerado;
+  - `plots-config: 115 gerados; 0 pulados; 0 desabilitados`;
+  - plots finais atualizados no diretorio `G:\raw_pyton\raw_mestrado\out_mestrado\plots`.
+
 ## 2026-03-20
 
 ### Added

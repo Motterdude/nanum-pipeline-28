@@ -950,6 +950,19 @@ def _airflow_component_fraction(df: pd.DataFrame, column: str) -> pd.Series:
     return pd.to_numeric(df.get(column, _nan_series(df.index)), errors="coerce") / 100.0
 
 
+def _ethanol_trial_mask(df: pd.DataFrame) -> pd.Series:
+    etoh = pd.to_numeric(df.get("EtOH_pct", _nan_series(df.index)), errors="coerce")
+    h2o = pd.to_numeric(df.get("H2O_pct", _nan_series(df.index)), errors="coerce")
+    return etoh.gt(0) | h2o.gt(0)
+
+
+def _diesel_like_no_ethanol_mask(df: pd.DataFrame) -> pd.Series:
+    dies = pd.to_numeric(df.get("DIES_pct", _nan_series(df.index)), errors="coerce")
+    biod = pd.to_numeric(df.get("BIOD_pct", _nan_series(df.index)), errors="coerce")
+    ethanol_mask = _ethanol_trial_mask(df)
+    return (dies.gt(0) | biod.gt(0)) & ~ethanol_mask
+
+
 def _airflow_stoich_blend_from_composition(df: pd.DataFrame) -> pd.Series:
     dies_frac = _airflow_component_fraction(df, "DIES_pct")
     biod_frac = _airflow_component_fraction(df, "BIOD_pct")
@@ -1119,12 +1132,30 @@ def add_airflow_channels_prefer_maf_inplace(
     maf = pd.to_numeric(out[maf_col], errors="coerce") if maf_col and maf_col in out.columns else nan_series.copy()
     fuel_labels = out.get("Fuel_Label", pd.Series(pd.NA, index=out.index, dtype="object"))
     fuel_labels = fuel_labels.where(fuel_labels.notna(), _fuel_blend_labels(out))
-    static_maf_mask, static_maf_labels = _static_maf_mask_by_fuel(maf, fuel_labels)
+    ethanol_mask = _ethanol_trial_mask(out)
+    diesel_like_mask = _diesel_like_no_ethanol_mask(out)
+
+    ignored_ethanol_maf_mask = ethanol_mask & maf.notna()
+    if bool(ignored_ethanol_maf_mask.any()):
+        ignored_labels = sorted(
+            {
+                str(label).strip()
+                for label in fuel_labels.where(ignored_ethanol_maf_mask).dropna().tolist()
+                if str(label).strip()
+            }
+        )
+        ignored_txt = ", ".join(ignored_labels) if ignored_labels else "combustiveis com etanol"
+        print(
+            f"[INFO] Airflow: MAF ignorado em {int(ignored_ethanol_maf_mask.sum())} ponto(s) com etanol "
+            f"({ignored_txt}); vou usar consumo+lambda por regra."
+        )
+
+    static_maf_mask, static_maf_labels = _static_maf_mask_by_fuel(maf.where(diesel_like_mask), fuel_labels.where(diesel_like_mask))
     if static_maf_labels:
         static_txt = ", ".join(static_maf_labels)
         print(f"[WARN] Airflow: ignorei MAF estatico para {static_txt}. Vou usar fuel+lambda nesses combustiveis.")
-    maf_valid = maf.gt(0) & maf.between(maf_min_kgh, maf_max_kgh, inclusive="both") & ~static_maf_mask
-    invalid_maf_mask = maf.notna() & ~maf_valid & ~static_maf_mask
+    maf_valid = diesel_like_mask & maf.gt(0) & maf.between(maf_min_kgh, maf_max_kgh, inclusive="both") & ~static_maf_mask
+    invalid_maf_mask = diesel_like_mask & maf.notna() & ~maf_valid & ~static_maf_mask
     if bool(invalid_maf_mask.any()):
         print(
             f"[WARN] Airflow: {int(invalid_maf_mask.sum())} ponto(s) com MAF fora de {maf_min_kgh:g}..{maf_max_kgh:g} kg/h; "
@@ -1215,7 +1246,7 @@ def add_volumetric_efficiency_channels_inplace(df: pd.DataFrame, defaults_cfg: D
 
     fuel_labels = out.get("Fuel_Label", pd.Series(pd.NA, index=out.index, dtype="object"))
     fuel_labels = fuel_labels.where(fuel_labels.notna(), _fuel_blend_labels(out))
-    diesel_mask = fuel_labels.eq("D85B15")
+    diesel_mask = _diesel_like_no_ethanol_mask(out)
 
     air_used = pd.to_numeric(out.get("Air_kg_h", pd.NA), errors="coerce")
     out.loc[air_used.gt(0), "VOL_EFF_AIR_SOURCE"] = "Air_kg_h"
@@ -1225,7 +1256,7 @@ def add_volumetric_efficiency_channels_inplace(df: pd.DataFrame, defaults_cfg: D
         maf = pd.to_numeric(out[maf_col], errors="coerce")
         diesel_maf = maf.where(diesel_mask)
         if _series_is_static(diesel_maf):
-            print("[WARN] MAF do diesel ficou estatico; cancelei eficiencia volumetrica para D85B15.")
+            print("[WARN] MAF diesel-like sem etanol ficou estatico; cancelei eficiencia volumetrica nesses pontos.")
             air_used.loc[diesel_mask] = pd.NA
             out.loc[diesel_mask, "VOL_EFF_AIR_SOURCE"] = pd.NA
         else:
@@ -1240,7 +1271,7 @@ def add_volumetric_efficiency_channels_inplace(df: pd.DataFrame, defaults_cfg: D
             out.loc[diesel_mask, "VOL_EFF_AIR_SOURCE"] = pd.NA
             out.loc[diesel_mask & diesel_maf_valid, "VOL_EFF_AIR_SOURCE"] = "MAF"
     elif bool(diesel_mask.any()):
-        print("[WARN] Nao achei coluna de MAF para diesel; cancelei eficiencia volumetrica para D85B15.")
+        print("[WARN] Nao achei coluna de MAF para pontos diesel-like sem etanol; cancelei eficiencia volumetrica nesses pontos.")
         air_used.loc[diesel_mask] = pd.NA
         out.loc[diesel_mask, "VOL_EFF_AIR_SOURCE"] = pd.NA
 
@@ -5728,6 +5759,8 @@ def build_final_table(
 def _fuel_plot_groups(df: pd.DataFrame, fuels_override: Optional[List[int]] = None) -> List[Tuple[Optional[str], pd.DataFrame]]:
     idx = df.index
     h2o = pd.to_numeric(df.get("H2O_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
+    dies = pd.to_numeric(df.get("DIES_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
+    biod = pd.to_numeric(df.get("BIOD_pct", pd.Series(pd.NA, index=idx)), errors="coerce")
     fuel_labels = df.get("Fuel_Label", pd.Series(pd.NA, index=idx, dtype="object"))
     fuel_labels = fuel_labels.where(fuel_labels.notna(), _fuel_blend_labels(df))
     fuel_labels = fuel_labels.map(lambda value: _to_str_or_empty(value) or pd.NA).astype("object")
@@ -5748,8 +5781,24 @@ def _fuel_plot_groups(df: pd.DataFrame, fuels_override: Optional[List[int]] = No
         if selected_h2o_levels is not None:
             selected_labels = []
             for label in labeled_fuels:
+                mapped_level = FUEL_H2O_LEVEL_BY_LABEL.get(label)
+                if mapped_level is not None:
+                    if any(abs(float(mapped_level) - float(level)) <= 0.6 for level in selected_h2o_levels):
+                        selected_labels.append(label)
+                    continue
+
                 label_mask = fuel_labels.eq(label)
                 label_h2o = h2o.where(label_mask)
+                label_dies = dies.where(label_mask)
+                label_biod = biod.where(label_mask)
+
+                # Diesel/biodiesel blends do not carry H2O_pct, so legacy
+                # "all fuels" filters that include 0 must still keep them.
+                is_diesel_like = bool(label_dies.gt(0).any() or label_biod.gt(0).any())
+                if is_diesel_like and any(abs(float(level)) <= 0.6 for level in selected_h2o_levels):
+                    selected_labels.append(label)
+                    continue
+
                 matches_level = any(bool((label_h2o.sub(level).abs() <= 0.6).any()) for level in selected_h2o_levels)
                 if matches_level:
                     selected_labels.append(label)
