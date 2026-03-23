@@ -2,6 +2,48 @@
 
 Todas as mudancas relevantes deste repositorio devem ser registradas aqui.
 
+## 2026-03-23
+
+### Added
+
+- `nanum_pipeline_30.py` entrou como runtime separado para campanhas `load/sweep`, preservando o `pipeline29` como fluxo estavel.
+- A GUI compartilhada ganhou o helper `Sweep/Load`, com:
+  - selecao de `RAW_INPUT_DIR`
+  - selecao de `OUT_DIR`
+  - modo `load` ou `sweep`
+  - coluna de varredura lida do bruto `LabVIEW/MoTeC`
+  - tolerancia de bin do sweep
+  - acao para converter `.open` faltantes para `.csv`
+- O `pipeline30` ganhou seletor de duplicatas por `combustivel x varredura`, em grade, com:
+  - checkbox principal por ponto
+  - checkbox por arquivo
+  - nomes completos dos ensaios na propria celula
+
+### Changed
+
+- O `pipeline30` passou a reutilizar `RAW_INPUT_DIR` e `OUT_DIR` salvos pela GUI, eliminando o segundo popup de diretorios apos fechar a configuracao.
+- O modo `sweep` agora usa binning configuravel no eixo X:
+  - coluna runtime nova `Sweep_Bin_Value`
+  - label runtime novo `Sweep_Bin_Label`
+  - tolerancia default `0.015`
+  - centros preferenciais vindos de `Sweep_Value` do nome do arquivo quando disponiveis
+- O seletor e os plots do `pipeline30` passaram a usar o valor binado do sweep, evitando separar pontos proximos como:
+  - `1.499` e `1.501` para o mesmo bin `1.5`
+  - `0.985` e `1.015` para o mesmo bin `1.0`
+- A renderizacao do seletor de duplicatas foi ajustada para forcar texto escuro nas celulas, corrigindo o caso em que os nomes existiam mas ficavam invisiveis na tabela por paleta escura.
+
+### Validation
+
+- `python -m py_compile nanum_pipeline_30.py`
+- `python -m py_compile pipeline29_config_gui.py`
+- Smoke test sintetico do binning do sweep confirmou:
+  - `0.985` e `1.015 -> 1.0`
+  - `1.499` e `1.501 -> 1.5`
+- Smoke test sintetico do filtro de duplicatas confirmou:
+  - montagem do catalogo por `Fuel_Label x Sweep_Bin_Value`
+  - filtro final por `BaseName`
+- Nao houve rerun completo no dataset real `D:\raw_pyton\Lean_Sweep` nesta rodada porque esse caminho ficou indisponivel nesta sessao.
+
 ## 2026-03-22
 
 ### Changed

@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import difflib
 import fnmatch
+import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -59,6 +61,7 @@ from pipeline29_config_backend import (
     text_config_exists,
     validate_bundle,
 )
+from kibox_open_to_csv import ExportRequest, build_output_name, export_open_file, find_opentocsv_exe
 
 
 SEARCHABLE_COLUMNS_BY_SECTION: Dict[str, set[str]] = {
@@ -72,6 +75,13 @@ PLOT_X_DEFAULTS = {"x_min": "0", "x_max": "55", "x_step": "5"}
 PLOT_Y_AUTOSCALE_FIELDS = {"y_min", "y_max", "y_step"}
 PLOT_Y_AUTOSCALE_TOKEN = "auto"
 PIPELINE29_GUI_SAVE_RUN_EXIT_CODE = 1001
+PIPELINE30_RUNTIME_SETTINGS_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "nanum_pipeline_30"
+PIPELINE30_RUNTIME_SETTINGS_PATH = PIPELINE30_RUNTIME_SETTINGS_DIR / "pipeline30_runtime_paths.json"
+PIPELINE30_SWEEP_TAB_TITLE = "Sweep/Load"
+PIPELINE30_SWEEP_DEFAULT_MODE = "load"
+PIPELINE30_SWEEP_DEFAULT_X_COL = "Sweep_Value"
+PIPELINE30_SWEEP_DEFAULT_KEY = "lambda"
+PIPELINE30_SWEEP_DEFAULT_BIN_TOL = "0.015"
 
 CHECKBOX_COLUMNS_BY_SECTION: Dict[str, set[str]] = {
     "Plots": {"with_uncertainty", "without_uncertainty"},
@@ -234,6 +244,132 @@ def _defaults_records_to_cfg(records: List[Dict[str, str]]) -> Dict[str, str]:
             continue
         out[key_norm] = str(record.get("value", "")).strip()
     return out
+
+
+def _load_pipeline30_runtime_settings() -> Dict[str, Any]:
+    if not PIPELINE30_RUNTIME_SETTINGS_PATH.exists():
+        return {}
+    try:
+        return json.loads(PIPELINE30_RUNTIME_SETTINGS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_pipeline30_runtime_settings(payload: Dict[str, Any]) -> None:
+    current = _load_pipeline30_runtime_settings()
+    current.update(payload)
+    PIPELINE30_RUNTIME_SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+    PIPELINE30_RUNTIME_SETTINGS_PATH.write_text(
+        json.dumps(current, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _planned_pipeline_csv_path_for_open(source_open: Path) -> Path:
+    planned_name = build_output_name(source_open, name_mode="pipeline", export_type="res")
+    return source_open.with_name(planned_name)
+
+
+def _pick_labview_sheet_name(path: Path) -> Optional[str]:
+    try:
+        xf = pd.ExcelFile(path)
+    except Exception:
+        return None
+    for sheet_name in xf.sheet_names:
+        text = str(sheet_name).strip().lower()
+        if text == "labview" or "labview" in text:
+            return str(sheet_name)
+    return str(xf.sheet_names[0]) if xf.sheet_names else None
+
+
+def _raw_header_to_output_candidates(header: object) -> List[str]:
+    text = str(header or "").strip()
+    if not text:
+        return []
+    if text.lower().endswith(("_mean_of_windows", "_sd_of_windows")):
+        return [text]
+    return [f"{text}_mean_of_windows", text]
+
+
+def _scan_pipeline30_sweep_catalog(process_dir: Path) -> Dict[str, Any]:
+    info: Dict[str, Any] = {
+        "process_dir": process_dir,
+        "exists": process_dir.exists() and process_dir.is_dir(),
+        "lv_count": 0,
+        "motec_count": 0,
+        "open_count": 0,
+        "missing_open_count": 0,
+        "available_x_cols": [PIPELINE30_SWEEP_DEFAULT_X_COL, "Load_kW"],
+        "missing_open_files": [],
+    }
+    if not info["exists"]:
+        return info
+
+    lv_files = sorted(p for p in process_dir.rglob("*.xlsx") if p.is_file() and not p.name.startswith("~$"))
+    motec_files = sorted(p for p in process_dir.rglob("*_m.csv") if p.is_file())
+    open_files = sorted(p for p in process_dir.rglob("*.open") if p.is_file())
+    missing_open_files = [p for p in open_files if not _planned_pipeline_csv_path_for_open(p).exists()]
+
+    available_x_cols = {PIPELINE30_SWEEP_DEFAULT_X_COL, "Load_kW", "UPD_Power_kW", "UPD_Power_Bin_kW"}
+
+    for path in lv_files:
+        sheet_name = _pick_labview_sheet_name(path)
+        if not sheet_name:
+            continue
+        try:
+            cols = pd.read_excel(path, sheet_name=sheet_name, nrows=0).columns
+        except Exception:
+            continue
+        for column in cols:
+            available_x_cols.update(_raw_header_to_output_candidates(column))
+
+    for path in motec_files:
+        try:
+            cols = pd.read_csv(path, nrows=0).columns
+        except Exception:
+            continue
+        for column in cols:
+            available_x_cols.update(_raw_header_to_output_candidates(column))
+
+    info.update(
+        {
+            "lv_count": len(lv_files),
+            "motec_count": len(motec_files),
+            "open_count": len(open_files),
+            "missing_open_count": len(missing_open_files),
+            "available_x_cols": sorted([value for value in available_x_cols if str(value).strip()], key=str.lower),
+            "missing_open_files": missing_open_files,
+        }
+    )
+    return info
+
+
+def _best_pipeline30_raw_input_dir(defaults_records: List[Dict[str, str]], *, base_dir: Path) -> Path:
+    defaults_cfg = _defaults_records_to_cfg(defaults_records)
+    raw_txt = str(defaults_cfg.get(_norm_key_local("RAW_INPUT_DIR"), "")).strip()
+    if raw_txt:
+        return Path(raw_txt).expanduser().resolve()
+
+    runtime_cfg = _load_pipeline30_runtime_settings()
+    runtime_txt = str(runtime_cfg.get("raw_input_dir", "")).strip()
+    if runtime_txt:
+        return Path(runtime_txt).expanduser().resolve()
+
+    return (base_dir / "raw" / "PROCESSAR").resolve()
+
+
+def _best_pipeline30_out_dir(defaults_records: List[Dict[str, str]], *, base_dir: Path) -> Path:
+    defaults_cfg = _defaults_records_to_cfg(defaults_records)
+    out_txt = str(defaults_cfg.get(_norm_key_local("OUT_DIR"), "")).strip()
+    if out_txt:
+        return Path(out_txt).expanduser().resolve()
+
+    runtime_cfg = _load_pipeline30_runtime_settings()
+    runtime_txt = str(runtime_cfg.get("out_dir", "")).strip()
+    if runtime_txt:
+        return Path(runtime_txt).expanduser().resolve()
+
+    return (base_dir / "out").resolve()
 
 
 def _expected_uncertainty_columns(
@@ -1031,6 +1167,192 @@ class ConfigRowDialog(QDialog):
         return out
 
 
+class Pipeline30SweepHelperDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        input_dir: Path,
+        out_dir: Path,
+        initial_mode: str,
+        initial_sweep_x_col: str,
+        initial_sweep_bin_tol: str,
+        initial_scan: Dict[str, Any],
+        variable_catalog_provider: Callable[[], List[str]],
+        scan_callback: Callable[[Path], Dict[str, Any]],
+        convert_callback: Callable[[Path], Dict[str, Any]],
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.variable_catalog_provider = variable_catalog_provider
+        self.scan_callback = scan_callback
+        self.convert_callback = convert_callback
+        self._current_scan = dict(initial_scan or {})
+        self._input_dir = Path(input_dir).expanduser().resolve()
+        self._out_dir = Path(out_dir).expanduser().resolve()
+
+        self.setWindowTitle("Pipeline 30 Sweep/Load helper")
+        self.resize(860, 380)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
+
+        self.info_label = QLabel(self)
+        self.info_label.setWordWrap(True)
+        root.addWidget(self.info_label)
+
+        form = QFormLayout()
+        self.input_dir_button = QPushButton(str(self._input_dir), self)
+        self.input_dir_button.setToolTip(str(self._input_dir))
+        self.input_dir_button.setStyleSheet("text-align: left; padding: 6px;")
+        form.addRow("RAW_INPUT_DIR", self.input_dir_button)
+
+        self.out_dir_button = QPushButton(str(self._out_dir), self)
+        self.out_dir_button.setToolTip(str(self._out_dir))
+        self.out_dir_button.setStyleSheet("text-align: left; padding: 6px;")
+        form.addRow("OUT_DIR", self.out_dir_button)
+
+        self.mode_combo = QComboBox(self)
+        self.mode_combo.addItems(["load", "sweep"])
+        self.mode_combo.setCurrentText((initial_mode or PIPELINE30_SWEEP_DEFAULT_MODE).strip() or PIPELINE30_SWEEP_DEFAULT_MODE)
+        form.addRow("Modo", self.mode_combo)
+
+        self.x_col_combo = QComboBox(self)
+        self.x_col_combo.setEditable(True)
+        self.x_col_combo.setInsertPolicy(QComboBox.NoInsert)
+        form.addRow("Coluna de varredura", self.x_col_combo)
+
+        self.bin_tol_edit = QLineEdit(self)
+        self.bin_tol_edit.setText(str(initial_sweep_bin_tol or PIPELINE30_SWEEP_DEFAULT_BIN_TOL).strip() or PIPELINE30_SWEEP_DEFAULT_BIN_TOL)
+        self.bin_tol_edit.setPlaceholderText(PIPELINE30_SWEEP_DEFAULT_BIN_TOL)
+        form.addRow("Tolerancia do bin", self.bin_tol_edit)
+        root.addLayout(form)
+
+        action_row = QHBoxLayout()
+        self.btn_reload_scan = QPushButton("Reload RAW_INPUT_DIR")
+        self.btn_convert_open = QPushButton("Converter .open faltantes")
+        action_row.addWidget(self.btn_reload_scan)
+        action_row.addWidget(self.btn_convert_open)
+        action_row.addStretch(1)
+        root.addLayout(action_row)
+
+        helper_text = QLabel(
+            "O dropdown de varredura mistura as colunas vistas nos arquivos brutos do LabVIEW/MoTeC com o catalogo atual "
+            "de variaveis do editor. Em modo sweep, o pipeline30 usa essa coluna como eixo X e para o seletor de duplicatas por combustivel x valor de varredura. "
+            "A tolerancia do bin agrupa valores medidos proximos no mesmo lambda nominal."
+        )
+        helper_text.setWordWrap(True)
+        root.addWidget(helper_text)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
+        root.addWidget(buttons)
+
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        self.btn_reload_scan.clicked.connect(self._reload_scan)
+        self.btn_convert_open.clicked.connect(self._convert_missing_open)
+        self.input_dir_button.clicked.connect(self._pick_input_dir)
+        self.out_dir_button.clicked.connect(self._pick_out_dir)
+        self.mode_combo.currentTextChanged.connect(lambda _text: self._sync_mode_state())
+
+        self._refresh_scan_info(self._current_scan, initial_sweep_x_col or PIPELINE30_SWEEP_DEFAULT_X_COL)
+        self._sync_mode_state()
+
+    def _sync_mode_state(self) -> None:
+        is_sweep = self.mode_combo.currentText().strip().lower() == "sweep"
+        self.x_col_combo.setEnabled(is_sweep)
+        self.bin_tol_edit.setEnabled(is_sweep)
+
+    def _combined_x_col_options(self) -> List[str]:
+        options = {
+            PIPELINE30_SWEEP_DEFAULT_X_COL,
+            "Load_kW",
+        }
+        for value in self._current_scan.get("available_x_cols", []) or []:
+            text = str(value or "").strip()
+            if text:
+                options.add(text)
+        for value in self.variable_catalog_provider() or []:
+            text = str(value or "").strip()
+            if text:
+                options.add(text)
+        return sorted(options, key=str.lower)
+
+    def _set_path_button_text(self, button: QPushButton, path: Path) -> None:
+        text = str(path)
+        button.setText(text)
+        button.setToolTip(text)
+
+    def _pick_input_dir(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Selecionar RAW_INPUT_DIR do pipeline30",
+            str(self._input_dir),
+        )
+        if not selected:
+            return
+        self._input_dir = Path(selected).expanduser().resolve()
+        self._set_path_button_text(self.input_dir_button, self._input_dir)
+        self._refresh_scan_info(self.scan_callback(self._input_dir), self.x_col_combo.currentText().strip())
+
+    def _pick_out_dir(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Selecionar OUT_DIR do pipeline30",
+            str(self._out_dir.parent if not self._out_dir.exists() else self._out_dir),
+        )
+        if not selected:
+            return
+        self._out_dir = Path(selected).expanduser().resolve()
+        self._set_path_button_text(self.out_dir_button, self._out_dir)
+
+    def _refresh_scan_info(self, scan_info: Dict[str, Any], selected_x_col: str) -> None:
+        self._current_scan = dict(scan_info or {})
+        process_dir = self._current_scan.get("process_dir", "")
+        lv_count = int(self._current_scan.get("lv_count", 0) or 0)
+        motec_count = int(self._current_scan.get("motec_count", 0) or 0)
+        open_count = int(self._current_scan.get("open_count", 0) or 0)
+        missing_open_count = int(self._current_scan.get("missing_open_count", 0) or 0)
+        exists = bool(self._current_scan.get("exists", False))
+        self.info_label.setText(
+            (
+                f"Entrada: {process_dir}\n"
+                f"Saida: {self._out_dir}\n"
+                f"LabVIEW: {lv_count} | MoTeC: {motec_count} | .open: {open_count} | faltando converter: {missing_open_count}\n"
+                + ("Diretorio de entrada encontrado." if exists else "Diretorio de entrada ausente ou invalido.")
+            )
+        )
+        self._set_path_button_text(self.input_dir_button, self._input_dir)
+        self._set_path_button_text(self.out_dir_button, self._out_dir)
+
+        current_text = str(selected_x_col or self.x_col_combo.currentText() or PIPELINE30_SWEEP_DEFAULT_X_COL).strip()
+        options = self._combined_x_col_options()
+        self.x_col_combo.blockSignals(True)
+        self.x_col_combo.clear()
+        self.x_col_combo.addItems(options)
+        if current_text and current_text not in options:
+            self.x_col_combo.addItem(current_text)
+        self.x_col_combo.setCurrentText(current_text or PIPELINE30_SWEEP_DEFAULT_X_COL)
+        self.x_col_combo.blockSignals(False)
+        self.btn_convert_open.setEnabled(missing_open_count > 0)
+
+    def _reload_scan(self) -> None:
+        self._refresh_scan_info(self.scan_callback(self._input_dir), self.x_col_combo.currentText().strip())
+
+    def _convert_missing_open(self) -> None:
+        updated_scan = self.convert_callback(self._input_dir)
+        self._refresh_scan_info(updated_scan, self.x_col_combo.currentText().strip())
+
+    def values(self) -> Dict[str, str]:
+        return {
+            "aggregation_mode": self.mode_combo.currentText().strip().lower() or PIPELINE30_SWEEP_DEFAULT_MODE,
+            "sweep_x_col": self.x_col_combo.currentText().strip() or PIPELINE30_SWEEP_DEFAULT_X_COL,
+            "sweep_bin_tol": self.bin_tol_edit.text().strip() or PIPELINE30_SWEEP_DEFAULT_BIN_TOL,
+            "raw_input_dir": str(self._input_dir),
+            "out_dir": str(self._out_dir),
+        }
+
+
 class EditableTableSection(QWidget):
     def __init__(
         self,
@@ -1255,6 +1577,16 @@ class Pipeline29ConfigEditor(QMainWindow):
         state_excel_path = str(state.get("excel_path", "")).strip()
         state_variable_source = str(state.get("variable_source_path", "")).strip()
         self.last_preset_path = str(state.get("last_preset_path", "")).strip()
+        runtime_cfg = _load_pipeline30_runtime_settings()
+        self.pipeline30_aggregation_mode = str(
+            state.get("pipeline30_aggregation_mode", runtime_cfg.get("aggregation_mode", PIPELINE30_SWEEP_DEFAULT_MODE))
+        ).strip() or PIPELINE30_SWEEP_DEFAULT_MODE
+        self.pipeline30_sweep_x_col = str(
+            state.get("pipeline30_sweep_x_col", runtime_cfg.get("sweep_x_col", PIPELINE30_SWEEP_DEFAULT_X_COL))
+        ).strip() or PIPELINE30_SWEEP_DEFAULT_X_COL
+        self.pipeline30_sweep_bin_tol = str(
+            state.get("pipeline30_sweep_bin_tol", runtime_cfg.get("sweep_bin_tol", PIPELINE30_SWEEP_DEFAULT_BIN_TOL))
+        ).strip() or PIPELINE30_SWEEP_DEFAULT_BIN_TOL
 
         self.config_dir = Path(state_config_dir).expanduser().resolve() if state_config_dir else default_config_dir
         self.excel_path = Path(state_excel_path).expanduser().resolve() if state_excel_path else default_excel_path
@@ -1263,6 +1595,9 @@ class Pipeline29ConfigEditor(QMainWindow):
             if state_variable_source
             else (self.base_dir / "out" / "lv_kpis_clean.xlsx").resolve()
         )
+        self._sweep_helper_tab_index = 0
+        self._last_non_helper_tab_index = 1
+        self._handling_sweep_helper_tab = False
         self._window_state_applied = False
         self._requested_exit_code: Optional[int] = None
 
@@ -1324,6 +1659,19 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.tabs = QTabWidget(self)
         root.addWidget(self.tabs, 1)
 
+        self.sweep_helper_tab = QWidget(self)
+        sweep_helper_layout = QVBoxLayout(self.sweep_helper_tab)
+        sweep_helper_layout.setContentsMargins(18, 18, 18, 18)
+        sweep_helper_layout.setSpacing(10)
+        sweep_helper_label = QLabel(
+            "Clique nesta aba para abrir o helper do pipeline30.\n"
+            "Ele guarda o modo load/sweep, a coluna de varredura, permite converter .open faltantes "
+            "e alimenta o seletor runtime de duplicatas por combustivel x valor de varredura."
+        )
+        sweep_helper_label.setWordWrap(True)
+        sweep_helper_layout.addWidget(sweep_helper_label)
+        sweep_helper_layout.addStretch(1)
+
         self.defaults_table = EditableTableSection("Defaults", ["param", "value"], status_callback=self._show_status)
         self.data_quality_table = EditableTableSection("Data Quality", ["param", "value"], status_callback=self._show_status)
         self.mappings_table = EditableTableSection(
@@ -1365,6 +1713,7 @@ class Pipeline29ConfigEditor(QMainWindow):
             add_row_dialog_factory=lambda initial=None: self._open_row_helper("Plots", DEFAULT_PLOT_COLUMNS, initial),
         )
 
+        self.tabs.addTab(self.sweep_helper_tab, PIPELINE30_SWEEP_TAB_TITLE)
         self.tabs.addTab(self.defaults_table, "Defaults")
         self.tabs.addTab(self.data_quality_table, "Data Quality")
         self.tabs.addTab(self.mappings_table, "Mappings")
@@ -1372,6 +1721,7 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.tabs.addTab(self.reporting_table, "Reporting")
         self.tabs.addTab(self.fuel_properties_table, "Fuel Properties")
         self.tabs.addTab(self.plots_table, "Plots")
+        self.tabs.setCurrentWidget(self.defaults_table)
 
         self.status = QStatusBar(self)
         self.setStatusBar(self.status)
@@ -1388,6 +1738,7 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.btn_validate.clicked.connect(self.validate_current_bundle)
         self.btn_save_preset.clicked.connect(self.save_preset)
         self.btn_load_preset.clicked.connect(self.load_preset)
+        self.tabs.currentChanged.connect(self._handle_tab_changed)
 
         self._load_initial_bundle()
         self.reload_variable_catalog(show_message=False)
@@ -1409,6 +1760,143 @@ class Pipeline29ConfigEditor(QMainWindow):
         if raw:
             return Path(raw).expanduser().resolve()
         return (self.base_dir / "out" / "lv_kpis_clean.xlsx").resolve()
+
+    def _current_pipeline30_raw_input_dir(self) -> Path:
+        return _best_pipeline30_raw_input_dir(self.defaults_table.records(), base_dir=self.base_dir)
+
+    def _current_pipeline30_out_dir(self) -> Path:
+        return _best_pipeline30_out_dir(self.defaults_table.records(), base_dir=self.base_dir)
+
+    def _scan_pipeline30_sweep_dir(self, raw_input_dir: Path) -> Dict[str, Any]:
+        return _scan_pipeline30_sweep_catalog(raw_input_dir)
+
+    def _current_pipeline30_sweep_scan(self) -> Dict[str, Any]:
+        return self._scan_pipeline30_sweep_dir(self._current_pipeline30_raw_input_dir())
+
+    def _convert_pipeline30_missing_open_files(self, raw_input_dir: Path) -> Dict[str, Any]:
+        scan = self._scan_pipeline30_sweep_dir(raw_input_dir)
+        missing_files = list(scan.get("missing_open_files", []) or [])
+        if not missing_files:
+            QMessageBox.information(self, "Pipeline 30", "Nao ha arquivos .open faltando conversao.")
+            return scan
+
+        try:
+            converter_path = find_opentocsv_exe()
+        except Exception as exc:
+            QMessageBox.critical(self, "Pipeline 30", f"Nao encontrei o OpenToCSV.exe.\n\n{exc}")
+            return scan
+
+        errors: List[str] = []
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            for idx, source_open in enumerate(missing_files, start=1):
+                planned_path = _planned_pipeline_csv_path_for_open(source_open)
+                self._show_status(f"Convertendo .open [{idx}/{len(missing_files)}]: {source_open.name}")
+                QApplication.processEvents()
+                result = export_open_file(
+                    ExportRequest(
+                        source_open=source_open,
+                        destination_dir=source_open.parent,
+                        export_type="res",
+                        separator="tab",
+                        include_cycle_number=True,
+                        name_mode="pipeline",
+                        output_name=planned_path.name,
+                    ),
+                    converter_path=converter_path,
+                )
+                if result.returncode != 0:
+                    errors.append(f"{source_open.name} -> codigo {result.returncode}")
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        updated_scan = self._scan_pipeline30_sweep_dir(raw_input_dir)
+        if errors:
+            QMessageBox.warning(
+                self,
+                "Pipeline 30",
+                "A conversao terminou com falhas em alguns arquivos:\n\n" + "\n".join(errors[:12]),
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Pipeline 30",
+                f"Conversao concluida. Arquivos .open faltantes convertidos: {len(missing_files)}",
+            )
+        return updated_scan
+
+    def _upsert_default_value(self, param_name: str, value: object) -> None:
+        records = list(self.defaults_table.records())
+        key_norm = _norm_key_local(param_name)
+        text_value = str(value).strip()
+        for record in records:
+            if _norm_key_local(record.get("param", "")) == key_norm:
+                record["param"] = param_name
+                record["value"] = text_value
+                self.defaults_table.load_records(records)
+                return
+        records.append({"param": param_name, "value": text_value})
+        self.defaults_table.load_records(records)
+
+    def _save_pipeline30_helper_settings(self) -> None:
+        raw_input_dir = self._current_pipeline30_raw_input_dir()
+        out_dir = self._current_pipeline30_out_dir()
+        payload = {
+            "aggregation_mode": self.pipeline30_aggregation_mode,
+            "sweep_x_col": self.pipeline30_sweep_x_col,
+            "sweep_bin_tol": self.pipeline30_sweep_bin_tol,
+            "helper_configured": True,
+            "sweep_key": PIPELINE30_SWEEP_DEFAULT_KEY,
+            "raw_input_dir": str(raw_input_dir),
+            "out_dir": str(out_dir),
+            "dirs_configured_in_gui": bool(str(raw_input_dir).strip() and str(out_dir).strip()),
+        }
+        _save_pipeline30_runtime_settings(payload)
+
+    def _open_pipeline30_sweep_helper(self) -> None:
+        scan = self._current_pipeline30_sweep_scan()
+        dialog = Pipeline30SweepHelperDialog(
+            input_dir=self._current_pipeline30_raw_input_dir(),
+            out_dir=self._current_pipeline30_out_dir(),
+            initial_mode=self.pipeline30_aggregation_mode,
+            initial_sweep_x_col=self.pipeline30_sweep_x_col,
+            initial_sweep_bin_tol=self.pipeline30_sweep_bin_tol,
+            initial_scan=scan,
+            variable_catalog_provider=self._available_variable_catalog,
+            scan_callback=self._scan_pipeline30_sweep_dir,
+            convert_callback=self._convert_pipeline30_missing_open_files,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        values = dialog.values()
+        self.pipeline30_aggregation_mode = str(values.get("aggregation_mode", PIPELINE30_SWEEP_DEFAULT_MODE)).strip() or PIPELINE30_SWEEP_DEFAULT_MODE
+        self.pipeline30_sweep_x_col = str(values.get("sweep_x_col", PIPELINE30_SWEEP_DEFAULT_X_COL)).strip() or PIPELINE30_SWEEP_DEFAULT_X_COL
+        self.pipeline30_sweep_bin_tol = str(values.get("sweep_bin_tol", PIPELINE30_SWEEP_DEFAULT_BIN_TOL)).strip() or PIPELINE30_SWEEP_DEFAULT_BIN_TOL
+        raw_input_dir = str(values.get("raw_input_dir", "")).strip()
+        out_dir = str(values.get("out_dir", "")).strip()
+        if raw_input_dir:
+            self._upsert_default_value("RAW_INPUT_DIR", raw_input_dir)
+        if out_dir:
+            self._upsert_default_value("OUT_DIR", out_dir)
+        self._save_pipeline30_helper_settings()
+        self._show_status(
+            f"Pipeline30 helper salvo: modo={self.pipeline30_aggregation_mode}, x={self.pipeline30_sweep_x_col}, bin=+/-{self.pipeline30_sweep_bin_tol}, raw={raw_input_dir or self._current_pipeline30_raw_input_dir()}"
+        )
+
+    def _handle_tab_changed(self, index: int) -> None:
+        if self._handling_sweep_helper_tab:
+            return
+        if index == self._sweep_helper_tab_index:
+            self._handling_sweep_helper_tab = True
+            try:
+                self._open_pipeline30_sweep_helper()
+                self.tabs.setCurrentIndex(self._last_non_helper_tab_index if self._last_non_helper_tab_index > 0 else 1)
+            finally:
+                self._handling_sweep_helper_tab = False
+            return
+        self._last_non_helper_tab_index = index
 
     def _choose_config_dir(self) -> None:
         selected = QFileDialog.getExistingDirectory(self, "Select pipeline29 text config dir", str(self._current_config_dir()))
@@ -1822,12 +2310,16 @@ class Pipeline29ConfigEditor(QMainWindow):
         self._show_status(f"Preset loaded from {selected}")
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        self._save_pipeline30_helper_settings()
         save_gui_state(
             {
                 "config_dir": str(self._current_config_dir()),
                 "excel_path": str(self._current_excel_path()),
                 "variable_source_path": str(self._current_variable_source_path()),
                 "last_preset_path": self.last_preset_path,
+                "pipeline30_aggregation_mode": self.pipeline30_aggregation_mode,
+                "pipeline30_sweep_x_col": self.pipeline30_sweep_x_col,
+                "pipeline30_sweep_bin_tol": self.pipeline30_sweep_bin_tol,
             },
             default_gui_state_path(),
         )

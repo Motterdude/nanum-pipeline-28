@@ -13,6 +13,99 @@ Arquivos de referencia:
 - O nome oficial daqui para frente e `HANDOFF_GLOBAL.md`. Nao criar novos arquivos de handoff paralelos sem necessidade objetiva.
 - Arquivos grandes de aquisicao bruta em formato `.open` podem ser mantidos localmente para reproducao, mas nao entram no Git comum quando excedem o limite operacional do GitHub. Quando isso acontecer, a decisao deve ser registrada aqui.
 
+## Pipeline30 - helper Sweep/Load, seletor de duplicatas e binning de sweep - 2026-03-23
+- Contexto:
+  - foi criada uma linha separada de evolucao para ensaios de varredura em lambda, preservando o `pipeline29` como referencia estavel;
+  - o novo trabalho ficou em `nanum_pipeline_30.py`, com apoio da GUI compartilhada em `pipeline29_config_gui.py`;
+  - o alvo operacional indicado para os testes era `D:\raw_pyton\Lean_Sweep`, mas esse caminho ficou indisponivel nesta sessao no momento da validacao final.
+- Arquivos afetados:
+  - `Processamentos/nanum_pipeline_30.py`
+  - `Processamentos/pipeline29_config_gui.py`
+  - `Processamentos/CHANGELOG.md`
+  - `Processamentos/HANDOFF_GLOBAL.md`
+- Decisao de arquitetura:
+  - o modo `sweep` entra no codigo principal do `pipeline30`, nao em script paralelo descartavel;
+  - a GUI compartilhada passa a ser a fonte principal de:
+    - `RAW_INPUT_DIR`
+    - `OUT_DIR`
+    - modo `load/sweep`
+    - coluna de varredura
+    - tolerancia de bin
+  - o runtime do `pipeline30` reaproveita essas escolhas sem abrir um segundo popup de diretorios.
+- Helper `Sweep/Load`:
+  - a primeira aba da GUI compartilhada abre um helper dedicado ao `pipeline30`;
+  - esse helper agora permite:
+    - clicar em `RAW_INPUT_DIR` para abrir o seletor nativo de pasta do Windows;
+    - clicar em `OUT_DIR` para abrir o seletor nativo de pasta do Windows;
+    - escolher `load` ou `sweep`;
+    - escolher a coluna da varredura a partir do catalogo combinado de `LabVIEW`, `MoTeC` e variaveis conhecidas da GUI;
+    - definir a tolerancia de bin do sweep;
+    - converter `.open` faltantes para `.csv` via `OpenToCSV.exe`.
+  - ao fechar a GUI, esse estado fica salvo tanto no state local da GUI quanto no runtime JSON do `pipeline30`.
+- Persistencia local relevante:
+  - arquivo:
+    - `LOCALAPPDATA\\nanum_pipeline_30\\pipeline30_runtime_paths.json`
+  - chaves novas/importantes nesta rodada:
+    - `raw_input_dir`
+    - `out_dir`
+    - `aggregation_mode`
+    - `sweep_x_col`
+    - `sweep_bin_tol`
+    - `helper_configured`
+    - `dirs_configured_in_gui`
+  - observacao:
+    - esse estado local nao e versionado no Git.
+- Seletor de duplicatas do sweep:
+  - o seletor anterior por duplo clique em celula foi substituido por uma grade visivel inteira;
+  - linhas:
+    - combustiveis
+  - colunas:
+    - valores da varredura
+  - comportamento por celula:
+    - quando houver duplicata, aparece um checkbox principal `Todos (selecionados/total)`;
+    - abaixo dele aparecem checkboxes individuais com o nome completo de cada `BaseName`;
+    - marcar apenas um arquivo mantem so aquele ensaio;
+    - marcar o checkbox principal mantem todos do ponto;
+    - desmarcar todos remove o ponto daquele combustivel/bin da rodada de plots e do Excel final do sweep.
+  - ajuste visual importante:
+    - os nomes dos arquivos passaram a ter cor forcada escura dentro da tabela, para nao desaparecerem quando a aplicacao estiver com paleta escura.
+- Binning do sweep:
+  - motivacao:
+    - valores medidos muito proximos nao podiam virar bins diferentes no eixo X, senao o mesmo lambda nominal era separado em colunas/curvas diferentes;
+  - regra implementada:
+    - o `pipeline30` cria `Sweep_Bin_Value` e `Sweep_Bin_Label`;
+    - a tolerancia default e `0.015`;
+    - os centros preferenciais do bin vem de `Sweep_Value` parseado do nome do arquivo, quando disponivel;
+    - para cada leitura da coluna escolhida no helper, o valor entra no bin cujo intervalo respeita:
+      - o ponto medio entre centros vizinhos;
+      - e o limite `+/- tolerancia`;
+    - exemplos validados:
+      - `1.499` e `1.501 -> 1.5`
+      - `0.985` e `1.015 -> 1.0`
+  - impacto:
+    - o seletor de duplicatas passa a indexar por `Sweep_Bin_Value`;
+    - os plots `vs load/power` convertidos para modo `sweep` tambem passam a usar `Sweep_Bin_Value` como eixo X runtime;
+    - titulos e nomes dos arquivos continuam refletindo a variavel real escolhida no helper, nao o nome tecnico da coluna binada.
+- Dependencias:
+  - nao houve inclusao de novo arquivo de requirements nesta rodada;
+  - o fluxo continua usando as dependencias ja existentes, especialmente:
+    - `PySide6` para a GUI
+    - wrapper local `kibox_open_to_csv`
+    - `OpenToCSV.exe` instalado no Windows quando houver conversao de `.open`.
+- Validacao executada:
+  - `python -m py_compile nanum_pipeline_30.py`
+  - `python -m py_compile pipeline29_config_gui.py`
+  - smoke test sintetico do binning:
+    - `0.985` e `1.015` foram para `1.0`
+    - `1.499` e `1.501` foram para `1.5`
+    - `_resolve_plot_x_request('Load_kW')` e `_resolve_plot_x_request('Lambda_Medida')` passaram a resolver para `Sweep_Bin_Value` em modo `sweep`
+  - smoke test sintetico do filtro:
+    - catalogo por `Fuel_Label x Sweep_Bin_Value` montado corretamente
+    - `_apply_sweep_duplicate_filter()` preservando os `BaseName` selecionados
+- Pendencia conhecida:
+  - faltou revalidacao end-to-end no dataset real `D:\raw_pyton\Lean_Sweep` porque esse caminho nao respondia nesta sessao;
+  - o codigo ficou validado por sintaxe e smoke tests locais, mas ainda e recomendavel um rerun real da campanha de sweep assim que o caminho estiver acessivel novamente.
+
 ## Regra permanente de airflow para ensaios com etanol no pipeline29 - 2026-03-22
 - Contexto:
   - depois da correcao do diesel nos plots `all_fuels_*`, o usuario reportou `ETA_V` anomala no `E75H25` apesar de o ponto existir no `lv_kpis_clean.xlsx`;
