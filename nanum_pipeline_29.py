@@ -111,6 +111,7 @@ DEFAULT_MAX_ECT_CONTROL_ERROR_C = 2.0
 TIME_DIAG_PLOT_DPI = 150
 TIME_DIAG_FILE_SCATTER_MAX_POINTS = 200
 K_COVERAGE = 2.0
+GUI_COMPARE_ENABLE_UNITARY_KEY = "GUI_COMPARE_ENABLE_UNITARY"
 
 
 def _path_is_within(path: Path, root: Path) -> bool:
@@ -2688,6 +2689,7 @@ def _prepare_config_bundle_for_pipeline(bundle: Pipeline29ConfigBundle) -> Pipel
     reporting_df["key_norm"] = reporting_df["key"].map(norm_key)
 
     plots_df = bundle.plots_df.copy() if bundle.plots_df is not None else pd.DataFrame()
+    compare_df = bundle.compare_df.copy() if bundle.compare_df is not None else pd.DataFrame()
     fuel_properties_df = bundle.fuel_properties_df.copy() if bundle.fuel_properties_df is not None else pd.DataFrame()
 
     return Pipeline29ConfigBundle(
@@ -2695,6 +2697,7 @@ def _prepare_config_bundle_for_pipeline(bundle: Pipeline29ConfigBundle) -> Pipel
         instruments_df=instruments_df,
         reporting_df=reporting_df,
         plots_df=plots_df,
+        compare_df=compare_df,
         fuel_properties_df=fuel_properties_df,
         data_quality_cfg=dict(bundle.data_quality_cfg or {}),
         defaults_cfg=defaults_prepared,
@@ -5336,6 +5339,12 @@ def _guess_plot_uncertainty_col(out_df: pd.DataFrame, y_col: str, mappings: dict
     return None
 
 
+def _compare_metric_uncertainty_cols(out_df: pd.DataFrame, metric_col: str, mappings: dict) -> Tuple[str, str, str, str]:
+    U_col = _guess_plot_uncertainty_col(out_df, metric_col, mappings) or f"U_{metric_col}"
+    suffix = U_col[2:] if U_col.startswith("U_") else metric_col
+    return f"uA_{suffix}", f"uB_{suffix}", f"uc_{suffix}", U_col
+
+
 # =========================
 # Final table
 # =========================
@@ -6014,7 +6023,21 @@ def _prepare_diesel_bl_adtv_points(df: pd.DataFrame) -> pd.DataFrame:
 
 def _aggregate_consumo_with_uncertainty(d: pd.DataFrame, group_cols: List[str]) -> pd.DataFrame:
     if d is None or d.empty:
-        return pd.DataFrame(columns=group_cols + ["consumo_kg_h", "uA_kg_h", "uB_kg_h", "uc_kg_h", "U_kg_h", "n_points"])
+        return pd.DataFrame(
+            columns=group_cols
+            + [
+                "consumo_kg_h",
+                "uA_kg_h",
+                "uB_kg_h",
+                "uc_kg_h",
+                "U_kg_h",
+                "uA_consumo_kg_h",
+                "uB_consumo_kg_h",
+                "uc_consumo_kg_h",
+                "U_consumo_kg_h",
+                "n_points",
+            ]
+        )
 
     g = (
         d.groupby(group_cols, dropna=False, sort=True)
@@ -6039,7 +6062,27 @@ def _aggregate_consumo_with_uncertainty(d: pd.DataFrame, group_cols: List[str]) 
     g["U_kg_h"] = K_COVERAGE * pd.to_numeric(g["uc_kg_h"], errors="coerce")
     g["U_kg_h"] = g["U_kg_h"].where(g["U_kg_h"].notna(), g["U_rss"] / n)
 
-    return g[group_cols + ["consumo_kg_h", "uA_kg_h", "uB_kg_h", "uc_kg_h", "U_kg_h", "n_points"]].copy()
+    # Alias names to match the generic compare_iter metric pipeline.
+    g["uA_consumo_kg_h"] = g["uA_kg_h"]
+    g["uB_consumo_kg_h"] = g["uB_kg_h"]
+    g["uc_consumo_kg_h"] = g["uc_kg_h"]
+    g["U_consumo_kg_h"] = g["U_kg_h"]
+
+    return g[
+        group_cols
+        + [
+            "consumo_kg_h",
+            "uA_kg_h",
+            "uB_kg_h",
+            "uc_kg_h",
+            "U_kg_h",
+            "uA_consumo_kg_h",
+            "uB_consumo_kg_h",
+            "uc_consumo_kg_h",
+            "U_consumo_kg_h",
+            "n_points",
+        ]
+    ].copy()
 
 
 def _mean_subida_descida_per_campaign(d: pd.DataFrame) -> pd.DataFrame:
@@ -6093,6 +6136,266 @@ def _campaign_label(campaign: str) -> str:
     if campaign == "aditivado":
         return "ADTV (aditivado_1)"
     return campaign
+
+
+COMPARE_ITER_SERIES_META: Dict[str, Dict[str, str]] = {
+    "baseline_media": {"label": "Baseline media", "slug": "baseline_media"},
+    "baseline_subida": {"label": "Baseline subida", "slug": "baseline_subida"},
+    "baseline_descida": {"label": "Baseline descida", "slug": "baseline_descida"},
+    "aditivado_media": {"label": "Aditivado media", "slug": "aditivado_media"},
+    "aditivado_subida": {"label": "Aditivado subida", "slug": "aditivado_subida"},
+    "aditivado_descida": {"label": "Aditivado descida", "slug": "aditivado_descida"},
+}
+
+
+COMPARE_ITER_METRIC_SPECS: List[Dict[str, str]] = [
+    {
+        "metric_id": "consumo",
+        "metric_col": "__consumo__",
+        "value_name": "consumo_kg_h",
+        "title": "Consumo absoluto",
+        "y_label": "Consumo absoluto (kg/h)",
+        "filename_slug": "consumo_abs",
+    },
+    {
+        "metric_id": "co2",
+        "metric_col": "CO2_mean_of_windows",
+        "value_name": "co2_medido",
+        "title": "CO2 medido",
+        "y_label": "CO2 medido (%)",
+        "filename_slug": "co2_medido",
+    },
+    {
+        "metric_id": "co",
+        "metric_col": "CO_mean_of_windows",
+        "value_name": "co_medido",
+        "title": "CO medido",
+        "y_label": "CO medido (ppm)",
+        "filename_slug": "co_medido",
+    },
+    {
+        "metric_id": "o2",
+        "metric_col": "O2_mean_of_windows",
+        "value_name": "o2_medido",
+        "title": "O2 medido",
+        "y_label": "O2 medido (%)",
+        "filename_slug": "o2_medido",
+    },
+    {
+        "metric_id": "nox",
+        "metric_col": "NOX_mean_of_windows",
+        "value_name": "nox_medido",
+        "title": "NOX medido",
+        "y_label": "NOX medido (ppm)",
+        "filename_slug": "nox_medido",
+    },
+    {
+        "metric_id": "thc",
+        "metric_col": "THC_mean_of_windows",
+        "value_name": "thc_medido",
+        "title": "THC medido",
+        "y_label": "THC medido (ppm)",
+        "filename_slug": "thc_medido",
+    },
+]
+COMPARE_ITER_METRIC_SPECS_BY_ID: Dict[str, Dict[str, str]] = {
+    str(spec.get("metric_id", "")).strip().lower(): spec
+    for spec in COMPARE_ITER_METRIC_SPECS
+    if str(spec.get("metric_id", "")).strip()
+}
+
+
+def _default_compare_iter_pairs() -> List[Tuple[str, str]]:
+    return [
+        ("baseline_media", "aditivado_media"),
+        ("baseline_subida", "aditivado_subida"),
+        ("baseline_descida", "aditivado_descida"),
+        ("baseline_subida", "baseline_descida"),
+        ("aditivado_subida", "aditivado_descida"),
+    ]
+
+
+def _cross_all_compare_iter_pairs() -> List[Tuple[str, str]]:
+    left_ids = ["baseline_media", "baseline_subida", "baseline_descida"]
+    right_ids = ["aditivado_media", "aditivado_subida", "aditivado_descida"]
+    out: List[Tuple[str, str]] = []
+    for left_id in left_ids:
+        for right_id in right_ids:
+            out.append((left_id, right_id))
+    return out
+
+
+def _all_compare_iter_pairs() -> List[Tuple[str, str]]:
+    out = _cross_all_compare_iter_pairs()
+    out.extend(
+        [
+            ("baseline_subida", "baseline_descida"),
+            ("aditivado_subida", "aditivado_descida"),
+        ]
+    )
+    return out
+
+
+def _parse_compare_iter_pair_token(token: str) -> Optional[Tuple[str, str]]:
+    raw = str(token or "").strip().lower()
+    if not raw:
+        return None
+    for sep in (":", ">", "|", "=>"):
+        if sep in raw:
+            left_id, right_id = [part.strip() for part in raw.split(sep, 1)]
+            break
+    else:
+        return None
+    if left_id not in COMPARE_ITER_SERIES_META or right_id not in COMPARE_ITER_SERIES_META:
+        return None
+    if left_id == right_id:
+        return None
+    return left_id, right_id
+
+
+def _resolve_compare_iter_pairs(cli_value: object) -> List[Tuple[str, str]]:
+    raw = _to_str_or_empty(cli_value)
+    if not raw:
+        raw = _to_str_or_empty(os.environ.get("PIPELINE29_COMPARE_ITER_PAIRS", ""))
+    if not raw:
+        return _default_compare_iter_pairs()
+
+    pairs: List[Tuple[str, str]] = []
+    for token in [part.strip() for part in raw.split(",") if part.strip()]:
+        token_norm = token.lower()
+        if token_norm == "default":
+            pairs.extend(_default_compare_iter_pairs())
+            continue
+        if token_norm == "cross_all":
+            pairs.extend(_cross_all_compare_iter_pairs())
+            continue
+        if token_norm == "all":
+            pairs.extend(_all_compare_iter_pairs())
+            continue
+        parsed = _parse_compare_iter_pair_token(token_norm)
+        if parsed is None:
+            print(
+                "[WARN] compare_iteracoes: token invalido em --compare-iter-pairs: "
+                f"'{token}'. Vou ignorar."
+            )
+            continue
+        pairs.append(parsed)
+
+    deduped: List[Tuple[str, str]] = []
+    seen: set[Tuple[str, str]] = set()
+    for pair in pairs:
+        if pair in seen:
+            continue
+        seen.add(pair)
+        deduped.append(pair)
+    return deduped or _default_compare_iter_pairs()
+
+
+def _build_default_compare_iter_requests(compare_iter_pairs: List[Tuple[str, str]]) -> List[Dict[str, object]]:
+    requests: List[Dict[str, object]] = []
+    dedupe: set[Tuple[str, str, str, str]] = set()
+    for metric_spec in COMPARE_ITER_METRIC_SPECS:
+        metric_id = str(metric_spec.get("metric_id", "")).strip().lower()
+        if not metric_id:
+            continue
+        for left_id, right_id in compare_iter_pairs:
+            key = (left_id, right_id, metric_id, "with_uncertainty")
+            if key in dedupe:
+                continue
+            dedupe.add(key)
+            requests.append(
+                {
+                    "left_id": left_id,
+                    "right_id": right_id,
+                    "metric_id": metric_id,
+                    "variant_key": "with_uncertainty",
+                    "show_uncertainty": "on",
+                    "dual_variant": False,
+                    "source": "fallback_pairs",
+                }
+            )
+    return requests
+
+
+def _resolve_compare_iter_requests(
+    compare_df: Optional[pd.DataFrame],
+    *,
+    fallback_pairs: Optional[List[Tuple[str, str]]] = None,
+    force_fallback_pairs: bool = False,
+) -> Tuple[List[Dict[str, object]], str]:
+    pairs = fallback_pairs or _default_compare_iter_pairs()
+    if force_fallback_pairs:
+        return _build_default_compare_iter_requests(pairs), "forced_fallback_pairs"
+    if compare_df is None or compare_df.empty:
+        return _build_default_compare_iter_requests(pairs), "fallback_pairs"
+
+    rows = compare_df.to_dict(orient="records")
+    enabled_rows = [row for row in rows if _row_enabled((row or {}).get("enabled", ""))]
+    if not enabled_rows:
+        return [], "gui_empty"
+
+    requests: List[Dict[str, object]] = []
+    dedupe: set[Tuple[str, str, str, str]] = set()
+    for row_idx, row in enumerate(enabled_rows, start=1):
+        left_id = _to_str_or_empty((row or {}).get("left_series", "")).lower()
+        right_id = _to_str_or_empty((row or {}).get("right_series", "")).lower()
+        metric_id = _to_str_or_empty((row or {}).get("metric_id", "")).lower()
+
+        if left_id not in COMPARE_ITER_SERIES_META or right_id not in COMPARE_ITER_SERIES_META:
+            print(
+                f"[WARN] compare_iteracoes: linha {row_idx} na aba Compare com series invalidas "
+                f"('{left_id}' vs '{right_id}'). Vou ignorar."
+            )
+            continue
+        if left_id == right_id:
+            print(
+                f"[WARN] compare_iteracoes: linha {row_idx} na aba Compare usa series iguais "
+                f"('{left_id}'). Vou ignorar."
+            )
+            continue
+        if metric_id not in COMPARE_ITER_METRIC_SPECS_BY_ID:
+            print(
+                f"[WARN] compare_iteracoes: linha {row_idx} na aba Compare com metrica invalida "
+                f"('{metric_id}'). Vou ignorar."
+            )
+            continue
+
+        variants = _plot_uncertainty_variants(pd.Series(row))
+        for variant_key, show_uncertainty, dual_variant in variants:
+            dedupe_key = (left_id, right_id, metric_id, variant_key)
+            if dedupe_key in dedupe:
+                continue
+            dedupe.add(dedupe_key)
+            requests.append(
+                {
+                    "left_id": left_id,
+                    "right_id": right_id,
+                    "metric_id": metric_id,
+                    "variant_key": variant_key,
+                    "show_uncertainty": show_uncertainty,
+                    "dual_variant": bool(dual_variant),
+                    "source": "gui_compare_tab",
+                }
+            )
+
+    if not requests:
+        return [], "gui_invalid"
+    return requests, "gui_compare_tab"
+
+
+def _compare_iter_pair_context(left_id: str, right_id: str) -> Dict[str, str]:
+    left_meta = COMPARE_ITER_SERIES_META[left_id]
+    right_meta = COMPARE_ITER_SERIES_META[right_id]
+    return {
+        "left_label": left_meta["label"],
+        "right_label": right_meta["label"],
+        "pair_slug": f"{left_meta['slug']}_vs_{right_meta['slug']}",
+        "pair_title": f"{left_meta['label']} vs {right_meta['label']}",
+        "line_label": f"{right_meta['label']} vs {left_meta['label']}",
+        "note_text": f"Negativo = {right_meta['label']} menor; Positivo = {right_meta['label']} maior",
+        "interpret_neg": f"{right_meta['slug']}_menor",
+        "interpret_pos": f"{right_meta['slug']}_maior",
+    }
 
 
 def _plot_bl_adtv_consumo_absolute(
@@ -6391,132 +6694,465 @@ def _export_compare_iteracoes_bl_adtv_excel(
     print(f"[OK] Salvei {outpath}")
 
 
-def _plot_compare_iteracoes_bl_vs_adtv(df: pd.DataFrame, *, root_plot_dir: Optional[Path] = None) -> None:
+def _prepare_compare_metric_points(
+    df: pd.DataFrame,
+    *,
+    metric_col: str,
+    mappings: dict,
+) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    if "BaseName" not in df.columns:
+        print("[WARN] compare iteracoes: coluna BaseName ausente. Pulei.")
+        return pd.DataFrame()
+
+    if metric_col not in df.columns:
+        print(f"[WARN] compare iteracoes: coluna '{metric_col}' nao encontrada no output. Pulei.")
+        return pd.DataFrame()
+
+    out = df.copy()
+    out["_campaign_bl_adtv"] = out["BaseName"].map(_diesel_campaign_from_basename)
+    out["_sentido_plot"] = out.apply(_diesel_sentido_from_row, axis=1)
+
+    if ("DIES_pct" in out.columns) or ("BIOD_pct" in out.columns):
+        dies = pd.to_numeric(out.get("DIES_pct", pd.Series(pd.NA, index=out.index)), errors="coerce")
+        biod = pd.to_numeric(out.get("BIOD_pct", pd.Series(pd.NA, index=out.index)), errors="coerce")
+        diesel_mask = dies.gt(0) | biod.gt(0)
+        if bool(diesel_mask.any()):
+            out = out[diesel_mask].copy()
+
+    uA_col, uB_col, uc_col, U_col = _compare_metric_uncertainty_cols(out, metric_col, mappings)
+    out["Load_kW"] = pd.to_numeric(out.get("Load_kW", pd.NA), errors="coerce")
+    out["_metric"] = pd.to_numeric(out.get(metric_col, pd.NA), errors="coerce")
+    out["_uA"] = pd.to_numeric(out.get(uA_col, pd.NA), errors="coerce")
+    out["_uB"] = pd.to_numeric(out.get(uB_col, pd.NA), errors="coerce")
+    out["_uc"] = pd.to_numeric(out.get(uc_col, pd.NA), errors="coerce")
+    out["_U"] = pd.to_numeric(out.get(U_col, pd.NA), errors="coerce")
+
+    out = out[
+        out["_campaign_bl_adtv"].isin(["baseline", "aditivado"])
+        & out["_sentido_plot"].isin(["subida", "descida"])
+    ].copy()
+    out = out.dropna(subset=["Load_kW", "_metric"]).copy()
+    return out
+
+
+def _aggregate_compare_metric_with_uncertainty(d: pd.DataFrame, *, value_name: str) -> pd.DataFrame:
+    return _aggregate_metric_with_uncertainty(
+        d,
+        group_cols=["_campaign_bl_adtv", "_sentido_plot", "Load_kW"],
+        value_col="_metric",
+        uA_col="_uA",
+        uB_col="_uB",
+        uc_col="_uc",
+        U_col="_U",
+        value_name=value_name,
+    )
+
+
+def _mean_subida_descida_per_campaign_metric(d: pd.DataFrame, *, value_name: str) -> pd.DataFrame:
+    out_cols = ["_campaign_bl_adtv", "Load_kW", value_name, f"uA_{value_name}", f"uB_{value_name}", f"uc_{value_name}", f"U_{value_name}", "n_points"]
+    if d is None or d.empty:
+        return pd.DataFrame(columns=out_cols)
+
+    sub = d[d["_sentido_plot"].eq("subida")].copy()
+    des = d[d["_sentido_plot"].eq("descida")].copy()
+    if sub.empty or des.empty:
+        return pd.DataFrame(columns=out_cols)
+
+    m = sub.merge(
+        des,
+        on=["_campaign_bl_adtv", "Load_kW"],
+        how="inner",
+        suffixes=("_sub", "_des"),
+    )
+    if m.empty:
+        return pd.DataFrame(columns=out_cols)
+
+    value_sub = pd.to_numeric(m.get(f"{value_name}_sub", pd.Series(pd.NA, index=m.index)), errors="coerce")
+    value_des = pd.to_numeric(m.get(f"{value_name}_des", pd.Series(pd.NA, index=m.index)), errors="coerce")
+    ua_sub = pd.to_numeric(m.get(f"uA_{value_name}_sub", pd.Series(pd.NA, index=m.index)), errors="coerce")
+    ua_des = pd.to_numeric(m.get(f"uA_{value_name}_des", pd.Series(pd.NA, index=m.index)), errors="coerce")
+    ub_sub = pd.to_numeric(m.get(f"uB_{value_name}_sub", pd.Series(pd.NA, index=m.index)), errors="coerce")
+    ub_des = pd.to_numeric(m.get(f"uB_{value_name}_des", pd.Series(pd.NA, index=m.index)), errors="coerce")
+    uc_sub = pd.to_numeric(m.get(f"uc_{value_name}_sub", pd.Series(pd.NA, index=m.index)), errors="coerce")
+    uc_des = pd.to_numeric(m.get(f"uc_{value_name}_des", pd.Series(pd.NA, index=m.index)), errors="coerce")
+    U_sub = pd.to_numeric(m.get(f"U_{value_name}_sub", pd.Series(pd.NA, index=m.index)), errors="coerce")
+    U_des = pd.to_numeric(m.get(f"U_{value_name}_des", pd.Series(pd.NA, index=m.index)), errors="coerce")
+
+    out = pd.DataFrame()
+    out["_campaign_bl_adtv"] = m["_campaign_bl_adtv"]
+    out["Load_kW"] = pd.to_numeric(m["Load_kW"], errors="coerce")
+    out[value_name] = (value_sub + value_des) / 2.0
+    out[f"uA_{value_name}"] = (ua_sub**2 + ua_des**2) ** 0.5 / 2.0
+    out[f"uB_{value_name}"] = (ub_sub**2 + ub_des**2) ** 0.5 / 2.0
+    out[f"uc_{value_name}"] = (out[f"uA_{value_name}"] ** 2 + out[f"uB_{value_name}"] ** 2) ** 0.5
+    out[f"uc_{value_name}"] = out[f"uc_{value_name}"].where(
+        out[f"uc_{value_name}"].notna(),
+        (uc_sub**2 + uc_des**2) ** 0.5 / 2.0,
+    )
+    out[f"U_{value_name}"] = K_COVERAGE * out[f"uc_{value_name}"]
+    out[f"U_{value_name}"] = out[f"U_{value_name}"].where(
+        out[f"U_{value_name}"].notna(),
+        (U_sub**2 + U_des**2) ** 0.5 / 2.0,
+    )
+    out["n_points"] = pd.to_numeric(m["n_points_sub"], errors="coerce").fillna(0) + pd.to_numeric(m["n_points_des"], errors="coerce").fillna(0)
+    return out.sort_values("Load_kW").copy()
+
+
+def _plot_compare_metric_absolute(
+    left_df: pd.DataFrame,
+    right_df: pd.DataFrame,
+    *,
+    value_name: str,
+    y_label: str,
+    title: str,
+    filename: str,
+    target_dir: Path,
+    label_left: str,
+    label_right: str,
+    include_uncertainty: bool = True,
+) -> bool:
+    if (left_df is None or left_df.empty) and (right_df is None or right_df.empty):
+        print(f"[WARN] compare iteracoes: sem dados para {filename}.")
+        return False
+
+    plt.figure()
+    any_curve = False
+    specs = [
+        (label_left, left_df, "#1f77b4"),
+        (label_right, right_df, "#d62728"),
+    ]
+    for label, d, color in specs:
+        if d is None or d.empty:
+            print(f"[WARN] compare iteracoes: sem dados para {label} em {filename}.")
+            continue
+        x = pd.to_numeric(d["Load_kW"], errors="coerce")
+        y = pd.to_numeric(d[value_name], errors="coerce")
+        yerr = pd.to_numeric(d.get(f"U_{value_name}", pd.NA), errors="coerce")
+        p = pd.DataFrame({"x": x, "y": y, "yerr": yerr}).dropna(subset=["x", "y"]).sort_values("x")
+        if p.empty:
+            continue
+        any_curve = True
+        if include_uncertainty and p["yerr"].notna().any():
+            plt.errorbar(p["x"], p["y"], yerr=p["yerr"], fmt="o-", capsize=3, linewidth=1.8, markersize=4.5, color=color, label=label)
+        else:
+            plt.plot(p["x"], p["y"], "o-", linewidth=1.8, markersize=4.5, color=color, label=label)
+
+    if not any_curve:
+        plt.close()
+        print(f"[WARN] compare iteracoes: curvas vazias para {filename}.")
+        return False
+
+    plt.xlabel("Carga nominal (kW)")
+    plt.ylabel(y_label)
+    plt.title(title)
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+    plt.legend()
+    outpath = target_dir / filename
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=200)
+    plt.close()
+    print(f"[OK] Salvei {outpath}")
+    return True
+
+
+def _build_compare_metric_delta_table(
+    left_df: pd.DataFrame,
+    right_df: pd.DataFrame,
+    *,
+    value_name: str,
+    label_left: str,
+    label_right: str,
+    interpret_neg: str,
+    interpret_pos: str,
+) -> pd.DataFrame:
+    if left_df is None or left_df.empty or right_df is None or right_df.empty:
+        return pd.DataFrame()
+
+    base_cols = ["Load_kW", value_name, f"uA_{value_name}", f"uB_{value_name}", f"uc_{value_name}", f"U_{value_name}", "n_points"]
+    left = left_df.copy()
+    right = right_df.copy()
+    for c in base_cols:
+        if c not in left.columns:
+            left[c] = pd.NA
+        if c not in right.columns:
+            right[c] = pd.NA
+
+    left = left[base_cols].rename(
+        columns={
+            value_name: "value_left",
+            f"uA_{value_name}": "uA_left",
+            f"uB_{value_name}": "uB_left",
+            f"uc_{value_name}": "uc_left",
+            f"U_{value_name}": "U_left",
+            "n_points": "n_points_left",
+        }
+    )
+    right = right[base_cols].rename(
+        columns={
+            value_name: "value_right",
+            f"uA_{value_name}": "uA_right",
+            f"uB_{value_name}": "uB_right",
+            f"uc_{value_name}": "uc_right",
+            f"U_{value_name}": "U_right",
+            "n_points": "n_points_right",
+        }
+    )
+
+    m = left.merge(right, on="Load_kW", how="inner")
+    if m.empty:
+        return pd.DataFrame()
+
+    numeric_cols = [
+        "Load_kW",
+        "value_left",
+        "uA_left",
+        "uB_left",
+        "uc_left",
+        "U_left",
+        "n_points_left",
+        "value_right",
+        "uA_right",
+        "uB_right",
+        "uc_right",
+        "U_right",
+        "n_points_right",
+    ]
+    for c in numeric_cols:
+        m[c] = pd.to_numeric(m[c], errors="coerce")
+
+    m = m.dropna(subset=["Load_kW", "value_left", "value_right"]).copy()
+    m = m[(m["value_left"] != 0) & (m["value_right"] != 0)].copy()
+    if m.empty:
+        return pd.DataFrame()
+
+    m["delta_abs"] = m["value_right"] - m["value_left"]
+    m["ratio_right_over_left"] = m["value_right"] / m["value_left"]
+    m["delta_pct"] = 100.0 * (m["ratio_right_over_left"] - 1.0)
+    m["d_delta_d_right"] = 100.0 / m["value_left"]
+    m["d_delta_d_left"] = -100.0 * m["value_right"] / (m["value_left"] ** 2)
+    m["uA_delta_pct"] = ((m["d_delta_d_right"].abs() * m["uA_right"]) ** 2 + (m["d_delta_d_left"].abs() * m["uA_left"]) ** 2) ** 0.5
+    m["uB_delta_pct"] = ((m["d_delta_d_right"].abs() * m["uB_right"]) ** 2 + (m["d_delta_d_left"].abs() * m["uB_left"]) ** 2) ** 0.5
+    m["uc_delta_pct"] = (m["uA_delta_pct"] ** 2 + m["uB_delta_pct"] ** 2) ** 0.5
+    m["U_delta_pct"] = K_COVERAGE * m["uc_delta_pct"]
+    m["delta_over_U"] = m["delta_pct"] / m["U_delta_pct"]
+    m["label_left"] = label_left
+    m["label_right"] = label_right
+    m["interpretacao"] = np.where(m["delta_pct"] < 0, interpret_neg, interpret_pos)
+    m["significancia_95pct"] = np.where(
+        m["delta_pct"].abs() > m["U_delta_pct"],
+        "diferenca_maior_que_U",
+        "diferenca_dentro_de_U",
+    )
+    return m.sort_values("Load_kW").copy()
+
+
+def _plot_compare_metric_delta_pct(
+    left_df: pd.DataFrame,
+    right_df: pd.DataFrame,
+    *,
+    value_name: str,
+    title: str,
+    filename: str,
+    target_dir: Path,
+    label_left: str,
+    label_right: str,
+    label_line: str,
+    note_text: str,
+    interpret_neg: str,
+    interpret_pos: str,
+    include_uncertainty: bool = True,
+) -> pd.DataFrame:
+    m = _build_compare_metric_delta_table(
+        left_df,
+        right_df,
+        value_name=value_name,
+        label_left=label_left,
+        label_right=label_right,
+        interpret_neg=interpret_neg,
+        interpret_pos=interpret_pos,
+    )
+    if m.empty:
+        print(f"[WARN] compare iteracoes: sem pares validos para {filename}.")
+        return pd.DataFrame()
+
+    plt.figure()
+    if include_uncertainty and m["U_delta_pct"].notna().any():
+        plt.errorbar(
+            m["Load_kW"],
+            m["delta_pct"],
+            yerr=m["U_delta_pct"],
+            fmt="o-",
+            capsize=3,
+            linewidth=1.8,
+            markersize=4.5,
+            color="#2ca02c",
+            label=label_line,
+        )
+    else:
+        plt.plot(m["Load_kW"], m["delta_pct"], "o-", linewidth=1.8, markersize=4.5, color="#2ca02c", label=label_line)
+
+    plt.axhline(0.0, color="gray", linestyle="--", linewidth=1.0, label="0%")
+    plt.xlabel("Carga nominal (kW)")
+    plt.ylabel("Delta percentual (%)")
+    plt.title(title)
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+    plt.legend()
+    plt.gcf().text(0.01, 0.01, note_text, fontsize=8, alpha=0.85)
+    outpath = target_dir / filename
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=200)
+    plt.close()
+    print(f"[OK] Salvei {outpath}")
+    return m
+
+
+def _build_compare_iter_series_frames(agg: pd.DataFrame, *, value_name: str) -> Dict[str, pd.DataFrame]:
+    subida = agg[agg["_sentido_plot"].eq("subida")].copy()
+    descida = agg[agg["_sentido_plot"].eq("descida")].copy()
+    media_sd = _mean_subida_descida_per_campaign_metric(agg, value_name=value_name)
+    return {
+        "baseline_subida": subida[subida["_campaign_bl_adtv"].eq("baseline")].copy(),
+        "baseline_descida": descida[descida["_campaign_bl_adtv"].eq("baseline")].copy(),
+        "baseline_media": media_sd[media_sd["_campaign_bl_adtv"].eq("baseline")].copy(),
+        "aditivado_subida": subida[subida["_campaign_bl_adtv"].eq("aditivado")].copy(),
+        "aditivado_descida": descida[descida["_campaign_bl_adtv"].eq("aditivado")].copy(),
+        "aditivado_media": media_sd[media_sd["_campaign_bl_adtv"].eq("aditivado")].copy(),
+    }
+
+
+def _export_compare_iteracoes_metricas_excel(rows: List[pd.DataFrame], target_dir: Path) -> None:
+    if not rows:
+        print("[WARN] compare iteracoes: sem dados para exportar Excel consolidado.")
+        return
+    out_df = pd.concat(rows, ignore_index=True)
+    out_df["Load_kW"] = pd.to_numeric(out_df["Load_kW"], errors="coerce")
+    out_df = out_df.sort_values(["Metrica", "Comparacao", "Load_kW"]).copy()
+    outpath = safe_to_excel(out_df, target_dir / "compare_iteracoes_metricas_incertezas.xlsx")
+    print(f"[OK] Salvei {outpath}")
+
+
+def _plot_compare_iteracoes_bl_vs_adtv(
+    df: pd.DataFrame,
+    *,
+    root_plot_dir: Optional[Path] = None,
+    mappings: Optional[dict] = None,
+    compare_iter_pairs: Optional[List[Tuple[str, str]]] = None,
+    compare_requests: Optional[List[Dict[str, object]]] = None,
+) -> None:
     base_root = PLOTS_DIR if root_plot_dir is None else root_plot_dir
     target_dir = base_root / "compare_iteracoes_bl_vs_adtv"
     target_dir.mkdir(parents=True, exist_ok=True)
-
-    pts = _prepare_diesel_bl_adtv_points(df)
-    if pts.empty:
-        print("[WARN] compare iteracoes BL vs ADTV: nao encontrei dados diesel baseline/aditivado no output.")
+    mappings = mappings or {}
+    compare_iter_pairs = compare_iter_pairs or _default_compare_iter_pairs()
+    requests = compare_requests if compare_requests is not None else _build_default_compare_iter_requests(compare_iter_pairs)
+    if not requests:
+        print("[INFO] compare_iteracoes: nenhuma linha habilitada na aba Compare. Pulei compare_iteracoes/.")
         return
 
-    agg = _aggregate_consumo_with_uncertainty(pts, ["_campaign_bl_adtv", "_sentido_plot", "Load_kW"])
-    if agg.empty:
-        print("[WARN] compare iteracoes BL vs ADTV: agregacao vazia.")
+    requests_by_metric: Dict[str, List[Dict[str, object]]] = {}
+    for request in requests:
+        metric_id = _to_str_or_empty(request.get("metric_id", "")).lower()
+        if metric_id not in COMPARE_ITER_METRIC_SPECS_BY_ID:
+            print(f"[WARN] compare iteracoes: metrica invalida no request '{metric_id}'. Vou ignorar.")
+            continue
+        requests_by_metric.setdefault(metric_id, []).append(request)
+
+    if not requests_by_metric:
+        print("[WARN] compare iteracoes: requests sem metricas validas. Pulei compare_iteracoes/.")
         return
 
-    subida = agg[agg["_sentido_plot"].eq("subida")].copy()
-    descida = agg[agg["_sentido_plot"].eq("descida")].copy()
-    media_sd = _mean_subida_descida_per_campaign(agg)
+    export_rows: List[pd.DataFrame] = []
+    generated_any = False
 
-    b_sub = subida[subida["_campaign_bl_adtv"].eq("baseline")].copy()
-    a_sub = subida[subida["_campaign_bl_adtv"].eq("aditivado")].copy()
-    b_des = descida[descida["_campaign_bl_adtv"].eq("baseline")].copy()
-    a_des = descida[descida["_campaign_bl_adtv"].eq("aditivado")].copy()
-    b_med = media_sd[media_sd["_campaign_bl_adtv"].eq("baseline")].copy()
-    a_med = media_sd[media_sd["_campaign_bl_adtv"].eq("aditivado")].copy()
+    for metric_id, metric_requests in requests_by_metric.items():
+        spec = COMPARE_ITER_METRIC_SPECS_BY_ID[metric_id]
+        value_name = spec["value_name"]
+        if metric_id == "consumo":
+            pts = _prepare_diesel_bl_adtv_points(df)
+            agg = _aggregate_consumo_with_uncertainty(pts, ["_campaign_bl_adtv", "_sentido_plot", "Load_kW"]) if not pts.empty else pd.DataFrame()
+            frames = _build_compare_iter_series_frames(agg, value_name="consumo_kg_h") if not agg.empty else {}
+        else:
+            pts = _prepare_compare_metric_points(df, metric_col=spec["metric_col"], mappings=mappings)
+            agg = _aggregate_compare_metric_with_uncertainty(pts, value_name=value_name) if not pts.empty else pd.DataFrame()
+            frames = _build_compare_iter_series_frames(agg, value_name=value_name) if not agg.empty else {}
 
-    _export_compare_iteracoes_bl_adtv_excel(
-        b_med=b_med,
-        a_med=a_med,
-        b_sub=b_sub,
-        a_sub=a_sub,
-        b_des=b_des,
-        a_des=a_des,
-        target_dir=target_dir,
-    )
+        if not frames:
+            print(f"[WARN] compare iteracoes: sem dados para a metrica '{metric_id}'.")
+            continue
 
-    _plot_bl_adtv_consumo_absolute(
-        b_med,
-        a_med,
-        title="Compare iteracoes BL vs ADTV - Consumo absoluto (media subida+descida)",
-        filename="compare_iteracoes_bl_vs_adtv_consumo_medio_subida_descida.png",
-        target_dir=target_dir,
-    )
-    _plot_bl_adtv_delta_pct(
-        b_med,
-        a_med,
-        title="Compare iteracoes BL vs ADTV - Delta percentual (media subida+descida)",
-        filename="compare_iteracoes_bl_vs_adtv_razao_delta_pct_medio_subida_descida.png",
-        target_dir=target_dir,
-    )
+        for request in metric_requests:
+            left_id = _to_str_or_empty(request.get("left_id", "")).lower()
+            right_id = _to_str_or_empty(request.get("right_id", "")).lower()
+            if left_id not in COMPARE_ITER_SERIES_META or right_id not in COMPARE_ITER_SERIES_META:
+                continue
+            left_df = frames.get(left_id)
+            right_df = frames.get(right_id)
+            if left_df is None or right_df is None:
+                continue
 
-    _plot_bl_adtv_consumo_absolute(
-        b_sub,
-        a_sub,
-        title="Compare iteracoes BL vs ADTV - Consumo absoluto (subida)",
-        filename="compare_iteracoes_bl_vs_adtv_consumo_subida.png",
-        target_dir=target_dir,
-    )
-    _plot_bl_adtv_delta_pct(
-        b_sub,
-        a_sub,
-        title="Compare iteracoes BL vs ADTV - Delta percentual (subida)",
-        filename="compare_iteracoes_bl_vs_adtv_razao_delta_pct_subida.png",
-        target_dir=target_dir,
-    )
+            variant_key = _to_str_or_empty(request.get("variant_key", "with_uncertainty")).lower() or "with_uncertainty"
+            uncertainty_mode = _to_str_or_empty(request.get("show_uncertainty", "on")).lower() or "on"
+            include_uncertainty = uncertainty_mode != "off"
+            dual_variant = bool(request.get("dual_variant", False))
+            ctx = _compare_iter_pair_context(left_id, right_id)
+            title_prefix = f"Compare {ctx['pair_title']}"
+            filename_base = f"compare_iteracoes_{ctx['pair_slug']}_{spec['filename_slug']}"
+            abs_filename, abs_title = _decorate_plot_variant_output(
+                f"{filename_base}.png",
+                f"{title_prefix} - {spec['title']}",
+                variant_key,
+                dual_variant,
+            )
+            abs_saved = _plot_compare_metric_absolute(
+                left_df,
+                right_df,
+                value_name=value_name,
+                y_label=spec["y_label"],
+                title=abs_title,
+                filename=abs_filename,
+                target_dir=target_dir,
+                label_left=ctx["left_label"],
+                label_right=ctx["right_label"],
+                include_uncertainty=include_uncertainty,
+            )
+            delta_filename, delta_title = _decorate_plot_variant_output(
+                f"{filename_base}_delta_pct.png",
+                f"{title_prefix} - Delta percentual",
+                variant_key,
+                dual_variant,
+            )
+            delta_df = _plot_compare_metric_delta_pct(
+                left_df,
+                right_df,
+                value_name=value_name,
+                title=delta_title,
+                filename=delta_filename,
+                target_dir=target_dir,
+                label_left=ctx["left_label"],
+                label_right=ctx["right_label"],
+                label_line=ctx["line_label"],
+                note_text=ctx["note_text"],
+                interpret_neg=ctx["interpret_neg"],
+                interpret_pos=ctx["interpret_pos"],
+                include_uncertainty=include_uncertainty,
+            )
+            if abs_saved:
+                generated_any = True
+            if not delta_df.empty:
+                generated_any = True
+                delta_df = delta_df.copy()
+                delta_df.insert(0, "Metrica", metric_id)
+                delta_df.insert(1, "Comparacao", ctx["pair_slug"])
+                delta_df.insert(2, "Incerteza", "com" if include_uncertainty else "sem")
+                export_rows.append(delta_df)
 
-    _plot_bl_adtv_consumo_absolute(
-        b_des,
-        a_des,
-        title="Compare iteracoes BL vs ADTV - Consumo absoluto (descida)",
-        filename="compare_iteracoes_bl_vs_adtv_consumo_descida.png",
-        target_dir=target_dir,
-    )
-    _plot_bl_adtv_delta_pct(
-        b_des,
-        a_des,
-        title="Compare iteracoes BL vs ADTV - Delta percentual (descida)",
-        filename="compare_iteracoes_bl_vs_adtv_razao_delta_pct_descida.png",
-        target_dir=target_dir,
-    )
-
-    _plot_bl_adtv_consumo_absolute(
-        b_sub,
-        b_des,
-        title="Compare baseline subida vs descida - Consumo absoluto",
-        filename="compare_iteracoes_baseline_subida_vs_descida_consumo_abs.png",
-        target_dir=target_dir,
-        label_bl="Baseline subida",
-        label_adtv="Baseline descida",
-    )
-    _plot_bl_adtv_delta_pct(
-        b_sub,
-        b_des,
-        title="Compare baseline subida vs descida - Delta percentual (descida/subida)",
-        filename="compare_iteracoes_baseline_subida_vs_descida_razao_delta_pct.png",
-        target_dir=target_dir,
-        label_line="Descida vs Subida (baseline)",
-        note_text="Negativo = descida com menor consumo; Positivo = descida com maior consumo",
-        label_bl="baseline_subida",
-        label_adtv="baseline_descida",
-        interpret_neg="descida_menor_que_subida",
-        interpret_pos="descida_maior_que_subida",
-    )
-
-    _plot_bl_adtv_consumo_absolute(
-        a_sub,
-        a_des,
-        title="Compare aditivado subida vs descida - Consumo absoluto",
-        filename="compare_iteracoes_aditivado_subida_vs_descida_consumo_abs.png",
-        target_dir=target_dir,
-        label_bl="Aditivado subida",
-        label_adtv="Aditivado descida",
-    )
-    _plot_bl_adtv_delta_pct(
-        a_sub,
-        a_des,
-        title="Compare aditivado subida vs descida - Delta percentual (descida/subida)",
-        filename="compare_iteracoes_aditivado_subida_vs_descida_razao_delta_pct.png",
-        target_dir=target_dir,
-        label_line="Descida vs Subida (aditivado)",
-        note_text="Negativo = descida com menor consumo; Positivo = descida com maior consumo",
-        label_bl="aditivado_subida",
-        label_adtv="aditivado_descida",
-        interpret_neg="descida_menor_que_subida",
-        interpret_pos="descida_maior_que_subida",
-    )
+    if not generated_any:
+        print("[WARN] compare iteracoes: nao encontrei pares baseline/aditivado/descida/subida validos.")
+        return
+    _export_compare_iteracoes_metricas_excel(export_rows, target_dir)
 
 
 def _plot_ethanol_equivalent_consumption_overlay(df: pd.DataFrame, *, plot_dir: Optional[Path] = None) -> None:
@@ -8513,7 +9149,58 @@ def _parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--rebuild-text-config", action="store_true", help="Regera a config textual a partir do Excel rev3.")
     parser.add_argument("--config-gui", action="store_true", help="Abre o editor GUI da configuracao textual e sai.")
     parser.add_argument("--skip-config-gui-prompt", action="store_true", help="Nao pergunta se deve abrir a GUI antes do run.")
+    parser.add_argument(
+        "--plot-scope",
+        choices=["all", "unitary", "compare", "none"],
+        default="",
+        help="Controla quais familias de plots gerar: all, unitary, compare ou none.",
+    )
+    parser.add_argument(
+        "--compare-iter-pairs",
+        default="",
+        help=(
+            "Seleciona os pares do compare_iteracoes. Aceita default, cross_all, all "
+            "ou uma lista separada por virgula como baseline_media:aditivado_subida."
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def _resolve_plot_scope(cli_value: object) -> str:
+    raw = _to_str_or_empty(cli_value).lower()
+    if not raw:
+        raw = _to_str_or_empty(os.environ.get("PIPELINE29_PLOT_SCOPE", "")).lower()
+    if raw not in {"all", "unitary", "compare", "none"}:
+        return "all"
+    return raw
+
+
+def _cfg_bool(defaults_cfg: Dict[str, str], key: str, *, default: bool) -> bool:
+    cfg = defaults_cfg or {}
+    raw = _to_str_or_empty(cfg.get(key, ""))
+    if not raw:
+        raw = _to_str_or_empty(cfg.get(norm_key(key), ""))
+    raw = raw.lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on", "y", "checked"}
+
+
+def _plot_scope_from_config(defaults_cfg: Dict[str, str], compare_df: Optional[pd.DataFrame]) -> str:
+    unitary_enabled = _cfg_bool(defaults_cfg, GUI_COMPARE_ENABLE_UNITARY_KEY, default=True)
+    compare_enabled = False
+    if compare_df is not None and not compare_df.empty:
+        for row in compare_df.to_dict(orient="records"):
+            if _row_enabled((row or {}).get("enabled", "")):
+                compare_enabled = True
+                break
+    if unitary_enabled and compare_enabled:
+        return "all"
+    if unitary_enabled:
+        return "unitary"
+    if compare_enabled:
+        return "compare"
+    return "none"
 
 
 def main(argv: Optional[List[str]] = None) -> None:
@@ -8521,6 +9208,28 @@ def main(argv: Optional[List[str]] = None) -> None:
     print(f"[INFO] Base do script: {BASE_DIR}")
     text_config_dir = _choose_text_config_dir(Path(args.config_dir) if args.config_dir else None)
     gui_save_run_exit_code = 1001
+    plot_scope_valid_values = {"all", "unitary", "compare", "none"}
+    plot_scope_cli_raw = _to_str_or_empty(args.plot_scope).lower()
+    plot_scope_env_raw = _to_str_or_empty(os.environ.get("PIPELINE29_PLOT_SCOPE", "")).lower()
+    if plot_scope_cli_raw and plot_scope_cli_raw not in plot_scope_valid_values:
+        print(
+            f"[WARN] --plot-scope invalido ('{plot_scope_cli_raw}'); "
+            "vou ignorar o override e usar a configuracao da GUI."
+        )
+    if plot_scope_env_raw and plot_scope_env_raw not in plot_scope_valid_values:
+        print(
+            f"[WARN] PIPELINE29_PLOT_SCOPE invalido ('{plot_scope_env_raw}'); "
+            "vou ignorar o override de ambiente e usar a configuracao da GUI."
+        )
+    plot_scope = _resolve_plot_scope(args.plot_scope)
+    plot_scope_cli_override = (
+        plot_scope_cli_raw in plot_scope_valid_values
+        or plot_scope_env_raw in plot_scope_valid_values
+    )
+    compare_iter_pairs = _resolve_compare_iter_pairs(args.compare_iter_pairs)
+    compare_iter_pairs_cli_override = bool(_to_str_or_empty(args.compare_iter_pairs)) or bool(
+        _to_str_or_empty(os.environ.get("PIPELINE29_COMPARE_ITER_PAIRS", ""))
+    )
 
     if args.config_gui:
         try:
@@ -8567,13 +9276,41 @@ def main(argv: Optional[List[str]] = None) -> None:
     instruments_df = config_bundle.instruments_df
     reporting_df = config_bundle.reporting_df
     plots_df = config_bundle.plots_df
+    compare_df = config_bundle.compare_df
     data_quality_cfg = config_bundle.data_quality_cfg
     defaults_cfg = config_bundle.defaults_cfg
+    compare_iter_requests, compare_request_source = _resolve_compare_iter_requests(
+        compare_df,
+        fallback_pairs=compare_iter_pairs,
+        force_fallback_pairs=compare_iter_pairs_cli_override,
+    )
     apply_runtime_path_overrides(defaults_cfg, config_bundle=config_bundle)
+    if not plot_scope_cli_override:
+        plot_scope = _plot_scope_from_config(defaults_cfg, compare_df)
     config_label = config_bundle.source_path if config_bundle.source_path is not None else text_config_dir
     print(f"[INFO] Config ({config_bundle.source_kind}): {config_label}")
     print(f"[INFO] Entrada LabVIEW/Kibox: {PROCESS_DIR}")
     print(f"[INFO] Saida: {OUT_DIR}")
+    if plot_scope_cli_override:
+        print(f"[INFO] Escopo de plots (CLI/ambiente): {plot_scope}")
+    else:
+        print(f"[INFO] Escopo de plots (aba Compare): {plot_scope}")
+    if compare_request_source == "gui_compare_tab":
+        print(f"[INFO] compare_iteracoes configurado na aba Compare: {len(compare_iter_requests)} selecao(oes) ativa(s).")
+    elif compare_request_source == "forced_fallback_pairs":
+        print(
+            "[INFO] compare_iteracoes forçado por CLI/ambiente: "
+            + ", ".join(f"{left_id}:{right_id}" for left_id, right_id in compare_iter_pairs)
+        )
+    elif compare_request_source == "gui_empty":
+        print("[INFO] compare_iteracoes: aba Compare sem linhas habilitadas; compare_iteracoes/ sera pulado.")
+    elif compare_request_source == "gui_invalid":
+        print("[WARN] compare_iteracoes: aba Compare sem selecoes validas; compare_iteracoes/ sera pulado.")
+    else:
+        print(
+            "[INFO] compare_iteracoes fallback por CLI/ambiente: "
+            + ", ".join(f"{left_id}:{right_id}" for left_id, right_id in compare_iter_pairs)
+        )
     clear_output_dir(OUT_DIR)
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -8762,8 +9499,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         selected_plot_points = prompt_plot_point_filter(out)
     plot_out = _apply_plot_point_filter(out, selected_plot_points)
     plot_summary_total = _new_plot_run_summary()
+    unitary_plot_out = plot_out if plot_scope in {"all", "unitary"} else plot_out.iloc[0:0].copy()
+    compare_plot_out = plot_out if plot_scope in {"all", "compare"} else plot_out.iloc[0:0].copy()
+    if plot_scope not in {"all", "unitary"}:
+        print("[INFO] Escopo de plots sem unitary; pulei plots finais por pasta.")
+    if plot_scope not in {"all", "compare"}:
+        print("[INFO] Escopo de plots sem compare; pulei compare/ e compare_iteracoes/.")
 
-    for source_folder, plot_dir, out_group in iter_source_plot_groups(plot_out):
+    for source_folder, plot_dir, out_group in iter_source_plot_groups(unitary_plot_out):
         source_label = source_folder if source_folder else "(raiz PROCESSAR)"
         print(f"[INFO] Gerando plots finais em {plot_dir} para {source_label}.")
         _merge_plot_run_summary(
@@ -8826,7 +9569,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             ),
         )
 
-    compare_groups = iter_compare_plot_groups(plot_out, root=PLOTS_DIR)
+    compare_groups = iter_compare_plot_groups(compare_plot_out, root=PLOTS_DIR)
     if compare_groups:
         for compare_key, plot_dir, cmp_group in compare_groups:
             series_vals = sorted(
@@ -8856,8 +9599,11 @@ def main(argv: Optional[List[str]] = None) -> None:
             _plot_compare_iteracoes_bl_vs_adtv,
             snapshot_dir=PLOTS_DIR,
             no_output_reason="faltaram pares baseline/aditivado subida/descida para comparação",
-            df=plot_out,
+            df=compare_plot_out,
             root_plot_dir=PLOTS_DIR,
+            mappings=mappings,
+            compare_iter_pairs=compare_iter_pairs,
+            compare_requests=compare_iter_requests,
         ),
     )
 

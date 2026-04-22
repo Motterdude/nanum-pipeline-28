@@ -43,6 +43,7 @@ Processamentos/
 |   |   |-- instruments.toml
 |   |   |-- reporting_rounding.toml
 |   |   |-- plots.toml
+|   |   |-- compare.toml
 |   |-- lhv.csv
 |   |-- rules_consumo.csv
 |-- raw/
@@ -94,6 +95,56 @@ Por padrao, o `pipeline29` usa `config/pipeline29_text/` e so cai para o Excel s
 7. Apenas `RAW_INPUT_DIR` e `OUT_DIR` sao sincronizados de volta na aba `Defaults`; o resto da planilha nao e alterado.
 8. Para rodar sem popup, use `PIPELINE29_USE_DEFAULT_RUNTIME_DIRS=1` antes de chamar o script. O `pipeline29` tambem aceita a variavel legada `PIPELINE28_USE_DEFAULT_RUNTIME_DIRS=1`.
 
+### Rodar apenas parte dos plots
+- Para gerar somente os plots unitarios/finais por pasta:
+```powershell
+& ".\.venv\Scripts\python.exe" .\nanum_pipeline_29.py --plot-scope unitary
+```
+- Para gerar somente `compare/` e `compare_iteracoes/`:
+```powershell
+& ".\.venv\Scripts\python.exe" .\nanum_pipeline_29.py --plot-scope compare
+```
+- Para pular toda a etapa de plots:
+```powershell
+& ".\.venv\Scripts\python.exe" .\nanum_pipeline_29.py --plot-scope none
+```
+
+### Selecionar os pares do `compare_iteracoes`
+- Selecao principal agora fica na GUI grande, na aba `Compare` (ultima aba, a direita), com 4 checkboxes:
+  - `Plot unitario (finais por pasta)`
+  - `Compare subida: aditivado vs baseline`
+  - `Compare descida: aditivado vs baseline`
+  - `Compare media (subida+descida): aditivado vs baseline`
+- O pipeline passa a inferir o escopo automaticamente pela aba `Compare`:
+  - unitario marcado + compares marcados -> `all`
+  - apenas unitario -> `unitary`
+  - apenas compares -> `compare`
+  - nada marcado -> `none`
+- Cada compare marcado gera todas as metricas de compare disponiveis:
+  - consumo, co2, co, o2, nox, thc
+- O argumento `--compare-iter-pairs` continua como fallback avancado via terminal, para automacao sem GUI.
+- Exemplos de fallback CLI:
+```powershell
+& ".\.venv\Scripts\python.exe" .\nanum_pipeline_29.py --plot-scope compare --compare-iter-pairs cross_all
+& ".\.venv\Scripts\python.exe" .\nanum_pipeline_29.py --plot-scope compare --compare-iter-pairs baseline_media:aditivado_subida,baseline_descida:aditivado_media
+```
+
+### Atualizacao 2026-04-22 (robustez de escopo e compare_iteracoes)
+- A leitura das flags da aba `Compare` foi endurecida para aceitar chaves originais e normalizadas no `defaults.toml`.
+- `Plot unitario` desmarcado na GUI volta a ser respeitado no runtime (nao gera mais unitarios por engano).
+- Override por `--plot-scope` e `PIPELINE29_PLOT_SCOPE` agora so vale com valor valido (`all|unitary|compare|none`); valor invalido gera `[WARN]` e cai para a selecao da GUI.
+- Corrigida quebra em `compare_iteracoes`:
+  - erro antigo: `KeyError: 'uA_consumo_kg_h_sub'`;
+  - ajuste aplicado no agregado de consumo com aliases de incerteza compativeis com a rotina generica.
+- Validacao da rodada:
+  - `python -m py_compile nanum_pipeline_29.py`
+  - `python -m py_compile pipeline29_config_gui.py`
+  - rerun completo com:
+    - `PIPELINE29_USE_DEFAULT_RUNTIME_DIRS=1`
+    - `PIPELINE29_SKIP_CONFIG_GUI_PROMPT=1`
+    - `python nanum_pipeline_29.py --config-source text --skip-config-gui-prompt`
+  - resultado: execucao conclui sem traceback e `compare_iteracoes` e exportado normalmente.
+
 ## Como editar a nova configuracao textual
 Abrir a GUI:
 ```powershell
@@ -117,12 +168,13 @@ Observacoes:
 - a GUI agora tem `Save` e `Save As` separados para a config textual;
 - a GUI tem um `Variable source` proprio para gerar catalogo de variaveis e alimentar os seletores de `Mappings` e `Plots`;
 - os campos de variavel em `Mappings` e `Plots` aceitam selecao por picker pesquisavel com wildcard ao dar duplo clique na celula;
-- `Add row` em `Mappings`, `Instruments` e `Plots` abre helper vertical dedicado;
+- `Add row` em `Mappings`, `Instruments`, `Plots` e `Compare` abre helper vertical dedicado;
 - o helper de `Instruments` usa dropdown editavel de `key` baseado nas chaves atuais de `Mappings`, inclusive sem salvar;
 - a janela principal abre maximizada por padrao;
 - no helper de `Mappings`, `col_sd` e sugerido automaticamente a partir do `col_mean`;
 - no helper de `Instruments`, `acc_pct`, `digits`, `lsd` e `resolution` caem para `0` quando vazios, `source` assume `User input`, e o `source` mostra descricao dinamica do catalogo atual;
 - no helper de `Plots`, os defaults de X ja entram preenchidos (`0 .. 55`, passo `5`) e `filename/title` sao gerados automaticamente pelos eixos;
+- no helper de `Compare`, `left_series`, `right_series` e `metric_id` sao dropdowns e o controle de com/sem incerteza funciona igual ao de `Plots`;
 - cada plot agora pode explicitar `show_uncertainty = auto | on | off` em `config/pipeline29_text/plots.toml`.
 
 ## Como rodar os utilitarios KIBOX

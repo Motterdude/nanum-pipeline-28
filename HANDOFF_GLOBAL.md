@@ -13,6 +13,112 @@ Arquivos de referencia:
 - O nome oficial daqui para frente e `HANDOFF_GLOBAL.md`. Nao criar novos arquivos de handoff paralelos sem necessidade objetiva.
 - Arquivos grandes de aquisicao bruta em formato `.open` podem ser mantidos localmente para reproducao, mas nao entram no Git comum quando excedem o limite operacional do GitHub. Quando isso acontecer, a decisao deve ser registrada aqui.
 
+## Plot scope seletivo e compare_iteracoes expandido - 2026-04-22
+- Contexto:
+  - o runtime do `pipeline29` estava demorando demais quando o interesse era apenas rerodar plots unitarios ou apenas os compares;
+  - tambem foi pedido expandir `compare_iteracoes/` para os gases medidos no analisador e permitir pares adicionais alem dos compares padrao.
+- Arquivos afetados:
+  - `Processamentos/nanum_pipeline_29.py`
+  - `Processamentos/README_EXECUCAO.md`
+  - `Processamentos/HANDOFF_GLOBAL.md`
+- Funcionalidades adicionadas:
+  - novo argumento CLI `--plot-scope` com valores:
+    - `all`
+    - `unitary`
+    - `compare`
+    - `none`
+  - fallback por ambiente via `PIPELINE29_PLOT_SCOPE`;
+  - novo argumento CLI `--compare-iter-pairs` com fallback por ambiente via `PIPELINE29_COMPARE_ITER_PAIRS`;
+  - aliases suportados em `--compare-iter-pairs`:
+    - `default`
+    - `cross_all`
+    - `all`
+  - pares customizados agora podem ser informados como lista separada por virgula, por exemplo:
+    - `baseline_media:aditivado_subida`
+    - `baseline_descida:aditivado_media`
+- `compare_iteracoes/` expandido:
+  - alem de consumo, agora gera compares para:
+    - `CO2_mean_of_windows`
+    - `CO_mean_of_windows`
+    - `O2_mean_of_windows`
+    - `NOX_mean_of_windows`
+    - `THC_mean_of_windows`
+  - os pares disponiveis passam a cobrir:
+    - `baseline_media`
+    - `baseline_subida`
+    - `baseline_descida`
+    - `aditivado_media`
+    - `aditivado_subida`
+    - `aditivado_descida`
+  - isso permite manter os compares ja existentes e adicionar, quando desejado:
+    - `descida vs descida`
+    - `subida vs subida`
+    - `media vs media`
+    - `baseline_media vs aditivado_subida`
+    - `baseline_media vs aditivado_descida`
+    - `baseline_subida vs aditivado_media`
+    - `baseline_descida vs aditivado_media`
+- Saidas novas/ajustadas:
+  - `compare_iteracoes_bl_vs_adtv/` continua sendo a pasta alvo;
+  - foi adicionado o Excel consolidado:
+    - `compare_iteracoes_metricas_incertezas.xlsx`
+  - os PNGs do `compare_iteracoes` passam a usar nomes derivados do par selecionado e da metrica.
+- Validacao executada:
+  - `python -m py_compile nanum_pipeline_29.py`
+  - validacao de import/parse dos novos argumentos CLI.
+
+## Aba Compare na GUI e selecao de compare_iteracoes via TOML - 2026-04-22
+- Contexto:
+  - foi solicitado tirar a dependencia do PowerShell para escolher pares/metricas de `compare_iteracoes`;
+  - a selecao passou a ser feita na GUI grande, em aba dedicada `Compare` (ultima aba, direita), espelhando a estrutura do `Plots` com controle de incerteza por item.
+- Arquivos afetados:
+  - `Processamentos/pipeline29_config_backend.py`
+  - `Processamentos/pipeline29_config_gui.py`
+  - `Processamentos/nanum_pipeline_29.py`
+  - `Processamentos/nanum_pipeline_30.py`
+  - `Processamentos/README_EXECUCAO.md`
+- O que mudou:
+  - novo arquivo textual `config/pipeline29_text/compare.toml`;
+  - backend passou a carregar/salvar/normalizar `compare_df` no `Pipeline29ConfigBundle`;
+  - GUI ganhou aba `Compare` com:
+    - `enabled`
+    - `with_uncertainty`
+    - `without_uncertainty`
+    - `left_series`
+    - `right_series`
+    - `metric_id`
+    - `notes`
+  - `left_series`, `right_series` e `metric_id` usam dropdown no helper de linha;
+  - `nanum_pipeline_29.py` agora resolve os requests de `compare_iteracoes` pela aba `Compare`, com fallback para CLI apenas quando necessario;
+  - compare com/sem incerteza agora respeita a escolha de cada linha da aba `Compare`:
+    - absoluto com/sem barras de incerteza;
+    - delta percentual com/sem barras de `U_delta_pct`;
+    - export consolidado inclui coluna `Incerteza`.
+- Compatibilidade:
+  - `--compare-iter-pairs` e `PIPELINE29_COMPARE_ITER_PAIRS` permanecem como fallback para automacao sem GUI;
+  - configs antigos sem `compare.toml` continuam carregando, pois o backend preenche defaults automaticamente.
+- Validacao executada:
+  - `python -m py_compile pipeline29_config_backend.py pipeline29_config_gui.py nanum_pipeline_29.py nanum_pipeline_30.py`
+
+## Ajuste final da aba Compare para 4 checkboxes fixos - 2026-04-22
+- Contexto:
+  - foi solicitado simplificar a aba `Compare` para um fluxo direto com 4 checkboxes, sem tabela de linhas.
+- Arquivos afetados:
+  - `Processamentos/pipeline29_config_gui.py`
+  - `Processamentos/nanum_pipeline_29.py`
+  - `Processamentos/README_EXECUCAO.md`
+- O que mudou:
+  - a aba `Compare` agora expone exatamente 4 checkboxes:
+    - `Plot unitario (finais por pasta)`
+    - `Compare subida: aditivado vs baseline`
+    - `Compare descida: aditivado vs baseline`
+    - `Compare media (subida+descida): aditivado vs baseline`
+  - no `save`, a GUI gera `compare_df` automaticamente a partir desses checkboxes;
+  - o `pipeline29` passou a resolver o `plot_scope` automaticamente via aba `Compare` quando nao ha override de CLI/ambiente;
+  - `--plot-scope` e `--compare-iter-pairs` continuam com prioridade para automacao.
+- Validacao executada:
+  - `python -m py_compile pipeline29_config_gui.py nanum_pipeline_29.py`
+
 ## Pipeline30 - helper Sweep/Load, seletor de duplicatas e binning de sweep - 2026-03-23
 - Contexto:
   - foi criada uma linha separada de evolucao para ensaios de varredura em lambda, preservando o `pipeline29` como referencia estavel;
@@ -1953,3 +2059,38 @@ Nao foi encontrada funcao removida: `nanum_pipeline_28.py` contem todo o nucleo 
   - documentacao e handoffs passam a apontar explicitamente para a separacao entre pipeline, Knock e conversor Kibox.
 - Pendencia fechada neste handoff:
   - o `pipeline29`, que estava apenas commitado localmente em `Processamentos`, entra na rodada de sincronizacao para o Git remoto junto dos demais artefatos atuais.
+
+## Fechamento de robustez do pipeline29 (GUI Compare + compare_iteracoes) - 2026-04-22
+- Contexto:
+  - depois da ultima edicao, o run passou a desrespeitar a selecao da GUI na aba `Compare` e voltou a gerar plots unitarios mesmo com `Plot unitario` desmarcado;
+  - no mesmo fluxo, o processamento quebrava no fim em `compare_iteracoes` com `KeyError: 'uA_consumo_kg_h_sub'`.
+- Arquivos afetados:
+  - `nanum_pipeline_29.py`
+  - `pipeline29_config_gui.py`
+  - `README_EXECUCAO.md`
+  - `HANDOFF_GLOBAL.md`
+- Causas raiz fechadas:
+  - leitura de flags da GUI usando chave nao normalizada em `defaults_cfg`, enquanto o runtime guarda chaves normalizadas (`gui_compare_enable_*`);
+  - override de escopo por CLI/ambiente podia ser tratado como ativo mesmo com valor invalido, mascarando a selecao da GUI;
+  - no `compare_iteracoes`, o agregado de consumo gerava `uA_kg_h/uB_kg_h/...`, mas a rotina generica da media subida+descida esperava `uA_consumo_kg_h/uB_consumo_kg_h/...`.
+- Correcao aplicada:
+  - `_cfg_bool(...)` em `nanum_pipeline_29.py` passou a aceitar tanto a chave original quanto a chave normalizada;
+  - `_cfg_flag_from_defaults(...)` em `pipeline29_config_gui.py` alinhado com a mesma logica;
+  - `plot_scope_cli_override` passou a considerar override apenas quando o valor de CLI/ambiente e valido (`all|unitary|compare|none`);
+  - valor invalido em `--plot-scope` ou `PIPELINE29_PLOT_SCOPE` agora gera `[WARN]` e o runtime volta para a configuracao da GUI;
+  - `_aggregate_consumo_with_uncertainty(...)` passou a publicar aliases `uA_consumo_kg_h/uB_consumo_kg_h/uc_consumo_kg_h/U_consumo_kg_h`;
+  - `_mean_subida_descida_per_campaign_metric(...)` foi endurecida com acesso defensivo por `m.get(...)` para evitar `KeyError` quando faltar coluna.
+- Validacao executada:
+  - `python -m py_compile nanum_pipeline_29.py`
+  - `python -m py_compile pipeline29_config_gui.py`
+  - rerun completo do `pipeline29` no mesmo modo de execucao da falha:
+    - `PIPELINE29_USE_DEFAULT_RUNTIME_DIRS=1`
+    - `PIPELINE29_SKIP_CONFIG_GUI_PROMPT=1`
+    - `python nanum_pipeline_29.py --config-source text --skip-config-gui-prompt`
+  - resultado:
+    - execucao concluida com `exit code 0`;
+    - escopo respeitado: `Escopo de plots (aba Compare): compare` e `Escopo de plots sem unitary; pulei plots finais por pasta.`;
+    - `compare_iteracoes` executado com sucesso e sem traceback, incluindo export `compare_iteracoes_metricas_incertezas.xlsx`.
+- Observacoes nao bloqueantes:
+  - dataset sem colunas MoTeC segue registrando skip de plots MoTeC (mensagens de `y_col ... nao encontrado`);
+  - `PerformanceWarning` de fragmentacao do pandas continua aparecendo em trechos antigos, sem interromper a execucao.

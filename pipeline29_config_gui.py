@@ -42,6 +42,9 @@ from PySide6.QtWidgets import (
 )
 
 from pipeline29_config_backend import (
+    DEFAULT_COMPARE_COLUMNS,
+    DEFAULT_COMPARE_METRIC_OPTIONS,
+    DEFAULT_COMPARE_SERIES_OPTIONS,
     DEFAULT_FUEL_PROPERTY_COLUMNS,
     DEFAULT_INSTRUMENT_COLUMNS,
     DEFAULT_MAPPING_COLUMNS,
@@ -82,12 +85,31 @@ PIPELINE30_SWEEP_DEFAULT_MODE = "load"
 PIPELINE30_SWEEP_DEFAULT_X_COL = "Sweep_Value"
 PIPELINE30_SWEEP_DEFAULT_KEY = "lambda"
 PIPELINE30_SWEEP_DEFAULT_BIN_TOL = "0.015"
+GUI_COMPARE_ENABLE_UNITARY_KEY = "GUI_COMPARE_ENABLE_UNITARY"
+GUI_COMPARE_ENABLE_UP_KEY = "GUI_COMPARE_ENABLE_UP"
+GUI_COMPARE_ENABLE_DOWN_KEY = "GUI_COMPARE_ENABLE_DOWN"
+GUI_COMPARE_ENABLE_MEAN_KEY = "GUI_COMPARE_ENABLE_MEAN"
+COMPARE_GUI_PAIR_ROWS: List[Tuple[str, str]] = [
+    ("baseline_media", "aditivado_media"),
+    ("baseline_subida", "aditivado_subida"),
+    ("baseline_descida", "aditivado_descida"),
+    ("baseline_subida", "baseline_descida"),
+    ("aditivado_subida", "aditivado_descida"),
+    ("baseline_descida", "aditivado_descida"),
+    ("baseline_media", "aditivado_subida"),
+    ("baseline_media", "aditivado_descida"),
+    ("baseline_subida", "aditivado_media"),
+    ("baseline_descida", "aditivado_media"),
+    ("baseline_subida", "aditivado_descida"),
+]
 
 CHECKBOX_COLUMNS_BY_SECTION: Dict[str, set[str]] = {
     "Plots": {"with_uncertainty", "without_uncertainty"},
+    "Compare": {"with_uncertainty", "without_uncertainty"},
 }
 HIDDEN_COLUMNS_BY_SECTION: Dict[str, set[str]] = {
     "Plots": {"show_uncertainty"},
+    "Compare": {"show_uncertainty"},
 }
 
 DEFAULT_FIELD_SPECS_BY_SECTION: Dict[str, List[Dict[str, Any]]] = {
@@ -136,6 +158,15 @@ DEFAULT_FIELD_SPECS_BY_SECTION: Dict[str, List[Dict[str, Any]]] = {
         {"name": "y_tol_minus", "kind": "text"},
         {"name": "filter_h2o_list", "kind": "text"},
         {"name": "label_variant", "kind": "combo", "options": ["box", "inline", "none"]},
+        {"name": "notes", "kind": "text"},
+    ],
+    "Compare": [
+        {"name": "enabled", "kind": "combo", "options": ["1", "0"]},
+        {"name": "with_uncertainty", "kind": "checkbox"},
+        {"name": "without_uncertainty", "kind": "checkbox"},
+        {"name": "left_series", "kind": "combo", "options": DEFAULT_COMPARE_SERIES_OPTIONS},
+        {"name": "right_series", "kind": "combo", "options": DEFAULT_COMPARE_SERIES_OPTIONS},
+        {"name": "metric_id", "kind": "combo", "options": DEFAULT_COMPARE_METRIC_OPTIONS},
         {"name": "notes", "kind": "text"},
     ],
     "Fuel Properties": [
@@ -710,6 +741,101 @@ def _normalize_plot_uncertainty_fields(record: Dict[str, Any]) -> Dict[str, Any]
     return out
 
 
+def _sanitize_compare_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(record or {})
+    out["left_series"] = str(out.get("left_series", "")).strip().lower()
+    out["right_series"] = str(out.get("right_series", "")).strip().lower()
+    out["metric_id"] = str(out.get("metric_id", "")).strip().lower()
+    return out
+
+
+def _normalize_compare_uncertainty_fields(record: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(record or {})
+    with_raw = str(out.get("with_uncertainty", "")).strip()
+    without_raw = str(out.get("without_uncertainty", "")).strip()
+    mode = str(out.get("show_uncertainty", "")).strip().lower()
+
+    with_defined = with_raw.lower() in {"1", "0", "true", "false", "yes", "no", "on", "off", "checked", "unchecked"}
+    without_defined = without_raw.lower() in {"1", "0", "true", "false", "yes", "no", "on", "off", "checked", "unchecked"}
+    with_flag = _is_truthy_checkbox_value(with_raw)
+    without_flag = _is_truthy_checkbox_value(without_raw)
+
+    if not with_defined and not without_defined:
+        if mode in {"off", "disable", "disabled", "none", "0", "false", "no", "na", "n/a"}:
+            with_flag, without_flag = False, True
+        elif mode in {"both", "all", "dual", "on_off"}:
+            with_flag, without_flag = True, True
+        else:
+            with_flag, without_flag = True, False
+    else:
+        if not with_defined:
+            with_flag = not without_flag
+        if not without_defined:
+            without_flag = False if with_flag else True
+
+    if not with_flag and not without_flag:
+        with_flag = True
+
+    out["with_uncertainty"] = "1" if with_flag else "0"
+    out["without_uncertainty"] = "1" if without_flag else "0"
+    if with_flag and without_flag:
+        out["show_uncertainty"] = "both"
+    elif with_flag:
+        out["show_uncertainty"] = "on"
+    else:
+        out["show_uncertainty"] = "off"
+    return out
+
+
+def _cfg_flag_from_defaults(defaults_cfg: Dict[str, str], key: str, *, default: bool = False) -> bool:
+    cfg = defaults_cfg or {}
+    raw = str(cfg.get(key, "")).strip()
+    if not raw:
+        raw = str(cfg.get(_norm_key_local(key), "")).strip()
+    if not raw:
+        return default
+    return _is_truthy_checkbox_value(raw)
+
+
+def _pair_enabled_in_compare_df(compare_df: pd.DataFrame, left_id: str, right_id: str) -> bool:
+    if compare_df is None or compare_df.empty:
+        return False
+    for row in compare_df.to_dict(orient="records"):
+        left = str((row or {}).get("left_series", "")).strip().lower()
+        right = str((row or {}).get("right_series", "")).strip().lower()
+        if (left, right) != (left_id, right_id):
+            continue
+        if _is_truthy_checkbox_value((row or {}).get("enabled", "")):
+            return True
+    return False
+
+
+def _compare_records_from_quick_flags(*, enable_up: bool, enable_down: bool, enable_mean: bool) -> List[Dict[str, str]]:
+    enabled_pairs = set()
+    if enable_up:
+        enabled_pairs.add(("baseline_subida", "aditivado_subida"))
+    if enable_down:
+        enabled_pairs.add(("baseline_descida", "aditivado_descida"))
+    if enable_mean:
+        enabled_pairs.add(("baseline_media", "aditivado_media"))
+
+    out: List[Dict[str, str]] = []
+    for left_series, right_series in COMPARE_GUI_PAIR_ROWS:
+        for metric_id in DEFAULT_COMPARE_METRIC_OPTIONS:
+            row = {
+                "enabled": "1" if (left_series, right_series) in enabled_pairs else "0",
+                "with_uncertainty": "1",
+                "without_uncertainty": "0",
+                "left_series": left_series,
+                "right_series": right_series,
+                "metric_id": metric_id,
+                "show_uncertainty": "on",
+                "notes": "GUI quick compare selection.",
+            }
+            out.append(_sanitize_compare_record(_normalize_compare_uncertainty_fields(row)))
+    return out
+
+
 class VariableSelectorDialog(QDialog):
     def __init__(
         self,
@@ -900,6 +1026,17 @@ class ConfigRowDialog(QDialog):
             for field in PLOT_Y_AUTOSCALE_FIELDS:
                 if not str(prepared.get(field, "")).strip():
                     prepared[field] = PLOT_Y_AUTOSCALE_TOKEN
+        if self.section_title == "Compare":
+            if not str(prepared.get("enabled", "")).strip():
+                prepared["enabled"] = "1"
+            if not str(prepared.get("left_series", "")).strip() and DEFAULT_COMPARE_SERIES_OPTIONS:
+                prepared["left_series"] = DEFAULT_COMPARE_SERIES_OPTIONS[0]
+            if not str(prepared.get("right_series", "")).strip() and len(DEFAULT_COMPARE_SERIES_OPTIONS) > 1:
+                prepared["right_series"] = DEFAULT_COMPARE_SERIES_OPTIONS[1]
+            if not str(prepared.get("metric_id", "")).strip() and DEFAULT_COMPARE_METRIC_OPTIONS:
+                prepared["metric_id"] = DEFAULT_COMPARE_METRIC_OPTIONS[0]
+            prepared = _sanitize_compare_record(prepared)
+            prepared = _normalize_compare_uncertainty_fields(prepared)
         if self.section_title == "Instruments" and not str(prepared.get("dist", "")).strip():
             prepared["dist"] = "rect"
         return prepared
@@ -1164,6 +1301,9 @@ class ConfigRowDialog(QDialog):
         if self.section_title == "Plots":
             out = _sanitize_plot_record(out)
             out = _normalize_plot_uncertainty_fields(out)
+        if self.section_title == "Compare":
+            out = _sanitize_compare_record(out)
+            out = _normalize_compare_uncertainty_fields(out)
         return out
 
 
@@ -1712,6 +1852,28 @@ class Pipeline29ConfigEditor(QMainWindow):
             status_callback=self._show_status,
             add_row_dialog_factory=lambda initial=None: self._open_row_helper("Plots", DEFAULT_PLOT_COLUMNS, initial),
         )
+        self.compare_tab = QWidget(self)
+        compare_layout = QVBoxLayout(self.compare_tab)
+        compare_layout.setContentsMargins(12, 12, 12, 12)
+        compare_layout.setSpacing(10)
+        compare_layout.addWidget(
+            QLabel(
+                "Selecione quais familias de plot gerar nesta execucao. "
+                "Essas 4 opcoes substituem a selecao via PowerShell para o compare principal."
+            )
+        )
+        self.compare_chk_unitary = QCheckBox("Plot unitario (finais por pasta)", self.compare_tab)
+        self.compare_chk_up = QCheckBox("Compare subida: aditivado vs baseline", self.compare_tab)
+        self.compare_chk_down = QCheckBox("Compare descida: aditivado vs baseline", self.compare_tab)
+        self.compare_chk_mean = QCheckBox(
+            "Compare media (subida+descida): aditivado vs baseline",
+            self.compare_tab,
+        )
+        compare_layout.addWidget(self.compare_chk_unitary)
+        compare_layout.addWidget(self.compare_chk_up)
+        compare_layout.addWidget(self.compare_chk_down)
+        compare_layout.addWidget(self.compare_chk_mean)
+        compare_layout.addStretch(1)
 
         self.tabs.addTab(self.sweep_helper_tab, PIPELINE30_SWEEP_TAB_TITLE)
         self.tabs.addTab(self.defaults_table, "Defaults")
@@ -1721,6 +1883,7 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.tabs.addTab(self.reporting_table, "Reporting")
         self.tabs.addTab(self.fuel_properties_table, "Fuel Properties")
         self.tabs.addTab(self.plots_table, "Plots")
+        self.tabs.addTab(self.compare_tab, "Compare")
         self.tabs.setCurrentWidget(self.defaults_table)
 
         self.status = QStatusBar(self)
@@ -1946,6 +2109,7 @@ class Pipeline29ConfigEditor(QMainWindow):
             instruments_df=pd.DataFrame(columns=DEFAULT_INSTRUMENT_COLUMNS),
             reporting_df=pd.DataFrame(columns=DEFAULT_REPORTING_COLUMNS),
             plots_df=pd.DataFrame(columns=DEFAULT_PLOT_COLUMNS),
+            compare_df=pd.DataFrame(columns=DEFAULT_COMPARE_COLUMNS),
             fuel_properties_df=pd.DataFrame(columns=DEFAULT_FUEL_PROPERTY_COLUMNS),
             data_quality_cfg={},
             defaults_cfg={},
@@ -1976,6 +2140,15 @@ class Pipeline29ConfigEditor(QMainWindow):
         self.reporting_table.load_records(bundle.reporting_df.to_dict(orient="records"))
         self.fuel_properties_table.load_records(bundle.fuel_properties_df.to_dict(orient="records"))
         self.plots_table.load_records([_sanitize_plot_record(record) for record in bundle.plots_df.to_dict(orient="records")])
+        compare_df = bundle.compare_df.copy() if bundle.compare_df is not None else pd.DataFrame(columns=DEFAULT_COMPARE_COLUMNS)
+        mean_enabled = _pair_enabled_in_compare_df(compare_df, "baseline_media", "aditivado_media")
+        up_enabled = _pair_enabled_in_compare_df(compare_df, "baseline_subida", "aditivado_subida")
+        down_enabled = _pair_enabled_in_compare_df(compare_df, "baseline_descida", "aditivado_descida")
+        any_enabled = bool(mean_enabled or up_enabled or down_enabled)
+        self.compare_chk_unitary.setChecked(_cfg_flag_from_defaults(bundle.defaults_cfg, GUI_COMPARE_ENABLE_UNITARY_KEY, default=True))
+        self.compare_chk_up.setChecked(up_enabled if any_enabled else True)
+        self.compare_chk_down.setChecked(down_enabled if any_enabled else True)
+        self.compare_chk_mean.setChecked(mean_enabled if any_enabled else True)
 
     def _available_variable_catalog(self) -> List[str]:
         names = {name for name in self.variable_catalog if str(name).strip()}
@@ -2145,6 +2318,20 @@ class Pipeline29ConfigEditor(QMainWindow):
                 "notes": row.get("notes", "").strip(),
             }
 
+        compare_enable_unitary = bool(self.compare_chk_unitary.isChecked())
+        compare_enable_up = bool(self.compare_chk_up.isChecked())
+        compare_enable_down = bool(self.compare_chk_down.isChecked())
+        compare_enable_mean = bool(self.compare_chk_mean.isChecked())
+        defaults_cfg[GUI_COMPARE_ENABLE_UNITARY_KEY] = "1" if compare_enable_unitary else "0"
+        defaults_cfg[GUI_COMPARE_ENABLE_UP_KEY] = "1" if compare_enable_up else "0"
+        defaults_cfg[GUI_COMPARE_ENABLE_DOWN_KEY] = "1" if compare_enable_down else "0"
+        defaults_cfg[GUI_COMPARE_ENABLE_MEAN_KEY] = "1" if compare_enable_mean else "0"
+        compare_records = _compare_records_from_quick_flags(
+            enable_up=compare_enable_up,
+            enable_down=compare_enable_down,
+            enable_mean=compare_enable_mean,
+        )
+
         bundle = Pipeline29ConfigBundle(
             mappings=mappings,
             instruments_df=pd.DataFrame(self.instruments_table.records(), columns=DEFAULT_INSTRUMENT_COLUMNS),
@@ -2153,6 +2340,7 @@ class Pipeline29ConfigEditor(QMainWindow):
                 [_sanitize_plot_record(record) for record in self.plots_table.records()],
                 columns=DEFAULT_PLOT_COLUMNS,
             ),
+            compare_df=pd.DataFrame(compare_records, columns=DEFAULT_COMPARE_COLUMNS),
             fuel_properties_df=pd.DataFrame(
                 self.fuel_properties_table.records(),
                 columns=DEFAULT_FUEL_PROPERTY_COLUMNS,
